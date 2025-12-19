@@ -25,7 +25,6 @@
 #include <Modules/ToolboxSettings.h>
 #include <Modules/CrashHandler.h>
 #include <Modules/DialogModule.h>
-#include <Modules/AprilFools.h>
 #include <Modules/ChatSettings.h>
 #include <Modules/GameSettings.h>
 #include <Modules/GwDatTextureModule.h>
@@ -55,7 +54,6 @@ namespace {
     HMODULE gwcamodule = nullptr;
     HMODULE dllmodule = nullptr;
     WNDPROC OldWndProc = nullptr;
-    bool defer_close = false;
     HWND gw_window_handle = nullptr;
 
     utf8::string imgui_inifile;
@@ -68,27 +66,30 @@ namespace {
     std::recursive_mutex module_management_mutex;
 
 
-    GW::UI::UIInteractionCallback OnMinOrRestoreOrExitBtnClicked_Func = nullptr;
-    GW::UI::UIInteractionCallback OnMinOrRestoreOrExitBtnClicked_Ret = nullptr;
+    GW::UI::UIInteractionCallback OnUiRoot_UICallback_Func = 0, OnUiRoot_UICallback_Ret = 0;
 
-    void OnMinOrRestoreOrExitBtnClicked(GW::UI::InteractionMessage* message, void* wparam, void* lparam)
+    // Hook the "Exit Game" button on logout prompt to ensure toolbox closes gracefully
+    void OnUiRoot_UICallback(GW::UI::InteractionMessage* message, void* wparam, void* lparam)
     {
         GW::Hook::EnterHook();
-        if (message->message_id == GW::UI::UIMessage::kMouseAction && wparam) {
-            const auto param = (GW::UI::UIPacket::kMouseAction*)wparam;
-            if (param->current_state == GW::UI::UIPacket::ActionState::MouseUp 
-                && param->child_offset_id == 0x3
-                && GW::UI::GetFrameById(param->frame_id) == GW::UI::GetFrameByLabel(L"btnExit")) {
-                param->current_state = GW::UI::UIPacket::ActionState::MouseDown; // Revert state to avoid GW closing the window on mouse up
-
-                // Left button clicked, on the exit button (ID 0x3)
-                SendMessage(gw_window_handle, WM_CLOSE, NULL, NULL);
-                GW::Hook::LeaveHook();
-                return;
-            }
+        if (message->message_id == GW::UI::UIMessage::kDestroyFrame) {
+            GWToolbox::SaveSettings();
         }
-        OnMinOrRestoreOrExitBtnClicked_Ret(message, wparam, lparam);
+        OnUiRoot_UICallback_Ret(message, wparam, lparam);
         GW::Hook::LeaveHook();
+    }
+
+    bool HookUiRoot()
+    {
+        if (OnUiRoot_UICallback_Func) 
+            return true;
+        const auto frame = GW::UI::GetParentFrame(GW::UI::GetFrameByLabel(L"Game"));
+        if (!(frame && frame->frame_callbacks.size()))
+            return false;
+        OnUiRoot_UICallback_Func = frame->frame_callbacks[0].callback;
+        GW::Hook::CreateHook((void**)&OnUiRoot_UICallback_Func, OnUiRoot_UICallback, (void**)&OnUiRoot_UICallback_Ret);
+        GW::Hook::EnableHooks(OnUiRoot_UICallback_Func);
+        return true;
     }
 
     bool render_callback_attached = false;
@@ -391,18 +392,6 @@ namespace {
     {
         static bool right_mouse_down = false;
 
-        if (Message == WM_CLOSE || (Message == WM_SYSCOMMAND && wParam == SC_CLOSE)) {
-            // This is naughty, but we need to defer the closing signal until toolbox has terminated properly.
-            // we can't sleep here, because toolbox modules will probably be using the render loop to close off things
-            // like hooks
-            defer_close = true;
-            GWToolbox::SignalTerminate();
-
-            if (GW::Map::GetInstanceType() != GW::Constants::InstanceType::Loading) {
-                return 0;
-            }
-        }
-
         if (!(CanRenderToolbox() && GWToolbox::IsInitialized())) {
             return CallWindowProc(OldWndProc, hWnd, Message, wParam, lParam);
         }
@@ -414,10 +403,7 @@ namespace {
         if (Message == WM_RBUTTONUP) {
             if (right_mouse_down && !mouse_moved_whilst_right_clicking && !io.WantCaptureMouse) {
                 // Tell imgui that the mouse cursor is in its original clicked position - GW messes with the cursor in-game
-                io.MousePos = {static_cast<float>(GET_X_LPARAM(right_click_lparam)), static_cast<float>(GET_Y_LPARAM(right_click_lparam))};
-                for (const auto m : tb.GetAllModules()) {
-                    m->WndProc(WM_GW_RBUTTONCLICK, 0, right_click_lparam);
-                }
+                SendMessage(hWnd, WM_GW_RBUTTONCLICK, 0, right_click_lparam);
             }
             mouse_moved_whilst_right_clicking = 0;
             right_mouse_down = false;
@@ -555,7 +541,7 @@ namespace {
                 break;
             default:
                 // Custom messages registered via RegisterWindowMessage
-                if (Message >= 0xC000 && Message <= 0xFFFF) {
+                if (Message >= 0x8000 && Message <= 0xFFFF) {
                     for (const auto m : tb.GetAllModules()) {
                         m->WndProc(Message, wParam, lParam);
                     }
@@ -608,8 +594,8 @@ namespace {
         OldWndProc = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(gw_window_handle, GWL_WNDPROC, reinterpret_cast<LONG>(SafeWndProc)));
         Log::Log("Installed input event handler, oldwndproc = 0x%X\n", OldWndProc);
 
-        
-        DEBUG_ASSERT(RegisterRawInputs(true));
+        // NB: Inputs are being listened to in reforged
+        //DEBUG_ASSERT(RegisterRawInputs(true));
 
         event_handler_attached = true;
         return true;
@@ -627,16 +613,6 @@ namespace {
         SetWindowLongPtr(gw_window_handle, GWL_WNDPROC, reinterpret_cast<LONG>(OldWndProc));
         event_handler_attached = false;
         return true;
-    }
-
-
-    void HookCloseButton() {
-        if (OnMinOrRestoreOrExitBtnClicked_Func) return;
-        const auto frame = GW::UI::GetFrameByLabel(L"BtnRestore");
-        if (!(frame && frame->frame_callbacks.size())) return;
-        OnMinOrRestoreOrExitBtnClicked_Func = frame->frame_callbacks[0].callback;
-        GW::Hook::CreateHook((void**)&OnMinOrRestoreOrExitBtnClicked_Func, OnMinOrRestoreOrExitBtnClicked, reinterpret_cast<void**>(&OnMinOrRestoreOrExitBtnClicked_Ret));
-        GW::Hook::EnableHooks(OnMinOrRestoreOrExitBtnClicked_Func);
     }
 
     FARPROC WINAPI CustomDliHook(const unsigned dliNotify, PDelayLoadInfo pdli)
@@ -752,10 +728,7 @@ DWORD __stdcall GWToolbox::MainLoop(LPVOID module) noexcept
         Sleep(160);
 
         UnloadGWCADll();
-        if (defer_close) {
-            // Toolbox was closed by a user closing GW - close it here for the by sending the `WM_CLOSE` message again.
-            SendMessage(gw_window_handle, WM_CLOSE, NULL, NULL);
-        }
+
     } __except (EXCEPT_EXPRESSION_ENTRY) {
         Log::Log("SafeThreadEntry __except body\n");
     }
@@ -784,8 +757,6 @@ void GWToolbox::Initialize(LPVOID module)
 
     AttachRenderCallback();
     GW::EnableHooks();
-
-    HookCloseButton();
 
     UpdateInitialising(.0f);
     AttachGameLoopCallback();
@@ -910,8 +881,7 @@ void GWToolbox::Disable()
         return;
     GW::DisableHooks();
     GW::Render::EnableHooks();
-    if (OnMinOrRestoreOrExitBtnClicked_Func)
-        GW::Hook::EnableHooks(OnMinOrRestoreOrExitBtnClicked_Func);
+    if (OnUiRoot_UICallback_Func) GW::Hook::EnableHooks(OnUiRoot_UICallback_Func);
     AttachRenderCallback();
     gwtoolbox_disabled = true;
 }
@@ -949,7 +919,7 @@ void GWToolbox::Update(GW::HookStatus*)
             return;
     }
 
-    HookCloseButton();
+    HookUiRoot();
 
     UpdateModulesTerminating(delta_f);
 
@@ -1126,7 +1096,6 @@ void GWToolbox::UpdateInitialising(float)
     ToggleModule(ChatSettings::Instance());
     ToggleModule(InventoryManager::Instance());
     ToggleModule(HallOfMonumentsModule::Instance());
-    ToggleModule(AprilFools::Instance());
     ToggleModule(SettingsWindow::Instance());
 
     ToolboxSettings::LoadModules(ini); // initialize all other modules as specified by the user
