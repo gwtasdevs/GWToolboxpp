@@ -44,8 +44,7 @@ DLLAPI ToolboxPlugin* ToolboxPluginInstance()
 }
 
 namespace {
-    GW::UI::UIMessage kSpellCastInterrupted = GW::UI::UIMessage::kFrameMessage_0x10000026;
-    GW::UI::UIMessage kSkillCooldownStart = GW::UI::UIMessage::kFrameMessage_0x1000005d;
+    GW::UI::UIMessage kSkillCooldownStart = (GW::UI::UIMessage)0x1000005d;
 
     GW::HookEntry RestoreChatCmd_HookEntry;
     GW::HookEntry InstanceLoadFile_Entry;
@@ -1117,7 +1116,7 @@ void SpeedrunScriptingTools::Initialize(ImGuiContext* ctx, const ImGuiAllocFns a
 
         triggerScripts(Trigger::InstanceLoad, [](auto) { return true; }, false);
     });
-    GW::UI::RegisterUIMessageCallback(&Interrupt_Entry, kSpellCastInterrupted, [this](GW::HookStatus*, GW::UI::UIMessage, void* wparam, void*) {
+    GW::UI::RegisterUIMessageCallback(&Interrupt_Entry, GW::UI::UIMessage::kAgentSkillCancelled, [this](GW::HookStatus*, GW::UI::UIMessage, void* wparam, void*) {
         const auto parameters = *reinterpret_cast<SkillCastParameters*>(wparam);
         const auto player = GW::Agents::GetControlledCharacter();
         if (!player || parameters.agentId != player->agent_id) return;
@@ -1138,7 +1137,7 @@ void SpeedrunScriptingTools::Initialize(ImGuiContext* ctx, const ImGuiAllocFns a
 
         triggerScripts(Trigger::BeginCooldown, [&](const Script& s){return s.triggerData.skillId == parameters.skillId || s.triggerData.skillId == GW::Constants::SkillID::No_Skill;});
     });
-    GW::UI::RegisterUIMessageCallback(&BeginSkillCast_Entry, GW::UI::UIMessage::kAgentStartCasting, [this](GW::HookStatus*, GW::UI::UIMessage, void* wparam, void*) {
+    GW::UI::RegisterUIMessageCallback(&BeginSkillCast_Entry, GW::UI::UIMessage::kAgentSkillStartedCast, [this](GW::HookStatus*, GW::UI::UIMessage, void* wparam, void*) {
         struct AgentCastMessage 
         {
             uint32_t agentId;
@@ -1275,9 +1274,9 @@ void SpeedrunScriptingTools::SignalTerminate()
     GW::StoC::RemovePostCallback<GW::Packet::StoC::DisplayDialogue>(&DisplayDialogue_Entry);
     GW::StoC::RemovePostCallback<GW::Packet::StoC::DungeonReward>(&DungeonReward_Entry);
     GW::StoC::RemovePostCallback<GW::Packet::StoC::DoACompleteZone>(&DoACompleteZone_Entry);
-    GW::UI::RemoveUIMessageCallback(&Interrupt_Entry, kSpellCastInterrupted);
+    GW::UI::RemoveUIMessageCallback(&Interrupt_Entry, GW::UI::UIMessage::kAgentSkillCancelled);
     GW::UI::RemoveUIMessageCallback(&FinishSkillCast_Entry, kSkillCooldownStart);
-    GW::UI::RemoveUIMessageCallback(&BeginSkillCast_Entry, GW::UI::UIMessage::kAgentStartCasting);
+    GW::UI::RemoveUIMessageCallback(&BeginSkillCast_Entry, GW::UI::UIMessage::kAgentSkillStartedCast);
     GW::UI::RemoveUIMessageCallback(&GotoTargetDialog_Entry, GW::UI::UIMessage::kDialogBody);
 
     GW::DisableHooks();
