@@ -27,7 +27,6 @@
 #include <GWCA/Managers/GameThreadMgr.h>
 #include <GWCA/Managers/SkillbarMgr.h>
 #include <GWCA/Managers/UIMgr.h>
-#include <GWCA/Managers/ChatMgr.h>
 #include <GWCA/Constants/Constants.h>
 #include <GWCA/GameEntities/Skill.h>
 #include <GWCA/Packets/StoC.h>

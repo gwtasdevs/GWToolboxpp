@@ -72,4 +72,4 @@ namespace GW
 std::vector<GW::Vec2f> readPositions(InputStream&);
 void writePositions(OutputStream&, const std::vector<GW::Vec2f>&);
 
-void logMessage(std::string_view message);
+void logMessage(std::string_view message, std::string_view pluginName = "SST");
