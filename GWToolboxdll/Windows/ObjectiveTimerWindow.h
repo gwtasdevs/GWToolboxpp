@@ -5,7 +5,10 @@
 #include <GWCA/Packets/StoC.h>
 
 #include <ToolboxWindow.h>
+#include <thread>
 #include <vector>
+
+#include <uWebsockets/App.h>
 
 /*
 each objective can have a duration (start and end) or a single timestamp
@@ -43,13 +46,7 @@ public:
     void SaveRuns();
 
 private:
-    std::thread run_loader;
-    bool loading = false;
 
-    bool map_load_pending = false;
-    GW::Packet::StoC::InstanceLoadInfo* InstanceLoadInfo = nullptr;
-    GW::Packet::StoC::InstanceLoadFile* InstanceLoadFile = nullptr;
-    GW::Packet::StoC::InstanceTimer* InstanceTimer = nullptr;
     // Checks that we've received all of the packets needed to start an objective set, then triggers necessary events
     void CheckIsMapLoaded();
 

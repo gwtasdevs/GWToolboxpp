@@ -326,7 +326,7 @@ void TradeWindow::Update(const float)
         ws_window->poll();
     }
     const bool search_pending = !pending_query_string.empty();
-    const bool maintain_socket = (visible && !collapsed) || ((print_game_chat || print_game_chat_asc) && GetPreference(GW::UI::FlagPreference::ChannelTrade) == 0) || search_pending;
+    const bool maintain_socket = (visible && !collapsed) || ((print_game_chat || print_game_chat_asc) && GW::Map::GetIsMapLoaded() && GetPreference(GW::UI::FlagPreference::ChannelTrade) == 0) || search_pending;
     if (maintain_socket && !ws_window) {
         AsyncWindowConnect();
     }
@@ -673,9 +673,7 @@ void TradeWindow::Draw(IDirect3DDevice9*)
     }
 
     if (ImGui::Button(buf, ImVec2(ImGui::GetContentRegionAvail().x, 20.0f))) {
-        if (SUCCEEDED(CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE))) {
-            ShellExecuteA(nullptr, "open", is_kamadan_chat ? https_host_kmd : https_host_asc, nullptr, nullptr, SW_SHOWNORMAL);
-        }
+        ShellExecuteA(nullptr, "open", is_kamadan_chat ? https_host_kmd : https_host_asc, nullptr, nullptr, SW_SHOWNORMAL);
     }
     ImGui::End();
 }
