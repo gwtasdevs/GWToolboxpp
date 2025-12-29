@@ -54,6 +54,7 @@ namespace {
     GW::HookEntry DisplayDialogue_Entry;
     GW::HookEntry DungeonReward_Entry;
     GW::HookEntry DoACompleteZone_Entry;
+    GW::HookEntry AgentAdd_Entry;
     GW::HookEntry GotoTargetDialog_Entry;
 
     struct SkillCastParameters 
@@ -1177,6 +1178,18 @@ void SpeedrunScriptingTools::Initialize(ImGuiContext* ctx, const ImGuiAllocFns a
         triggerScripts(Trigger::DoaZoneComplete, [&](const Script& s){ return s.triggerData.doaZone == doaZone; });
     });
 
+    GW::StoC::RegisterPostPacketCallback<GW::Packet::StoC::AgentAdd>(&AgentAdd_Entry, [&](GW::HookStatus*, const GW::Packet::StoC::AgentAdd* packet) {
+        const auto agent = GW::Agents::GetAgentByID(packet->agent_id);
+        if (!agent || !agent->GetIsLivingType()) return;
+
+        const auto node = repopMinipets.extract(agent->GetAsAgentLiving()->player_number);
+        if (node) {
+            for (auto agentHasSpawned : node.mapped()) {
+                *agentHasSpawned = true;
+            }
+        }
+    });
+
     GW::UI::RegisterUIMessageCallback(&GotoTargetDialog_Entry, GW::UI::UIMessage::kDialogBody, [](GW::HookStatus*, GW::UI::UIMessage, void* wParam, void*) {
         const auto packet = static_cast<GW::UI::DialogBodyInfo*>(wParam);
 
@@ -1273,6 +1286,7 @@ void SpeedrunScriptingTools::SignalTerminate()
     GW::StoC::RemovePostCallback<GW::Packet::StoC::DisplayDialogue>(&DisplayDialogue_Entry);
     GW::StoC::RemovePostCallback<GW::Packet::StoC::DungeonReward>(&DungeonReward_Entry);
     GW::StoC::RemovePostCallback<GW::Packet::StoC::DoACompleteZone>(&DoACompleteZone_Entry);
+    GW::StoC::RemovePostCallback<GW::Packet::StoC::AgentAdd>(&AgentAdd_Entry);
     GW::UI::RemoveUIMessageCallback(&Interrupt_Entry, GW::UI::UIMessage::kAgentSkillCancelled);
     GW::UI::RemoveUIMessageCallback(&FinishSkillCast_Entry, kSkillCooldownStart);
     GW::UI::RemoveUIMessageCallback(&BeginSkillCast_Entry, GW::UI::UIMessage::kAgentSkillStartedCast);

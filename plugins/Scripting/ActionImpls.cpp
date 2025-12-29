@@ -1527,6 +1527,7 @@ ActionBehaviourFlags ConditionedAction::behaviour() const
 }
 
 /// ------------- RepopMinipetAction -------------
+std::map<uint32_t, std::vector<bool*>> repopMinipets;
 RepopMinipetAction::RepopMinipetAction(InputStream& stream)
 {
     stream >> itemModelId >> agentModelId;
@@ -1544,12 +1545,10 @@ void RepopMinipetAction::initialAction()
     agentHasSpawned = false;
     hasUsedItem = false;
 
-    GW::StoC::RegisterPostPacketCallback<GW::Packet::StoC::AgentAdd>(&hook,
-        [&](GW::HookStatus*, const GW::Packet::StoC::AgentAdd* packet) {
-            const auto agent = GW::Agents::GetAgentByID(packet->agent_id);
-            if (!agent || !agent->GetIsLivingType()) return;
-            if (agent->GetAsAgentLiving()->player_number == agentModelId) agentHasSpawned = true;
-        });
+    auto result = repopMinipets.insert({agentModelId, std::vector{&agentHasSpawned}});
+    if (!result.second) {
+        result.first->second.push_back(&agentHasSpawned);
+    }
 }
 void RepopMinipetAction::finalAction()
 {

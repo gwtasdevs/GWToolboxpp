@@ -22,6 +22,7 @@
 #include <unordered_set>
 
 extern std::map<uint32_t, std::vector<bool*>> gotoTargetDialogPoppedUp;
+extern std::map<uint32_t, std::vector<bool*>> repopMinipets;
 
 class MoveToAction : public Action {
 public:
