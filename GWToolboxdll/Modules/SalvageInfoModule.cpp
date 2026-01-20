@@ -182,10 +182,10 @@ namespace {
         const auto current_time = time(nullptr);
         NewLineIfNotEmpty(description);
         if (collection_time <= current_time) {
-            description += std::format(L"{}\x10a\x108\x107Nicholas The Traveller collects {} of these right now!\x1\x1", GW::EncStrings::ItemUnique, nicholas_info->quantity);
+            description += std::format(L"{}\x10a\x108\x107Nicholas The Traveler collects {} of these right now!\x1\x1", GW::EncStrings::ItemUnique, nicholas_info->quantity);
         }
         else {
-            description += std::format(L"{}\x10a\x108\x107Nicholas The Traveller collects {} of these in {}!\x1\x1", GW::EncStrings::ItemUnique, nicholas_info->quantity, PrintRelativeTime(collection_time));
+            description += std::format(L"{}\x10a\x108\x107Nicholas The Traveler collects {} of these in {}!\x1\x1", GW::EncStrings::ItemUnique, nicholas_info->quantity, PrintRelativeTime(collection_time));
         }
     }
     std::wstring tmp_item_description;
