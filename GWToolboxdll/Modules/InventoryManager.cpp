@@ -2480,6 +2480,22 @@ bool InventoryManager::Item::CanBeIdentified() const
     return true;
 }
 
+bool InventoryManager::Item::IsOldSchool() const
+{
+    // Not OS if inscribable (Nightfall/EotN) or not salvagable
+    if (GetIsInscribable() || !IsSalvagable(false)) return false;
+
+    // OS off-hands (wand/focus/shield) have 2 inherent mods, no upgrade slots
+    switch (type) {
+        case GW::Constants::ItemType::Wand:
+        case GW::Constants::ItemType::Offhand:
+            return !IsUpgradable();
+    }
+
+    // Other OS weapons have 1 inherent + 1 suffix slot (so they ARE upgradable)
+    return IsWeapon() && !IsPrefixUpgradable();
+}
+
 bool InventoryManager::Item::IsSalvagable(bool check_bag) const
 {
     if (item_formula == 0x5da) {

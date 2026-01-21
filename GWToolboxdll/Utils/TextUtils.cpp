@@ -606,7 +606,7 @@ namespace TextUtils {
         size_t pos = 0;
 
         while ((pos = in.find(token, start)) != std::string::npos) {
-            std::string part = in.substr(start, pos - start);
+            auto part = in.substr(start, pos - start);
             if (!part.empty()) {
                 // Skip empty substrings
                 result.push_back(part);
@@ -615,7 +615,30 @@ namespace TextUtils {
         }
 
         // Add the last remaining part if it's not empty
-        std::string lastPart = in.substr(start);
+        auto lastPart = in.substr(start);
+        if (!lastPart.empty()) {
+            result.push_back(lastPart);
+        }
+
+        return result;
+    }
+    std::vector<std::wstring> Split(const std::wstring& in, const std::wstring& token)
+    {
+        std::vector<std::wstring> result;
+        size_t start = 0;
+        size_t pos = 0;
+
+        while ((pos = in.find(token, start)) != std::wstring::npos) {
+            auto part = in.substr(start, pos - start);
+            if (!part.empty()) {
+                // Skip empty substrings
+                result.push_back(part);
+            }
+            start = pos + token.length();
+        }
+
+        // Add the last remaining part if it's not empty
+        auto lastPart = in.substr(start);
         if (!lastPart.empty()) {
             result.push_back(lastPart);
         }
@@ -623,21 +646,34 @@ namespace TextUtils {
         return result;
     }
 
-    std::string Join(const std::vector<std::string>& parts, const std::string& token)
+    std::wstring Join(const std::vector<std::wstring>& parts, const std::wstring& token)
     {
-        std::string result;
-        bool first = true; // Track if it's the first valid part
-
+        std::wstring result;
+        bool first = true;
         for (const auto& part : parts) {
             if (!part.empty()) {
                 if (!first) {
-                    result += token; // Add the delimiter before non-first parts
+                    result += token;
                 }
                 result += part;
-                first = false; // Switch after adding the first valid part
+                first = false;
             }
         }
-
+        return result;
+    }
+    std::string Join(const std::vector<std::string>& parts, const std::string& token)
+    {
+        std::string result;
+        bool first = true;
+        for (const auto& part : parts) {
+            if (!part.empty()) {
+                if (!first) {
+                    result += token;
+                }
+                result += part;
+                first = false;
+            }
+        }
         return result;
     }
 

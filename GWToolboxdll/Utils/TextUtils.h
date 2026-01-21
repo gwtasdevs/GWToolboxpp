@@ -52,8 +52,13 @@ namespace TextUtils {
     std::string TimeToString(time_t utc_timestamp = 0, bool include_seconds = false);
     std::string TimeToString(uint32_t utc_timestamp, bool include_seconds = false);
     std::string TimeToString(FILETIME utc_timestamp, bool include_seconds = false);
+
     std::vector<std::string> Split(const std::string& in, const std::string& token);
-    // Turn and array of strings into a single string
+    std::vector<std::wstring> Split(const std::wstring& in, const std::wstring& token);
+
+
+    // Join function with string_view support
+    std::wstring Join(const std::vector<std::wstring>& parts, const std::wstring& token);
     std::string Join(const std::vector<std::string>& parts, const std::string& token);
     // Capitalise the first letter of each word. Replaces original.
     std::string UcWords(std::string_view input);
@@ -278,4 +283,5 @@ namespace TextUtils {
         }
         return subject;
     }
-}
+
+} // namespace TextUtils

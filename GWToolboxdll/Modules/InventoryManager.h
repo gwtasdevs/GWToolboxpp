@@ -13,6 +13,7 @@ namespace GW {
 
         enum class Bag : uint8_t;
         enum class Rarity : uint8_t;
+        enum class ItemType : uint8_t;
     }
     namespace UI {
         enum class UIMessage : uint32_t;
@@ -210,6 +211,12 @@ public:
         [[nodiscard]] bool IsInscription() const
         {
             return (interaction & 0x25000000) == 0x25000000;
+        }
+
+        [[nodiscard]] bool IsOldSchool() const;
+
+        [[nodiscard]] bool IsUpgradable() const { 
+            return GetIsInscribable() || IsPrefixUpgradable() || IsSuffixUpgradable();
         }
 
         [[nodiscard]] bool IsBlue() const
