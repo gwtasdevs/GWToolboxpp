@@ -591,7 +591,6 @@ void QuestModule::DrawSettingsInternal()
 #endif
     if(recalc_quest_paths)
         RefreshAllQuestPaths();
-    ImGui::DragFloat("Max distance between two points##max_visibility_range", &Pathing::max_visibility_range, 1'000.f, 1'000.f, 50'000.f);
     ImGui::ShowHelp("The higher this value, the more accurate the path will be, but the more CPU it will use.");
 }
 
@@ -603,7 +602,6 @@ void QuestModule::LoadSettings(ToolboxIni* ini)
     LOAD_BOOL(draw_quest_path_on_terrain);
     LOAD_BOOL(show_paths_to_all_quests);
     using namespace Pathing;
-    LOAD_FLOAT(max_visibility_range);
     float custom_quest_marker_world_pos_x = .0f;
     float custom_quest_marker_world_pos_y = .0f;
     LOAD_FLOAT(custom_quest_marker_world_pos_x);
@@ -623,7 +621,6 @@ void QuestModule::SaveSettings(ToolboxIni* ini)
     SAVE_BOOL(draw_quest_path_on_terrain);
     SAVE_BOOL(show_paths_to_all_quests);
     using namespace Pathing;
-    SAVE_FLOAT(max_visibility_range);
     float custom_quest_marker_world_pos_x = custom_quest_marker_world_pos.x;
     float custom_quest_marker_world_pos_y = custom_quest_marker_world_pos.y;
     SAVE_FLOAT(custom_quest_marker_world_pos_x);

@@ -26,7 +26,8 @@ namespace {
     // Returns milepath pointer for the current map, nullptr if we're not in a valid state
     Pathing::MilePath* GetMilepathForCurrentMap()
     {
-        if (!GW::Map::GetIsMapLoaded()) return nullptr;
+        //todo: maybe use bool GetIsMapReady() from other modules?
+        if (GW::Map::GetInstanceType() == GW::Constants::InstanceType::Loading || !GW::Map::GetIsMapLoaded()) return nullptr;
         const auto mc = GW::GetMapContext();
         if (!(mc && mc->path && mc->path->staticData)) return nullptr;
 
