@@ -7,6 +7,27 @@ layout: default
 Previous releases are available on Github as dll files. There is no support for older releases. If you are looking for
 the latest version, go to the [Home Page](./) instead.
 
+## Version 8.7
+* [Fix] Fixed bug preventing gamepads from working as intended when toolbox is running (again)
+* [Fix] Fixed crash when using the reroll feature in some situations
+* [Fix] Fixed client freezing when toolbox is closed from the char select screen
+* [Fix] Fixed a bug with pathing that caused paths to cut through impassable terrain
+* [Fix] Fixed a bug causing the currently typed chat message to be cleared when a chat command is triggered by toolbox
+* [Fix] Fixed some issues hiding/showing compass when the relevent minimap options are enabled
+* [Fix] Fixed a bug preventing guild wars hotkeys like "logout" from working
+* [Fix] Fixed issues flagging heroes using the toolbox minimap
+* [Fix] Fixed crash when printing resign log for some players
+* [Fix] Fixed bug preventing compass drawings from other players showing up on minimap
+* [Fix] Fixed memory leak caused by the item drops feature
+* [Fix] Fixed title tracker widget showing wrong counts for some titles
+* [Fix] Fixed bug causing heroes to drop bundles when calling a target with toolbox
+* [Minor] Added Frozen Soil to spirit effects
+* [Minor] "Automatically cancel unyielding aura when re-casting" now also applies to heroes
+* [Minor] Added elite skills on world map for GW Beyond, and lots of other community amends for the elite skill locations on the world map :)
+* [New] Added free text-to-speech api https://tts.gwtoolbox.com - allows the Text-to-speech module to be used for free.
+* [New] Added Market Browser window, allowing players to browse items from https://v2.gwmarket.net
+* [New] Added Inventory Sorting module - settings to organise inventory are in Inventory Settings
+
 ## Version 8.6
 * [Fix] Fixed bug preventing window positions from being saved on close
 * [Fix] Fixed flagging cursor not being cleared when flagging on the minimap

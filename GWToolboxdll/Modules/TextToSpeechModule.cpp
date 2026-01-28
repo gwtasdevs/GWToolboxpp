@@ -1,4 +1,4 @@
-#include "NPCVoiceModule.h"
+#include "TextToSpeechModule.h"
 #include "stdafx.h"
 
 #include <GWCA/Managers/GameThreadMgr.h>
@@ -39,8 +39,55 @@ namespace {
     const char* voice_id_human_female = "EXAVITQu4vr4xnSDxMaL";
     const char* voice_id_dwarven_male = "N2lVS1w4EtoT3dr4eOWO";
 
+    const char* gwtts_hostname = "https://tts.gwtoolbox.com";
+    //const char* gwtts_hostname = "http://localhost:8081";
+
+    // Cost optimization settings
+    bool stop_speech_when_dialog_closed = false;
+    bool play_goodbye_messages = true;
+    bool only_use_first_dialog = false;
+    bool only_use_first_sentence = true;
+    bool play_speech_from_non_friendly_npcs = true;
+    bool play_speech_bubbles_in_explorable = false;
+    bool play_speech_bubbles_in_outpost = true;
+    bool play_speech_bubbles_from_party_members = false;
+    float npc_speech_bubble_range = GW::Constants::Range::Earshot;
+    bool play_speech_from_vendors = true;
+    bool play_tts_in_explorable_areas = true;
+    bool play_tts_in_outposts = true;
+
     struct PendingNPCAudio;
     typedef std::string (*GenerateVoiceCallback)(PendingNPCAudio* audio);
+
+    struct DialogueFrameContext {
+        GW::UI::UICtlCallback* vtable;
+        uint32_t frame_id;
+        uint32_t flags;
+        uint32_t agent_id;
+        float duration;
+    };
+    static_assert(sizeof(DialogueFrameContext) == 0x14);
+
+    uint32_t current_dialogue_1_agent_id = 0;
+
+    DialogueFrameContext* GetCurrentlyShowingDialogue() {
+        struct UIFrameQueue_Context {
+            GW::Array<void*> h0000;
+            uint32_t showing_frame_id;
+            uint32_t count;
+        };
+        static_assert(sizeof(UIFrameQueue_Context) == 0x18);
+        auto frame = GW::UI::GetFrameByLabel(L"NpcDialogue1");
+        if (frame && frame->frame_callbacks.size() > 0) {
+            const auto context = (UIFrameQueue_Context*)frame->frame_callbacks[1].uictl_context;
+            if (context->showing_frame_id) {
+                const auto current = GW::UI::GetFrameById(context->showing_frame_id);
+                return (DialogueFrameContext*)GW::UI::GetFrameContext(current);
+            }
+        }
+        return nullptr;
+    }
+
 
     // API Configuration structure
     struct APIConfig {
@@ -56,22 +103,28 @@ namespace {
 
     GW::Constants::Language GetAudioLanguage()
     {
+        // @Enhancement: Guild Wars only officially supports 6 audio languages, so this will spit out english even if the player is using chinese text.
         return (GW::Constants::Language)GW::UI::GetPreference(GW::UI::NumberPreference::LanguageAudio);
     }
+
+    enum class GWRace : uint8_t { Human, Charr, Norn, Asura, Tengu, Dwarf, Centaur, Count }; // namespace GWRace
+
+    std::map<GWRace, bool> play_speech_from_race;
 
         // Add OpenAI TTS function
     std::string GenerateVoiceOpenAI(PendingNPCAudio*);
     std::string GenerateVoiceElevenLabs(PendingNPCAudio*);
     std::string GenerateVoiceGoogle(PendingNPCAudio*);
     std::string GenerateVoicePlayHT(PendingNPCAudio* );
-
+    std::string GenerateVoiceGWDevHub(PendingNPCAudio*);
 
     // Static API configurations
     APIConfig api_configs[] = {
+        {GenerateVoiceGWDevHub, "GWDevHub TTS", "", "This is a free TTS service specifically for Guild Wars players, provided by GWDevHub"},
         {GenerateVoiceElevenLabs ,"ElevenLabs", "https://elevenlabs.io/app/settings/api-keys"},
         {GenerateVoiceOpenAI ,"OpenAI", "https://platform.openai.com/api-keys"},
         {GenerateVoiceGoogle ,"Google Cloud", "https://console.cloud.google.com/apis/credentials", "Note: Make sure to enable the Text-to-Speech API in your Google Cloud project"},
-        {GenerateVoicePlayHT ,"Play.ht", "https://elevenlabs.io/app/settings/api-keys", "Note: Play.ht requires both an API Key and User ID", true}
+        {GenerateVoicePlayHT ,"Play.ht", "https://elevenlabs.io/app/settings/api-keys", "Note: Play.ht requires both an API Key and User ID", true},
     };
 
     // TTS Provider settings
@@ -94,11 +147,15 @@ namespace {
     char custom_npc_id_buffer[32] = {0};
     char custom_voice_id_buffer[256] = {0};
 
-    enum class GWRace : uint8_t { Human, Charr, Norn, Asura, Tengu, Dwarf, Centaur }; // namespace GWRace
 
 
     enum class Gender : uint8_t { Male, Female, Unknown };
     std::map<uint32_t, uint32_t> sound_file_by_model_file_id;
+
+    bool NeedToPreprocessEncodedStr() {
+        const auto api_config = GetCurrentAPIConfig();
+        return api_config && api_config->signup_url[0];
+    }
 
     const char* GetApiKey() {
         const auto api_config = GetCurrentAPIConfig();
@@ -165,9 +222,23 @@ namespace {
         if (cache && TIMER_DIFF(last_cached_system_volume) < 10000) 
             return cached_system_volume;
 
-        // Check Windows audio system
-        HRESULT hr = CoInitialize(nullptr);
+        // Try to initialize COM - accept either threading model
+        HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
         bool needs_uninit = SUCCEEDED(hr);
+
+        // RPC_E_CHANGED_MODE means COM is already initialized with different threading model
+        // S_FALSE means COM was already initialized on this thread - that's fine
+        if (hr == RPC_E_CHANGED_MODE) {
+            // COM already initialized with different threading model, continue anyway
+            needs_uninit = false;
+            hr = S_OK;
+        }
+        else if (hr == S_FALSE) {
+            // Already initialized on this thread
+            needs_uninit = false;
+            hr = S_OK;
+        }
+    
 
         IMMDeviceEnumerator* deviceEnumerator = nullptr;
         IMMDevice* defaultDevice = nullptr;
@@ -202,25 +273,57 @@ namespace {
         return cached_system_volume = systemVolume, cached_system_volume;
     }
 
+    GW::NPC* GetAgentAsNPC(uint32_t agent_id) {
+        const auto agent = static_cast<GW::AgentLiving*>(GW::Agents::GetAgentByID(agent_id));
+        if (!(agent && agent->GetIsLivingType())) return 0;
+        if (!agent->IsNPC()) return 0;
+        return GW::Agents::GetNPCByID(agent->player_number);
+    }
 
+    // We traverse the agent's model file to find the file_id used when the agent dies; this allows us to describe the sex and race of the agent.
+    uint32_t GetDescriptiveModelFileId(uint32_t agent_id)
+    {
+        const auto npc = GetAgentAsNPC(agent_id);
+        if (!npc) return 0;
+        if (!sound_file_by_model_file_id.contains(npc->model_file_id)) {
+            uint32_t file_id = 0;
+            GetDeathSoundForModelFileId(npc->model_file_id, &file_id);
+            sound_file_by_model_file_id[npc->model_file_id] = file_id;
+        }
+        if (!sound_file_by_model_file_id[npc->model_file_id]) {
+            return npc->files_count > 0 ? npc->model_files[0] : 0;
+        }
+        return sound_file_by_model_file_id[npc->model_file_id];
+    }
     Gender GetGenderByFileId(const uint32_t file_id)
     {
-        Log::Log("GetGenderByFileId 0x%08X", file_id);
+        //Log::Log("GetGenderByFileId 0x%08X", file_id);
         switch (file_id) {
             case 0x13fdb: // e.g. Krytan
             case 0x2f15d: // e.g. Ascalonian
             case 0x13f6f: // e.g. Male caster
             case 0x16dfc: // Shining blade
-            case 0x8b56: // Dwarf
-            case 0x17390: // Dwarf
             case 0x13e25: // Mesmer
-            case 0x12b3d: // Male centaur
             case 0x13eaa: // Ministry of purity
             case 0x2f1a1: // Razah
             case 0x37614: // Istan paragon
             case 0x37794: // Istan derv
             case 0x13EF3: // Proph monk
+
+            case 0x8b56:  // Dwarf
+            case 0x17390: // Dwarf
+
+            case 0x12b3d: // Male centaur
+
+            case 0x6ef5: // Male charr
+            case 0x4f19: // Male charr
+
+            case 0x4a4a8: // Male norn
+
+            case 0x2D145: // Skin model for togo (can't find death sound from animation file)
                 return Gender::Male;
+
+
             case 0x2f17e:
             case 0x97fa:
             case 0x13f93:
@@ -230,52 +333,68 @@ namespace {
             case 0x16dcf: // White mantle
             case 0x203e4: // Livia
             case 0x4541c: // Istan caster
+
+            case 0x4c47a: // Female Norn
                 return Gender::Female;
+
+            case 0x4c29e: // Asura (male and female)
+                return Gender::Unknown; // NOTE: We can't tell from the animation file id for asura!
         }
         return Gender::Unknown;
     }
     GWRace GetRaceByFileId(const uint32_t file_id)
     {
-        Log::Log("GetRaceByFileId 0x%08X", file_id);
+        //Log::Log("GetRaceByFileId 0x%08X", file_id);
         switch (file_id) {
             case 0x8b56:
             case 0x17390: // Dwarf
                 return GWRace::Dwarf;
+            case 0x4c29e: // Asura (male and female)
+                return GWRace::Asura;
+            case 0x4a4a8:
+            case 0x4c47a:
+                return GWRace::Norn;
+            case 0x12b3d:
+                return GWRace::Centaur;
+            case 0x6ef5:
+            case 0x4f19:
+                return GWRace::Charr;
         }
         return GWRace::Human;
+    }
+    const char* GetRaceName(GWRace race)
+    {
+        switch (race) {
+            case GWRace::Human:
+                return "Human";
+            case GWRace::Charr:
+                return "Charr";
+            case GWRace::Norn:
+                return "Norn";
+            case GWRace::Asura:
+                return "Asura";
+            case GWRace::Tengu:
+                return "Tengu";
+            case GWRace::Dwarf:
+                return "Dwarf";
+            case GWRace::Centaur:
+                return "Centaur";
+            default:
+                return "Unknown";
+        }
     }
     GWRace GetAgentRace(uint32_t agent_id)
     {
-        const auto agent = static_cast<GW::AgentLiving*>(GW::Agents::GetAgentByID(agent_id));
-        if (!(agent && agent->GetIsLivingType())) return GWRace::Human;
-        if (agent->IsNPC()) {
-            const auto npc = GW::Agents::GetNPCByID(agent->player_number);
-            if (!npc) return GWRace::Human;
-            if (!sound_file_by_model_file_id.contains(npc->model_file_id)) {
-                uint32_t file_id;
-                GetDeathSoundForModelFileId(npc->model_file_id, &file_id);
-                sound_file_by_model_file_id[npc->model_file_id] = file_id;
-            }
-            return GetRaceByFileId(sound_file_by_model_file_id[npc->model_file_id]);
-        }
-        return GWRace::Human;
+        return GetRaceByFileId(GetDescriptiveModelFileId(agent_id));
     }
-
     Gender GetAgentGender(uint32_t agent_id)
     {
-        const auto agent = static_cast<GW::AgentLiving*>(GW::Agents::GetAgentByID(agent_id));
-        if (!(agent && agent->GetIsLivingType())) return Gender::Unknown;
-        if (agent->IsNPC()) {
-            const auto npc = GW::Agents::GetNPCByID(agent->player_number);
+        if (GetAgentRace(agent_id) == GWRace::Asura) {
+            const auto npc = GetAgentAsNPC(agent_id);
             if (!npc) return Gender::Unknown;
-            if (!sound_file_by_model_file_id.contains(npc->model_file_id)) {
-                uint32_t file_id;
-                GetDeathSoundForModelFileId(npc->model_file_id, &file_id);
-                sound_file_by_model_file_id[npc->model_file_id] = file_id;
-            }
-            return GetGenderByFileId(sound_file_by_model_file_id[npc->model_file_id]);
+            return (npc->appearance & 0x1) == 1 ? Gender::Female : Gender::Male;
         }
-        return Gender::Unknown;
+        return GetGenderByFileId(GetDescriptiveModelFileId(agent_id));
     }
 
     enum class TraderType : uint8_t { Merchant, RuneTrader, ArmorCrafter, WeaponCustomizer, MaterialTrader, RareMaterialTrader, DyeTrader, OtherItemCrafter, SkillTrainer };
@@ -378,17 +497,7 @@ namespace {
         1991 // Durmand
     };
 
-    // Cost optimization settings
-    bool stop_speech_when_dialog_closed = false;
-    bool play_goodbye_messages = false;
-    bool only_use_first_dialog = true;
-    bool only_use_first_sentence = true; // NB: Not changable because we don't know how to stop a running audio file!
-    bool play_speech_from_non_friendly_npcs = true;
-    bool play_speech_bubbles_in_explorable = false;
-    bool play_speech_bubbles_in_outpost = true;
-    bool play_speech_bubbles_from_party_members = false;
-    float npc_speech_bubble_range = GW::Constants::Range::Adjacent;
-    bool play_speech_from_vendors = true;
+
 
     uint32_t last_dialog_agent_id = 0;
 
@@ -401,9 +510,13 @@ namespace {
     struct PendingNPCAudio {
         GW::Constants::Language language = GW::Constants::Language::English;
         std::wstring encoded_message;
+        std::wstring encoded_npc_name;
         std::wstring decoded_message;
+        Gender gender;
+        GWRace race;
         VoiceProfile* profile = nullptr;
         uint32_t agent_id = 0;
+        uint32_t model_file_id = 0;
         std::filesystem::path path;
         clock_t started = 0;
         clock_t duration = 0;
@@ -506,7 +619,14 @@ namespace {
     }
     PendingNPCAudio::PendingNPCAudio(uint32_t _agent_id, const wchar_t* message, bool _is_dialog_window) : agent_id(_agent_id), started(0), duration(0), is_dialog_window(_is_dialog_window)
     {
-        encoded_message = PreprocessEncodedTextForTTS(message);
+        gender = GetAgentGender(_agent_id);
+        race = GetAgentRace(_agent_id);
+        const auto name_enc = GW::Agents::GetAgentEncName(_agent_id);
+        if (name_enc) {
+            encoded_npc_name = name_enc;
+        }
+        model_file_id = GetDescriptiveModelFileId(_agent_id);
+        encoded_message = NeedToPreprocessEncodedStr() ? PreprocessEncodedTextForTTS(message) : message;
         profile = GetVoiceProfile(agent_id, GW::Map::GetMapID());
         language = GetAudioLanguage();
         pending_audio.push_back(this);
@@ -713,7 +833,7 @@ namespace {
 
     void GenerateVoiceFromDecodedString(PendingNPCAudio* audio)
     {
-        if (!(audio && audio->decoded_message.size() && audio->profile)) {
+        if (!(audio && audio->decoded_message.size())) {
             delete audio;
             return;
         }
@@ -772,6 +892,8 @@ namespace {
 
         // Generate random goodbye message if enabled
         if (play_goodbye_messages && !was_dialog_already_open && GetDistanceFromAgentId(last_dialog_agent_id) < GW::Constants::Range::Adjacent) {
+            if (GetAudioLanguage() != GW::Constants::Language::English) 
+                return; // Only english supported
             // Get random message from the pool
             const auto num_goodbye_messages = sizeof(generic_goodbye_messages) / sizeof(generic_goodbye_messages[0]);
             size_t random_index = rand() % num_goodbye_messages;
@@ -826,6 +948,16 @@ namespace {
         }
 
     }
+    void UnHookNPCInteractFrame() {
+        if (OnNPCInteract_UICallback_Func) {
+            GW::Hook::RemoveHook(OnNPCInteract_UICallback_Func);
+            OnNPCInteract_UICallback_Func = 0;
+        }
+        if (OnVendorInteract_UICallback_Func) {
+            GW::Hook::RemoveHook(OnVendorInteract_UICallback_Func);
+            OnVendorInteract_UICallback_Func = 0;
+        }
+    }
 
     void OnPreUIMessage(GW::HookStatus* status, GW::UI::UIMessage msgid, void* wParam, void*)
     {
@@ -855,22 +987,28 @@ namespace {
             case GW::UI::UIMessage::kPreferenceValueChanged: {
                 GetDialogVolume(false);
             } break;
+            case GW::UI::UIMessage::kDialogueMessageUpdated: {
+                // Enqueue for next thread; GetCurrentlyShowingDialogue hasn't been cleared just yet.
+                GW::GameThread::Enqueue([]() {
+                    const auto current = GetCurrentlyShowingDialogue();
+                    CancelDialogSpeech(current_dialogue_1_agent_id);
+                    if (current) {
+                        const auto frame = GW::UI::GetFrameById(current->frame_id);
+                        const auto message_frame = (GW::MultiLineTextLabelFrame*)GW::UI::GetChildFrame(frame, 1);
+                        const auto message_enc = message_frame ? message_frame->GetEncodedLabel() : nullptr;
+                        if (message_enc && current->agent_id) {
+                            CancelDialogSpeech(current->agent_id);
+                            GenerateVoiceFromEncodedString(new PendingNPCAudio(current->agent_id, message_enc, true));
+                            current_dialogue_1_agent_id = current->agent_id;
+                            return;
+                        }
+                    }
+                    current_dialogue_1_agent_id = 0;
+                });
+            } break;
             case GW::UI::UIMessage::kMapChange:
             case GW::UI::UIMessage::kMapLoaded: {
                 ClearSounds();
-            } break;
-            case GW::UI::UIMessage::kAgentSpeechBubble: {
-                // Some NPCs don't have a dialog window, but they can still have speech bubbles
-                if (!play_speech_bubbles_in_explorable && GW::Map::GetInstanceType() == GW::Constants::InstanceType::Explorable) break;
-                if (!play_speech_bubbles_in_outpost && GW::Map::GetInstanceType() == GW::Constants::InstanceType::Outpost) break;
-                const auto packet = (GW::UI::UIPacket::kAgentSpeechBubble*)wParam;
-                if (!(packet && packet->message && *packet->message)) break;
-                if (!play_speech_bubbles_from_party_members && GW::PartyMgr::IsAgentInParty(packet->agent_id)) break;
-                const auto agent = GW::Agents::GetAgentByID(packet->agent_id);
-                if (GW::GetDistance(agent->pos, GetPlayerPosition()) > npc_speech_bubble_range) {
-                    return; // Ignore distant NPCs
-                }
-                GenerateVoiceFromEncodedString(new PendingNPCAudio(packet->agent_id, packet->message));
             } break;
             case GW::UI::UIMessage::kVendorWindow: {
                 HookNPCInteractFrame();
@@ -881,6 +1019,12 @@ namespace {
                     case GW::Merchant::TransactionType::CollectorBuy: {
                         // Find and use the collector's dialog context
                         const auto collector_dialog = (GW::MultiLineTextLabelFrame*)GW::UI::GetChildFrame(GW::UI::GetFrameByLabel(L"Vendor"), 0, 0, 2);
+                        const auto enc_text = collector_dialog ? collector_dialog->GetEncodedLabel() : nullptr;
+                        if (enc_text && *enc_text) GenerateVoiceFromEncodedString(new PendingNPCAudio(packet->unk, enc_text, true));
+                    } break;
+                    case GW::Merchant::TransactionType::DonateFaction: {
+                        // Find and use the collector's dialog context
+                        const auto collector_dialog = (GW::MultiLineTextLabelFrame*)GW::UI::GetChildFrame(GW::UI::GetFrameByLabel(L"NPCInteract"), 0, 0, 0);
                         const auto enc_text = collector_dialog ? collector_dialog->GetEncodedLabel() : nullptr;
                         if (enc_text && *enc_text) GenerateVoiceFromEncodedString(new PendingNPCAudio(packet->unk, enc_text, true));
                     } break;
@@ -916,13 +1060,19 @@ namespace {
         }
     }
 
+    Gender GetPlayerGender()
+    {
+        const auto agent = GW::Agents::GetControlledCharacter();
+        return agent && agent->GetIsFemale() ? Gender::Female : Gender::Male;
+    }
+
 // Fixed cache key generation that works with Korean/Japanese/Chinese text
     // Fixed cache key generation that works with Korean/Japanese/Chinese text
-    std::string GenerateOptimizedCacheKey(const VoiceProfile* p, const std::wstring& text, GW::Constants::Language)
+    std::string GenerateOptimizedCacheKey(const PendingNPCAudio* p)
     {
         // Just hash the text - works with ANY language
-        auto text_hash = std::hash<std::wstring>{}(text);
-        return std::format("{}_{:x}_{}.mp3", p->voice_id, text_hash,text.size());
+        auto text_hash = std::hash<std::wstring>{}(p->decoded_message);
+        return std::format("{}_{}_{}_{:x}_{}.mp3", (uint8_t)p->race, (uint8_t)p->gender, (uint32_t) p->language, text_hash, p->decoded_message.size());
     }
 
     size_t CurlWriteCallback(void* contents, size_t size, size_t nmemb, std::string* userp)
@@ -960,10 +1110,14 @@ namespace {
     // Add OpenAI TTS function
     std::string GenerateVoiceOpenAI(PendingNPCAudio* audio)
     {
+        if (!(audio && audio->profile)) {
+            return VoiceLog("No Audio Profile"), "";
+        }
         const auto api_config = GetCurrentAPIConfig();
         if (!(api_config && *api_config->api_key)) {
             return VoiceLog("No API Key"), "";
         }
+
 
         nlohmann::json request_body;
         request_body["model"] = "gpt-4o-mini-tts";
@@ -987,6 +1141,9 @@ namespace {
     // Refactored ElevenLabs voice generation
     std::string GenerateVoiceElevenLabs(PendingNPCAudio* audio)
     {
+        if (!(audio && audio->profile)) {
+            return VoiceLog("No Audio Profile"), "";
+        }
         const auto api_config = GetCurrentAPIConfig();
         if (!(api_config && *api_config->api_key)) {
             return VoiceLog("No API Key"), "";
@@ -1015,8 +1172,52 @@ namespace {
         return audio_data;
     }
 
+    std::string GenerateVoiceGWDevHub(PendingNPCAudio* audio)
+    {
+        // Build JSON request body
+        nlohmann::json request_body = nlohmann::json::object();
+
+        // Convert encoded message to array of hex integers
+        nlohmann::json encoded_array = nlohmann::json::array();
+        for (const auto& c : audio->encoded_message) {
+            encoded_array.push_back(static_cast<uint32_t>(c));
+        }
+        request_body["encoded"] = encoded_array;
+
+        nlohmann::json decoded_array = nlohmann::json::array();
+        for (const auto& c : audio->decoded_message) {
+            decoded_array.push_back(static_cast<uint32_t>(c));
+        }
+        request_body["decoded"] = decoded_array;
+
+        if (!audio->encoded_npc_name.empty()) {
+            nlohmann::json encoded_npc_name_arr = nlohmann::json::array();
+            for (const auto& c : audio->encoded_npc_name) {
+                encoded_npc_name_arr.push_back(static_cast<uint32_t>(c));
+            }
+            request_body["npc_name"] = encoded_npc_name_arr;
+        }
+
+        request_body["language"] = static_cast<uint32_t>(audio->language);
+        request_body["speaker_gender"] = audio->gender == Gender::Male ? "m" : "f";
+        request_body["speaker_race"] = GetRaceName(GetRaceByFileId(audio->model_file_id));
+        request_body["player_gender"] = GetPlayerGender() == Gender::Male ? "m" : "f";
+
+        RestClient client;
+        client.SetHeader("Accept", "audio/mpeg");
+        const auto audio_data = PostJson(client, std::format("{}/decode.mp3",gwtts_hostname).c_str(), request_body, "GWDevHub");
+
+        if (!audio_data.empty()) {
+            VoiceLog("GWDevHub voice generation successful, received %zu bytes", audio_data.size());
+        }
+        return audio_data;
+    }
+
     std::string GenerateVoiceGoogle(PendingNPCAudio* audio)
     {
+        if (!(audio && audio->profile)) {
+            return VoiceLog("No Audio Profile"), "";
+        }
         const auto api_config = GetCurrentAPIConfig();
         if (!(api_config && *api_config->api_key)) {
             return VoiceLog("No API Key"), "";
@@ -1070,6 +1271,9 @@ namespace {
 
     std::string GenerateVoicePlayHT(PendingNPCAudio* audio)
     {
+        if (!(audio && audio->profile)) {
+            return VoiceLog("No Audio Profile"), "";
+        }
         const auto api_config = GetCurrentAPIConfig();
         if (!(api_config && *api_config->api_key)) {
             return VoiceLog("No API Key"), "";
@@ -1097,36 +1301,61 @@ namespace {
             voice_id = playht_voice_male_default;
         }
 
-        request_body["voice"] = voice_id;
+request_body["voice"] = voice_id;
 
-        // Add language if supported (Play.ht auto-detects but we can specify)
-        std::string lang_code = LanguageToAbbreviation(audio->language);
-        if (lang_code == "en") {
-            request_body["voice_engine"] = "PlayHT2.0-turbo";
-        }
-        else {
-            request_body["voice_engine"] = "PlayHT2.0"; // Better for non-English
-        }
+// Add language if supported (Play.ht auto-detects but we can specify)
+std::string lang_code = LanguageToAbbreviation(audio->language);
+if (lang_code == "en") {
+    request_body["voice_engine"] = "PlayHT2.0-turbo";
+}
+else {
+    request_body["voice_engine"] = "PlayHT2.0"; // Better for non-English
+}
 
-        // Make API request using shared function
-        RestClient client;
-        client.SetHeader("Authorization", ("Bearer " + std::string(api_config->api_key)).c_str());
-        client.SetHeader("X-User-ID", api_config->user_id);
-        client.SetHeader("Accept", "audio/mpeg");
+// Make API request using shared function
+RestClient client;
+client.SetHeader("Authorization", ("Bearer " + std::string(api_config->api_key)).c_str());
+client.SetHeader("X-User-ID", api_config->user_id);
+client.SetHeader("Accept", "audio/mpeg");
 
-        std::string audio_data = PostJson(client, "https://api.play.ht/api/v2/tts", request_body, api_config->name);
+std::string audio_data = PostJson(client, "https://api.play.ht/api/v2/tts", request_body, api_config->name);
 
-        if (!audio_data.empty()) {
-            VoiceLog("Play.ht voice generation successful, received %zu bytes", audio_data.size());
-        }
+if (!audio_data.empty()) {
+    VoiceLog("Play.ht voice generation successful, received %zu bytes", audio_data.size());
+}
 
-        return audio_data;
+return audio_data;
     }
+
 
     void GenerateVoice(PendingNPCAudio* audio)
     {
         if (generating_voice || !audio) return;
         generating_voice = true;
+        if (audio->gender == Gender::Unknown) {
+            VoiceLog("Unknown Gender");
+            delete audio;
+            generating_voice = false;
+            return;
+        }
+        if (!play_speech_from_race[audio->race]) {
+            VoiceLog("Blocked Gender %s",GetRaceName(audio->race));
+            delete audio;
+            generating_voice = false;
+            return;
+        }
+        if (GW::Map::GetInstanceType() == GW::Constants::InstanceType::Outpost && !play_tts_in_outposts) {
+            VoiceLog("Blocked TTS in outposts");
+            delete audio;
+            generating_voice = false;
+            return;
+        }
+        if (GW::Map::GetInstanceType() == GW::Constants::InstanceType::Explorable && !play_tts_in_outposts) {
+            VoiceLog("Blocked TTS in explorable areas");
+            delete audio;
+            generating_voice = false;
+            return;
+        }
 
         float volume = GetDialogVolume() * GetSystemVolume();
 
@@ -1141,7 +1370,9 @@ namespace {
             if (std::ranges::find(pending_audio, audio) == pending_audio.end())
                 return generating_voice = false;
 
-            const auto cache_key = GenerateOptimizedCacheKey(audio->profile, audio->decoded_message, audio->language);
+            const auto api_config = GetCurrentAPIConfig();
+
+            const auto cache_key = GenerateOptimizedCacheKey(audio);
             audio->path = Resources::GetPath("NPCVoiceCache") / LanguageToAbbreviation(audio->language) / cache_key;
 
             // Check cache first
@@ -1151,7 +1382,7 @@ namespace {
             }
 
             std::string audio_data = "";
-            const auto api_config = GetCurrentAPIConfig();
+            
             audio_data = api_config ? api_config->callback(audio) : "";
             if (std::ranges::find(pending_audio, audio) == pending_audio.end()) return generating_voice = false;
             if (!audio_data.size()) {
@@ -1178,18 +1409,29 @@ namespace {
             if (std::ranges::find(pending_audio, audio) == pending_audio.end()) return generating_voice = false;
             audio->Play();
             return generating_voice = false;
-        });
+            });
     }
-    
+
     // Block any in-game speech from an agent that we're already doing TTS for
     void OnPlaySound(GW::HookStatus* status, const wchar_t* filename, SoundProps* props) {
-        if (status->blocked) return;
-        if (!(props && (props->flags & 0xffff) == 0x1404)) return; // Positional, dialog
-        if (GW::Map::GetIsInCinematic()) return;
-        if (wcslen(filename) > 4) return;
-        if (!GetApiKey()) return;
-        const auto agent_id = GetAgentAtPosition({props->position.x, props->position.y},20.f);
-        if (!(agent_id && GetVoiceProfile(agent_id, GW::Map::GetMapID()))) return;
+        if (status->blocked)
+            return;
+        if (!(props && (props->flags & 0xffff) == 0x1404))
+            return; // Positional, dialog
+        if (GW::Map::GetIsInCinematic())
+            return;
+        if (wcslen(filename) > 4)
+            return;
+        if (!GetApiKey())
+            return;
+        const auto agent_id = GetAgentAtPosition({ props->position.x, props->position.y }, 20.f);
+        if (!(agent_id && GetVoiceProfile(agent_id, GW::Map::GetMapID())))
+            return;
+        if (wcslen(filename) < 10) {
+            // Block an NPC dialog from encoded file hash that has a valid profile and should have a translation or welcome message.
+            status->blocked = true;
+            return;
+        }
         const auto found = playing_audio_map.find(agent_id);
         if (found != playing_audio_map.end() && found->second->IsPlaying()) {
             // If we already have a playing audio for this agent, block the sound
@@ -1206,11 +1448,50 @@ namespace {
         }
     }
 
+    GW::UI::UIInteractionCallback OnAgentSpeechBubble_UICallback_Func = 0, OnAgentSpeechBubble_UICallback_Ret = 0;
+    void OnAgentSpeechBubble_UICallback(GW::UI::InteractionMessage* message, void* wParam, void* lParam)
+    {
+        GW::Hook::EnterHook();
+        
+        OnAgentSpeechBubble_UICallback_Ret(message, wParam, lParam);
+        switch (message->message_id) {
+            case GW::UI::UIMessage::kInitFrame: {
+                const auto frame = GW::UI::GetFrameById(message->frame_id);
+                if (!frame) break;
+                uint32_t agent_id = frame->child_offset_id & 0xfffff;
+                const auto message_frame = (GW::TextLabelFrame*)GW::UI::GetChildFrame(frame, 3);
+                const auto message_enc = message_frame ? message_frame->GetEncodedLabel() : nullptr;
+                if (!message_enc) break;
+                const auto agent = GW::Agents::GetAgentByID(agent_id);
+                if (!agent) break;
+
+                // Some NPCs don't have a dialog window, but they can still have speech bubbles
+                if (!play_speech_bubbles_in_explorable && GW::Map::GetInstanceType() == GW::Constants::InstanceType::Explorable) 
+                    break;
+                if (!play_speech_bubbles_in_outpost && GW::Map::GetInstanceType() == GW::Constants::InstanceType::Outpost) 
+                    break;
+                if (!play_speech_bubbles_from_party_members && GW::PartyMgr::IsAgentInParty(agent_id)) 
+                    break;
+                if (GW::GetDistance(agent->pos, GetPlayerPosition()) > npc_speech_bubble_range)
+                    break; // Ignore distant NPCs
+                GenerateVoiceFromEncodedString(new PendingNPCAudio(agent_id, message_enc));
+            } break;
+        }
+        GW::Hook::LeaveHook();
+    }
+    
+
 } // namespace
 
-void NPCVoiceModule::Initialize()
+void TextToSpeechModule::Initialize()
 {
     ToolboxModule::Initialize();
+
+    if (play_speech_from_race.empty()) {
+        for (size_t i = 0; i < (size_t)GWRace::Count; i++) {
+            play_speech_from_race[(GWRace)i] = true;
+        }
+    }
 
     voice_matrix.clear();
     special_npc_voices.clear();
@@ -1358,7 +1639,7 @@ void NPCVoiceModule::Initialize()
     merchant_greetings[{GW::Region::Region_ShingJea, TraderType::RareMaterialTrader}] = L"Rare treasures from the sacred archives.";
     merchant_greetings[{GW::Region::Region_ShingJea, TraderType::DyeTrader}] = L"Colors harmonious as monastery gardens.";
     merchant_greetings[{GW::Region::Region_ShingJea, TraderType::OtherItemCrafter}] = L"Greetings, I craft with the wisdom of ancient masters.";
-    merchant_greetings[{GW::Region::Region_ShingJea, TraderType::SkillTrainer}] = L"Welcome, young student. I shall guide you in the ancient martial ways of Shing Jea.";
+    merchant_greetings[{GW::Region::Region_ShingJea, TraderType::SkillTrainer}] = L"Welcome, young student - I shall guide you in the ancient martial ways of Shing Jea.";
 
     // CANTHA - KAINENG CITY - Urban, bustling
     merchant_greetings[{GW::Region::Region_Kaineng, TraderType::Merchant}] = L"Welcome to Kaineng City, the finest goods from across the empire!";
@@ -1500,32 +1781,38 @@ void NPCVoiceModule::Initialize()
     merchant_greetings[{GW::Region::Region_BattleIslands, TraderType::OtherItemCrafter}] = L"Greetings, I use techniques from across the world.";
     merchant_greetings[{GW::Region::Region_BattleIslands, TraderType::SkillTrainer}] = L"Welcome! I teach arts from every tradition.";
 
-    const GW::UI::UIMessage messages[] = {
-        GW::UI::UIMessage::kDialogBody, 
-        GW::UI::UIMessage::kVendorWindow, 
-        GW::UI::UIMessage::kAgentSpeechBubble, 
-        GW::UI::UIMessage::kMapChange, 
-        GW::UI::UIMessage::kMapLoaded, 
-        GW::UI::UIMessage::kPreferenceValueChanged
-    };
+    const GW::UI::UIMessage messages[] = {GW::UI::UIMessage::kDialogBody, GW::UI::UIMessage::kVendorWindow,           GW::UI::UIMessage::kAgentSpeechBubble,     GW::UI::UIMessage::kMapChange,
+                                          GW::UI::UIMessage::kMapLoaded,  GW::UI::UIMessage::kPreferenceValueChanged, GW::UI::UIMessage::kDialogueMessageUpdated};
 
     for (auto message_id : messages) {
         GW::UI::RegisterUIMessageCallback(&PreUIMessage_HookEntry, message_id, OnPreUIMessage, -0x1);
         GW::UI::RegisterUIMessageCallback(&UIMessage_HookEntry, message_id, OnPostUIMessage, 0x4000);
     }
     AudioSettings::RegisterPlaySoundCallback(&UIMessage_HookEntry, OnPlaySound);
+
+    OnAgentSpeechBubble_UICallback_Func = (GW::UI::UIInteractionCallback)GW::Scanner::ToFunctionStart(GW::Scanner::FindAssertion("AtMonolog.cpp", "msg.createParam",0,0),0xfff);
+    if (OnAgentSpeechBubble_UICallback_Func) {
+        GW::Hook::CreateHook((void**)&OnAgentSpeechBubble_UICallback_Func, OnAgentSpeechBubble_UICallback, (void**)&OnAgentSpeechBubble_UICallback_Ret);
+        GW::Hook::EnableHooks(OnAgentSpeechBubble_UICallback_Func);
+    }
+    DEBUG_ASSERT(OnAgentSpeechBubble_UICallback_Func);
 }
 
-void NPCVoiceModule::Terminate()
+void TextToSpeechModule::Terminate()
 {
     ToolboxModule::Terminate();
     ClearSounds();
+    UnHookNPCInteractFrame();
     GW::UI::RemoveUIMessageCallback(&UIMessage_HookEntry);
     GW::UI::RemoveUIMessageCallback(&PreUIMessage_HookEntry);
     AudioSettings::RemovePlaySoundCallback(&UIMessage_HookEntry);
+    if (OnAgentSpeechBubble_UICallback_Func) {
+        GW::Hook::RemoveHook(OnAgentSpeechBubble_UICallback_Func);
+        OnAgentSpeechBubble_UICallback_Func = 0;
+    }
 }
 
-void NPCVoiceModule::LoadSettings(ToolboxIni* ini)
+void TextToSpeechModule::LoadSettings(ToolboxIni* ini)
 {
     ToolboxModule::LoadSettings(ini);
 
@@ -1574,7 +1861,7 @@ void NPCVoiceModule::LoadSettings(ToolboxIni* ini)
     }
 }
 
-void NPCVoiceModule::SaveSettings(ToolboxIni* ini)
+void TextToSpeechModule::SaveSettings(ToolboxIni* ini)
 {
     ToolboxModule::SaveSettings(ini);
 
@@ -1621,7 +1908,7 @@ void NPCVoiceModule::SaveSettings(ToolboxIni* ini)
     }
 }
 
-void NPCVoiceModule::DrawSettingsInternal()
+void TextToSpeechModule::DrawSettingsInternal()
 {
     static bool show_passwords = false;
     ImGui::Separator();
@@ -1641,144 +1928,186 @@ void NPCVoiceModule::DrawSettingsInternal()
     ImGui::Separator();
     ImGui::Text("API Configuration:");
     const ImColor col(102, 187, 238, 255);
-
-    if (auto api_config = GetCurrentAPIConfig()) {
-        ImGui::Text("%s API Key: ",api_config->name);
-        ImGui::SameLine();
-        ImGui::InputTextSecret("###current provider API Key", api_config->api_key, _countof(api_config->api_key), &show_passwords);
-        if (api_config->has_user_id) {
-            ImGui::Text("%s User ID: ",api_config->name);
+    auto api_config = GetCurrentAPIConfig();
+    bool is_api_locked_down = !(api_config && *api_config->signup_url);
+    if (api_config)
+    {
+        if (!is_api_locked_down)
+        {
+            ImGui::Text("%s API Key: ", api_config->name);
             ImGui::SameLine();
-            ImGui::InputTextSecret("###current provider User ID", api_config->user_id, _countof(api_config->user_id), &show_passwords);
+            ImGui::InputTextSecret("###current provider API Key", api_config->api_key, _countof(api_config->api_key), &show_passwords);
+            if (api_config->has_user_id) {
+                ImGui::Text("%s User ID: ", api_config->name);
+                ImGui::SameLine();
+                ImGui::InputTextSecret("###current provider User ID", api_config->user_id, _countof(api_config->user_id), &show_passwords);
+            }
+            ImGui::TextColored(col.Value, "Click Here to get %s API credentials", api_config->name);
+            if (ImGui::IsItemClicked()) {
+                GW::GameThread::Enqueue([api_config]() {
+                    SendUIMessage(GW::UI::UIMessage::kOpenWikiUrl, (void*)api_config->signup_url);
+                });
+            }
         }
-        ImGui::TextColored(col.Value, "Click Here to get %s API credentials",api_config->name);
-        if (ImGui::IsItemClicked()) {
-            GW::GameThread::Enqueue([api_config]() {
-                SendUIMessage(GW::UI::UIMessage::kOpenWikiUrl, (void*)api_config->signup_url);
-            });
-        }
+
         if (api_config->note && *api_config->note) ImGui::TextColored(ImColor(255, 255, 0), api_config->note);
     }
+
+    
 
     ImGui::Separator();
 
     bool show_warning = false;
-    ImGui::Checkbox("Only process the first sentence of a dialog", &only_use_first_sentence);
-    ImGui::ShowHelp("If enabled, only the first sentence of an NPC dialog will be processed.");
-    show_warning |= !only_use_first_sentence;
+
+    if (!is_api_locked_down) {
+        ImGui::NextSpacedElement();
+        ImGui::Checkbox("Only process the first sentence of a dialog", &only_use_first_sentence);
+        ImGui::ShowHelp("If enabled, only the first sentence of an NPC dialog will be processed.");
+        show_warning |= !only_use_first_sentence;
+    }
+    else {
+        ImGui::TextDisabled("Note: With the chosen TTS API, only the first sentence of an NPC's dialog will be processed.");
+    }
 
     ImGui::Checkbox("Only process the first dialog of an NPC", &only_use_first_dialog);
     ImGui::ShowHelp("If enabled, only the first dialog of an NPC conversation will be processed.");
     show_warning |= !only_use_first_dialog;
 
     ImGui::Checkbox("Play goodbye message when closing NPC dialog", &play_goodbye_messages);
-    ImGui::ShowHelp("If enabled, NPCs will say a random goodbye when you close their dialog.");
+    ImGui::ShowHelp("If enabled, NPCs will say a random goodbye when you close their dialog.\n\nNote: Only english language is currently supported.");
     show_warning |= play_goodbye_messages;
+
+    ImGui::Checkbox("Play greetings from merchants and traders", &play_speech_from_vendors);
+    ImGui::ShowHelp("Note: For some types of traders, Only english language is currently supported.");
 
     ImGui::Checkbox("Stop speech when dialog window is closed", &stop_speech_when_dialog_closed);
 
-    ImGui::Checkbox("Play greetings from merchants and traders", &play_speech_from_vendors);
+    ImGui::TextUnformatted("Play speech in:");
+    ImGui::Indent();
+    ImGui::StartSpacedElements(264.f);
+    ImGui::NextSpacedElement();
+    ImGui::Checkbox("Explorable Areas", &play_tts_in_explorable_areas);
+    ImGui::NextSpacedElement();
+    ImGui::Checkbox("Outposts", &play_tts_in_outposts);
+    ImGui::Unindent();
 
-    ImGui::Checkbox("Play speech bubbles when in an outpost", &play_speech_bubbles_in_outpost);
+    ImGui::TextUnformatted("Play speech bubbles:");
+    ImGui::Indent();
+    ImGui::StartSpacedElements(264.f);
+    ImGui::NextSpacedElement();
+    ImGui::Checkbox("When in an outpost", &play_speech_bubbles_in_outpost);
     ImGui::ShowHelp("If enabled, speech bubbles above an NPC when in an outpost will be processed");
 
-    ImGui::Checkbox("Play speech bubbles when in an explorable area", &play_speech_bubbles_in_explorable);
-    show_warning |= play_speech_bubbles_in_explorable;
+    ImGui::NextSpacedElement();
+    ImGui::Checkbox("When in an explorable area", &play_speech_bubbles_in_explorable);
     ImGui::ShowHelp("If enabled, speech bubbles from skills and quotes from enemies and allies within speech bubble range will be processed.");
+    show_warning |= play_speech_bubbles_in_explorable;
 
-    ImGui::Checkbox("Play speech bubbles from party members", &play_speech_bubbles_from_party_members);
-    show_warning |= play_speech_bubbles_from_party_members;
+    ImGui::NextSpacedElement();
+    ImGui::Checkbox("From other party members", &play_speech_bubbles_from_party_members);
     ImGui::ShowHelp("If enabled, speech bubbles from skills and quotes from party members within speech bubble range will be processed.");
+    show_warning |= play_speech_bubbles_from_party_members;
 
-    
+    ImGui::NextSpacedElement();
+    ImGui::Checkbox("From non-friendly NPCs", &play_speech_from_non_friendly_npcs);
+    show_warning |= play_speech_from_non_friendly_npcs;
 
+    ImGui::Unindent();
     if (ImGui::InputFloat("NPC speech bubble range", &npc_speech_bubble_range, GW::Constants::Range::Adjacent, GW::Constants::Range::Adjacent)) {
         npc_speech_bubble_range = std::max(npc_speech_bubble_range, 0.f);
         npc_speech_bubble_range = std::min(npc_speech_bubble_range, 2500.f);
     }
+    ImGui::ShowHelp("The range at which NPC speech bubbles will be processed. Set to 0 to disable.");
     show_warning |= (npc_speech_bubble_range > 166.f);
 
-    ImGui::ShowHelp("The range at which NPC speech bubbles will be processed. Set to 0 to disable.");
-    ImGui::Checkbox("Play speech bubbles from non-friendly NPCs", &play_speech_from_non_friendly_npcs);
-    show_warning |= play_speech_from_non_friendly_npcs;
-
-    if (show_warning) {
+    if (show_warning && !is_api_locked_down) {
         ImGui::TextColored(ImColor(IM_COL32(245, 245, 0, 255)), "Warning: Processing more lines of dialog will use up more API credits!");
     }
 
-// Custom NPC Voice Assignment Section
-    ImGui::Separator();
-    ImGui::Text("Custom NPC Voice Assignment:");
-    ImGui::Text("Assign specific voices to individual NPCs by their NPC ID.");
-    ImGui::Text("Voice settings (stability, similarity, etc.) will be inherited from the NPC's region/gender.");
-
-    // Input fields for new custom assignment
-    ImGui::PushItemWidth(100);
-    ImGui::InputTextWithHint("##npc_id_custom", "e.g. 1234", custom_npc_id_buffer, sizeof(custom_npc_id_buffer), ImGuiInputTextFlags_CharsDecimal);
-    ImGui::SameLine();
-    ImGui::Text("NPC ID");
-    ImGui::SameLine();
-    ImGui::PushItemWidth(300);
-    ImGui::InputTextWithHint("##voice_id_custom", "e.g. 2EiwWnXFnvU5JabPnv8n", custom_voice_id_buffer, sizeof(custom_voice_id_buffer));
-    ImGui::SameLine();
-    ImGui::Text("Voice ID");
-    ImGui::PopItemWidth();
-
-    // Add button
-    if (ImGui::Button("Add Custom Voice Assignment")) {
-        if (strlen(custom_npc_id_buffer) > 0 && strlen(custom_voice_id_buffer) > 0) {
-            try {
-                uint32_t npc_id = std::stoul(custom_npc_id_buffer);
-
-                // Create profile with only voice_id - everything else will be inherited
-                VoiceProfile profile(custom_voice_id_buffer, 0.5f, 0.5f, 0.5f, 1.0f, "");
-                special_npc_voices[npc_id] = profile;
-
-                // Clear input buffers
-                memset(custom_npc_id_buffer, 0, sizeof(custom_npc_id_buffer));
-                memset(custom_voice_id_buffer, 0, sizeof(custom_voice_id_buffer));
-
-                VoiceLog("Added custom voice assignment for NPC ID %u", npc_id);
-            } catch (const std::exception&) {
-                VoiceLog("Invalid NPC ID entered");
-            }
-        }
+    ImGui::TextUnformatted("Play speech from:");
+    ImGui::Indent();
+    ImGui::StartSpacedElements(264.f);
+    for (auto& it : play_speech_from_race) {
+        ImGui::NextSpacedElement();
+        ImGui::Checkbox(GetRaceName(it.first), (bool*) & it.second);
     }
-    ImGui::PopItemWidth();
-
-    // Display existing custom assignments
-    if (!special_npc_voices.empty()) {
+    ImGui::Unindent();
+    // Custom NPC Voice Assignment Section
+    if (!is_api_locked_down) {
         ImGui::Separator();
-        ImGui::Text("Current Custom Voice Assignments:");
+        ImGui::Text("Custom NPC Voice Assignment:");
+        ImGui::Text("Assign specific voices to individual NPCs by their NPC ID.");
+        ImGui::Text("Voice settings (stability, similarity, etc.) will be inherited from the NPC's region/gender.");
 
-        // Create a vector for iteration since we might modify the map
-        std::vector<uint32_t> to_remove;
+        // Input fields for new custom assignment
+        ImGui::PushItemWidth(100);
+        ImGui::InputTextWithHint("##npc_id_custom", "e.g. 1234", custom_npc_id_buffer, sizeof(custom_npc_id_buffer), ImGuiInputTextFlags_CharsDecimal);
+        ImGui::SameLine();
+        ImGui::Text("NPC ID");
+        ImGui::SameLine();
+        ImGui::PushItemWidth(300);
+        ImGui::InputTextWithHint("##voice_id_custom", "e.g. 2EiwWnXFnvU5JabPnv8n", custom_voice_id_buffer, sizeof(custom_voice_id_buffer));
+        ImGui::SameLine();
+        ImGui::Text("Voice ID");
+        ImGui::PopItemWidth();
 
-        for (const auto& [npc_id, voice_profile] : special_npc_voices) {
-            ImGui::PushID(npc_id);
+        // Add button
+        if (ImGui::Button("Add Custom Voice Assignment")) {
+            if (strlen(custom_npc_id_buffer) > 0 && strlen(custom_voice_id_buffer) > 0) {
+                try {
+                    uint32_t npc_id = std::stoul(custom_npc_id_buffer);
 
-            // Display the assignment
-            ImGui::Text("NPC ID: %u", npc_id);
-            ImGui::SameLine(120);
-            ImGui::Text("Voice: %s", voice_profile.voice_id.c_str());
-            ImGui::SameLine();
-            ImGui::TextColored(ImColor(150, 150, 150), "(inherits region/gender settings)");
+                    // Create profile with only voice_id - everything else will be inherited
+                    VoiceProfile profile(custom_voice_id_buffer, 0.5f, 0.5f, 0.5f, 1.0f, "");
+                    special_npc_voices[npc_id] = profile;
 
-            // Remove button
-            ImGui::SameLine();
-            if (ImGui::Button("Remove")) {
-                to_remove.push_back(npc_id);
+                    // Clear input buffers
+                    memset(custom_npc_id_buffer, 0, sizeof(custom_npc_id_buffer));
+                    memset(custom_voice_id_buffer, 0, sizeof(custom_voice_id_buffer));
+
+                    VoiceLog("Added custom voice assignment for NPC ID %u", npc_id);
+                } catch (const std::exception&) {
+                    VoiceLog("Invalid NPC ID entered");
+                }
+            }
+        }
+        ImGui::PopItemWidth();
+
+        // Display existing custom assignments
+        if (!special_npc_voices.empty()) {
+            ImGui::Separator();
+            ImGui::Text("Current Custom Voice Assignments:");
+
+            // Create a vector for iteration since we might modify the map
+            std::vector<uint32_t> to_remove;
+
+            for (const auto& [npc_id, voice_profile] : special_npc_voices) {
+                ImGui::PushID(npc_id);
+
+                // Display the assignment
+                ImGui::Text("NPC ID: %u", npc_id);
+                ImGui::SameLine(120);
+                ImGui::Text("Voice: %s", voice_profile.voice_id.c_str());
+                ImGui::SameLine();
+                ImGui::TextColored(ImColor(150, 150, 150), "(inherits region/gender settings)");
+
+                // Remove button
+                ImGui::SameLine();
+                if (ImGui::Button("Remove")) {
+                    to_remove.push_back(npc_id);
+                }
+
+                ImGui::PopID();
             }
 
-            ImGui::PopID();
-        }
-
-        // Remove marked entries
-        for (uint32_t npc_id : to_remove) {
-            special_npc_voices.erase(npc_id);
-            VoiceLog("Removed custom voice assignment for NPC ID %u", npc_id);
+            // Remove marked entries
+            for (uint32_t npc_id : to_remove) {
+                special_npc_voices.erase(npc_id);
+                VoiceLog("Removed custom voice assignment for NPC ID %u", npc_id);
+            }
         }
     }
+    
 
 
     // Simple log display

@@ -18,17 +18,15 @@
 #include <unordered_map>
 #include <vector>
 
-enum class TTSProvider : uint32_t { ElevenLabs, OpenAI, Google, PlayHT };
-
-class NPCVoiceModule : public ToolboxModule {
+class TextToSpeechModule : public ToolboxModule {
 public:
-    static NPCVoiceModule& Instance()
+    static TextToSpeechModule& Instance()
     {
-        static NPCVoiceModule instance;
+        static TextToSpeechModule instance;
         return instance;
     }
 
-    const char* Name() const override { return "NPC Voice"; }
+    const char* Name() const override { return "Text-to-speech"; } 
     const char* Description() const override { return "AI-generated voices for NPCs using ElevenLabs or OpenAI TTS with cost optimization"; }
     const char* Icon() const override { return ICON_FA_VOLUME_UP; }
 

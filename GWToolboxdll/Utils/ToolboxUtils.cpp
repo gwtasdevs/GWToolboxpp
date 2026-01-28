@@ -12,6 +12,7 @@
 #include <GWCA/GameEntities/Friendslist.h>
 #include <GWCA/GameEntities/Item.h>
 #include <GWCA/GameEntities/Map.h>
+#include <GWCA/GameEntities/Attribute.h>
 
 #include <GWCA/Managers/PlayerMgr.h>
 #include <GWCA/Managers/PartyMgr.h>
@@ -33,10 +34,13 @@
 #include <GWCA/Managers/GameThreadMgr.h>
 #include <Timer.h>
 #include <GWCA/GameEntities/Frame.h>
+#include <Modules/Resources.h>
+#include <Utils/GuiUtils.h>
+#include <GWCA/Managers/ItemMgr.h>
 
 namespace {
-    typedef UUID* (__cdecl*PortalGetUserId_pt)();
-    PortalGetUserId_pt PortalGetUserId_Func = 0;
+
+    GUID* account_uuid = 0;
 
     GW::Array<GW::AvailableCharacterInfo>* available_chars_ptr = nullptr;
 
@@ -464,11 +468,14 @@ namespace GW {
 
         const UUID* GetPortalAccountUuid()
         {
-            if (!PortalGetUserId_Func) {
-                HMODULE hPortalDll = GetModuleHandle("GwLoginClient.dll");
-                PortalGetUserId_Func = hPortalDll ? (PortalGetUserId_pt)GetProcAddress(hPortalDll, "PortalGetUserId") : nullptr;
+            if (!account_uuid) {
+                auto address = GW::Scanner::Find("\x50\x6a\x18\x6a\x02\xff\x15", "xxxxxxx", 0x7);
+                if (address && GW::Scanner::IsValidPtr(*(uintptr_t*)address, GW::ScannerSection::Section_DATA)) {
+                    address = *(uintptr_t*)address;
+                    account_uuid = (GUID*)(address + 0x90);
+                }
             }
-            return PortalGetUserId_Func ? PortalGetUserId_Func() : nullptr;
+            return account_uuid;
         }
 
         AvailableCharacterInfo* GetAvailableCharacter(const wchar_t* name)
@@ -515,10 +522,231 @@ namespace GW {
     }
 
     namespace Agents {
+        bool IsAgentCarryingBundle(uint32_t agent_id) {
+            const auto agent = (GW::AgentLiving*)GW::Agents::GetAgentByID(agent_id);
+            const auto held_item = agent && agent->GetIsLivingType() ? GW::Items::GetItemById(agent->weapon_item_id) : 0;
+            return held_item && held_item->type == GW::Constants::ItemType::Bundle;
+        }
         void AsyncGetAgentName(const Agent* agent, std::wstring& out)
         {
             UI::AsyncDecodeStr(GetAgentEncName(agent), &out);
         }
+    } // namespace Agents
+    namespace Items {
+        GW::Constants::Rarity GetRarity(const GW::Item* item)
+        {
+            if(!item)
+                return GW::Constants::Rarity::Unknown;
+            if ((item->interaction & 0x10) != 0) 
+                return GW::Constants::Rarity::Green;
+            if ((item->interaction & 0x400000) != 0) 
+                return GW::Constants::Rarity::Purple;
+            if ((item->interaction & 0x20000) != 0) 
+                return GW::Constants::Rarity::Gold;
+            if (item->single_item_name && item->single_item_name[0] == 0xA3F) 
+                return GW::Constants::Rarity::Blue;
+            return GW::Constants::Rarity::White;
+        }
+
+        ImColor GetRarityColor(const GW::Constants::Rarity rarity)
+        {
+            switch (rarity) {
+                case GW::Constants::Rarity::White:
+                    return IM_COL32(230, 230, 230, 255);
+                case GW::Constants::Rarity::Blue:
+                    return IM_COL32(37, 150, 190, 255);
+                case GW::Constants::Rarity::Purple:
+                    return IM_COL32(124, 95, 168, 255);
+                case GW::Constants::Rarity::Gold:
+                    return IM_COL32(253, 202, 83, 255);
+                case GW::Constants::Rarity::Green:
+                    return IM_COL32(0, 230, 0, 255);
+            }
+            return IM_COL32(128, 128, 128, 255);
+        }
+
+        const char* GetItemTypeName(const GW::Constants::ItemType item_type)
+        {
+            using GW::Constants::ItemType;
+            switch (item_type) {
+                case ItemType::Salvage:
+                    return "Salvage Item";
+                case ItemType::Axe:
+                    return "Axe";
+                case ItemType::Bag:
+                    return "Bag";
+                case ItemType::Boots:
+                    return "Boots";
+                case ItemType::Bow:
+                    return "Bow";
+                case ItemType::Bundle:
+                    return "Bundle";
+                case ItemType::Chestpiece:
+                    return "Chestpiece";
+                case ItemType::Rune_Mod:
+                    return "Rune";
+                case ItemType::Usable:
+                    return "Usable Item";
+                case ItemType::Dye:
+                    return "Dye";
+                case ItemType::Materials_Zcoins:
+                    return "Materials";
+                case ItemType::Offhand:
+                    return "Offhand";
+                case ItemType::Gloves:
+                    return "Gloves";
+                case ItemType::Hammer:
+                    return "Hammer";
+                case ItemType::Headpiece:
+                    return "Headpiece";
+                case ItemType::CC_Shards:
+                    return "Candy Cane Shards";
+                case ItemType::Key:
+                    return "Key";
+                case ItemType::Leggings:
+                    return "Leggings";
+                case ItemType::Gold_Coin:
+                    return "Gold";
+                case ItemType::Quest_Item:
+                    return "Quest Item";
+                case ItemType::Wand:
+                    return "Wand";
+                case ItemType::Shield:
+                    return "Shield";
+                case ItemType::Staff:
+                    return "Staff";
+                case ItemType::Sword:
+                    return "Sword";
+                case ItemType::Kit:
+                    return "Kit";
+                case ItemType::Trophy:
+                    return "Trophy";
+                case ItemType::Scroll:
+                    return "Scroll";
+                case ItemType::Daggers:
+                    return "Daggers";
+                case ItemType::Present:
+                    return "Present";
+                case ItemType::Minipet:
+                    return "Miniature";
+                case ItemType::Scythe:
+                    return "Scythe";
+                case ItemType::Spear:
+                    return "Spear";
+                case ItemType::Storybook:
+                    return "Storybook";
+                case ItemType::Costume:
+                    return "Costume";
+                case ItemType::Costume_Headpiece:
+                    return "Costume Headpiece";
+                case ItemType::Unknown:
+                default:
+                    return "Unknown";
+            }
+        }
+
+        uint32_t GetUses(GW::Item* item) {
+            if (!item) return 0;
+            const GW::ItemModifier* mod = item->mod_struct;
+            for (DWORD i = 0; mod && i < item->mod_struct_size; i++) {
+                if (mod->identifier() == 0x2458) {
+                    return mod->arg2() * item->quantity;
+                }
+                mod++;
+            }
+            return item->quantity;
+        }
+
+        uint32_t GetAlcoholPointsPerUse(GW::Item* item) {
+            if (!item) return 0;
+            switch (item->model_id) {
+                case GW::Constants::ItemID::Eggnog:
+                case GW::Constants::ItemID::DwarvenAle:
+                case GW::Constants::ItemID::HuntersAle:
+                case GW::Constants::ItemID::Absinthe:
+                case GW::Constants::ItemID::WitchsBrew:
+                case GW::Constants::ItemID::Ricewine:
+                case GW::Constants::ItemID::ShamrockAle:
+                case GW::Constants::ItemID::Cider:
+                    return 1;
+                case GW::Constants::ItemID::Grog:
+                case GW::Constants::ItemID::SpikedEggnog:
+                case GW::Constants::ItemID::AgedDwarvenAle:
+                case GW::Constants::ItemID::AgedHuntersAle:
+                case GW::Constants::ItemID::FlaskOfFirewater:
+                case GW::Constants::ItemID::KrytanBrandy:
+                case GW::Constants::ItemID::Keg:
+                    return 5;
+            }
+            return 0;
+        }
+
+        bool IsAlcohol(GW::Item* item)
+        {
+            return GetAlcoholPointsPerUse(item) > 0;
+        }
+
+        const char* GetAttributeName(const GW::Constants::AttributeByte attribute)
+        {
+            const auto attribute_data = GW::SkillbarMgr::GetAttributeConstantData((GW::Constants::Attribute)attribute);
+
+            return attribute_data ? Resources::DecodeStringId(attribute_data->name_id)->string().c_str() : "Unknown";
+        }
+
+        const char* GetDamageTypeName(const GW::Constants::DamageType type)
+        {
+            switch (type) {
+                case GW::Constants::DamageType::Blunt:
+                    return "Blunt";
+                case GW::Constants::DamageType::Piercing:
+                    return "Piercing";
+                case GW::Constants::DamageType::Slashing:
+                    return "Slashing";
+                case GW::Constants::DamageType::Cold:
+                    return "Cold";
+                case GW::Constants::DamageType::Lightning:
+                    return "Lightning";
+                case GW::Constants::DamageType::Fire:
+                    return "Fire";
+                case GW::Constants::DamageType::Chaos:
+                    return "Chaos";
+                case GW::Constants::DamageType::Dark:
+                case GW::Constants::DamageType::DarkDupe:
+                    return "Dark";
+                case GW::Constants::DamageType::Holy:
+                    return "Holy";
+                case GW::Constants::DamageType::Nature:
+                    return "Nature";
+                case GW::Constants::DamageType::Sacrifice:
+                    return "Sacrifice";
+                case GW::Constants::DamageType::Earth:
+                    return "Earth";
+                case GW::Constants::DamageType::Generic:
+                    return "Generic";
+                case GW::Constants::DamageType::None:
+                    return "None";
+                default:
+                    return "Unknown";
+            }
+        }
+
+        const char* GetRarityName(const GW::Constants::Rarity rarity)
+        {
+            switch (rarity) {
+                case GW::Constants::Rarity::White:
+                    return "White";
+                case GW::Constants::Rarity::Blue:
+                    return "Blue";
+                case GW::Constants::Rarity::Purple:
+                    return "Purple";
+                case GW::Constants::Rarity::Gold:
+                    return "Gold";
+                case GW::Constants::Rarity::Green:
+                    return "Green";
+            }
+            return "Unknown";
+        }
+
     }
 }
 
@@ -896,6 +1124,7 @@ namespace ToolboxUtils {
 
     std::wstring ShorthandItemDescription(GW::Item* item)
     {
+        if (!(item && item->info_string && *item->info_string)) return L"";
         std::wstring original(item->info_string);
         wchar_t buffer[128];
 

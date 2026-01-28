@@ -10,14 +10,10 @@
 
 namespace GW {
     namespace Constants {
-        enum class Rarity : uint8_t {
-            White,
-            Blue,
-            Purple,
-            Gold,
-            Green
-        };
+
         enum class Bag : uint8_t;
+        enum class Rarity : uint8_t;
+        enum class ItemType : uint8_t;
     }
     namespace UI {
         enum class UIMessage : uint32_t;
@@ -103,35 +99,7 @@ protected:
 
 private:
 
-    bool show_item_context_menu = false;
-    bool is_identifying = false;
-    bool is_identifying_all = false;
-    bool is_salvaging = false;
-    bool is_salvaging_all = false;
-    bool has_prompted_salvage = false;
-    bool show_salvage_all_popup = true;
-    bool salvage_listeners_attached = false;
-    bool only_use_superior_salvage_kits = false;
 
-    bool hide_unsellable_items = false;
-    bool hide_weapon_sets_and_customized_items = false;
-    bool hide_golds_from_merchant = false;
-
-
-    std::map<uint32_t, std::string> hide_from_merchant_items{};
-    bool salvage_rare_mats = false;
-    bool salvage_nicholas_items = true;
-    bool show_transact_quantity_popup = false;
-    bool transaction_listeners_attached = false;
-
-    bool wiki_link_on_context_menu = false;
-    bool right_click_context_menu_in_explorable = true;
-    bool right_click_context_menu_in_outpost = true;
-
-    std::map<GW::Constants::Bag, bool> bags_to_salvage_from{};
-
-    size_t identified_count = 0;
-    size_t salvaged_count = 0;
 
     void ContinueIdentify();
 
@@ -215,6 +183,12 @@ public:
         [[nodiscard]] bool IsInscription() const
         {
             return (interaction & 0x25000000) == 0x25000000;
+        }
+
+        [[nodiscard]] bool IsOldSchool() const;
+
+        [[nodiscard]] bool IsUpgradable() const { 
+            return GetIsInscribable() || IsPrefixUpgradable() || IsSuffixUpgradable();
         }
 
         [[nodiscard]] bool IsBlue() const

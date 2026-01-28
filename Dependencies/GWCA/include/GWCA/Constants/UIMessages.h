@@ -129,6 +129,7 @@ namespace GW {
             kAgentUpdate        = 0x10000007,        // 0x10000007, wparam = uint32_t agent_id
             kAgentDestroy       = 0x10000008,        // 0x10000008, wparam = uint32_t agent_id
             kUpdateAgentEffects = 0x10000009,        // 0x10000009
+            kDialogueMessage = 0x1000000c,
             kAgentSpeechBubble = 0x10000017,         // 0x10000017
             kShowAgentNameTag = 0x10000019,          // 0x10000019, wparam = AgentNameTagInfo*
             kHideAgentNameTag = 0x1000001A,          // 0x1000001A
@@ -169,6 +170,7 @@ namespace GW {
             kMapLoaded = 0x1000008C,                     // 0x1000008C
             kOpenWhisper = 0x10000092,                   // 0x10000092, wparam = wchar* name
             kLoadMapContext = 0x10000098,                // 0x10000098, wparam = UIPacket::kLoadMapContext
+            kDialogueMessageUpdated = 0x1000009c,
             kLogout = 0x1000009D,                        // 0x1000009D, wparam = { bool unknown, bool character_select }
             kCompassDraw = 0x1000009E,                   // 0x1000009E, wparam = UIPacket::kCompassDraw*
             kOnScreenMessage = 0x100000A2,               // 0x100000A2, wparam = wchar_** encoded_string
@@ -211,6 +213,10 @@ namespace GW {
             kDisableEnterMissionBtn = 0x1000012A,        // 0x1000012A, wparam = boolean (1 = disabled, 0 = enabled)
             kShowCancelEnterMissionBtn = 0x1000012D,     // 0x1000012D
             kPartyDefeated = 0x1000012F,                 // 0x1000012F
+            kPartySearchCreated = 0x10000133,            // 0x10000136 wparam = GW::PartySearch*
+            kPartySearchIdChanged = 0x10000134,          // 0x10000134 wparam = uint32_t* party_search_id
+            kPartySearchRemoved = 0x10000135,            // 0x10000136 wparam = uint32_t* party_search_id
+            kPartySearchUpdated = 0x10000136,            // 0x10000136 wparam = GW::PartySearch*
             kPartySearchInviteReceived = 0x10000137,     // 0x10000137, wparam = UIPacket::kPartySearchInviteReceived*
             kPartySearchInviteSent = 0x10000139,         // 0x10000139
             kPartyShowConfirmDialog = 0x1000013A,        // 0x1000013A, wparam = UIPacket::kPartyShowConfirmDialog
@@ -284,6 +290,13 @@ namespace GW {
         };
 
         namespace UIPacket {
+            struct kDialogueMessage {
+                uint32_t agent_id;
+                wchar_t* sender;
+                wchar_t* message;
+                uint32_t duration;
+                uint32_t is_dialogue_1_or_2;
+            };
             struct kErrorMessage {
                 uint32_t error_id;
                 wchar_t* message;

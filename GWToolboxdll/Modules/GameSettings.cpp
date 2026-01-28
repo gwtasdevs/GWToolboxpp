@@ -580,7 +580,8 @@ namespace {
                             GW::PartyMgr::SetPetBehavior(pet.owner_agent_id, GW::HeroBehavior::Fight);
                         }
                         for (auto& hero : w->hero_flags) {
-                            GW::PartyMgr::SetHeroTarget(hero.agent_id, party_target_info->identifier);
+                            if (!GW::Agents::IsAgentCarryingBundle(hero.agent_id)) 
+                                GW::PartyMgr::SetHeroTarget(hero.agent_id, party_target_info->identifier);
                         }
                     }
                 }
@@ -2313,8 +2314,6 @@ void GameSettings::DrawSettingsInternal()
                     "selling Gold and Green items introduced\n"
                     "in February 5, 2019 update.");
 
-    ImGui::ShowHelp("When logging out to switch character, your email address is visible on the login screen; tick this to automatically hide it\n\nThis is useful when streaming your gameplay to hide your personal info.");
-
     ImGui::Checkbox("Keep current quest when accepting a new one", &keep_current_quest_when_new_quest_added);
     ImGui::ShowHelp(
         "By default, Guild Wars changes your currently selected quest to the one you've just taken from an NPC.\nThis can be annoying if you don't realise your quest marker is now taking you somewhere different!\nTick this to make sure your current quest isn't changed when a new quest is added to your log."
@@ -2857,18 +2856,15 @@ void GameSettings::OnWriteChat(GW::HookStatus* status, GW::UI::UIMessage, void* 
 // Auto-drop UA when recasting
 void GameSettings::OnAgentStartCast(GW::HookStatus*, GW::UI::UIMessage, void* wParam, void*)
 {
-    if (!(wParam && drop_ua_on_cast)) {
-        return;
-    }
-    const struct Casting {
-        uint32_t agent_id;
-        GW::Constants::SkillID skill_id;
-    }* casting = static_cast<Casting*>(wParam);
-    if (casting->agent_id == GW::Agents::GetControlledCharacterId() && casting->skill_id == GW::Constants::SkillID::Unyielding_Aura) {
-        // Cancel UA before recast
-        const GW::Buff* buff = GW::Effects::GetPlayerBuffBySkillId(casting->skill_id);
-        if (buff && buff->skill_id != GW::Constants::SkillID::No_Skill) {
-            GW::Effects::DropBuff(buff->buff_id);
+    const auto packet = (GW::UI::UIPacket::kAgentSkillPacket*)wParam;
+    if (drop_ua_on_cast && packet && packet->skill_id == GW::Constants::SkillID::Unyielding_Aura) {
+        const auto buffs = GW::Effects::GetAgentBuffs(packet->agent_id);
+        if (buffs) {
+            for (auto& buff : *buffs) {
+                if (buff.skill_id == packet->skill_id) {
+                    GW::Effects::DropBuff(buff.buff_id);
+                }
+            }
         }
     }
 };

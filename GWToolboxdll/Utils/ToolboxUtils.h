@@ -27,6 +27,7 @@ public:
 };
 
 struct ImRect;
+struct ImColor;
 
 namespace GW {
     struct MapProp;
@@ -47,6 +48,31 @@ namespace GW {
     namespace Constants {
         enum class SkillID : uint32_t;
         enum class TitleID : uint32_t;
+        // Blunt, Piercing, Slashing, Cold, Lightning, Fire, Chaos, Dark, Holy, Nature, Sacrifice, Earth, Generic, Dark
+        enum class DamageType : uint8_t {
+            Blunt,
+            Piercing,
+            Slashing, 
+            Cold, 
+            Lightning,
+            Fire,
+            Chaos,
+            Dark,
+            Holy,
+            Nature, 
+            Sacrifice,
+            Earth,
+            Generic,
+            DarkDupe,
+            Count,
+            None = 0xff
+        };
+        static_assert(static_cast<uint8_t>(DamageType::Count) == 0xe);
+
+        enum class Rarity : uint8_t { White, Blue, Purple, Gold, Green, Unknown };
+
+        enum class ItemType : uint8_t;
+        enum class AttributeByte : uint8_t;
     }
 
     template <typename T>
@@ -140,7 +166,20 @@ namespace GW {
         bool BelongsToFrame(GW::UI::Frame* parent, GW::UI::Frame* child);
     }
     namespace Agents {
+        bool IsAgentCarryingBundle(uint32_t agent_id);
         void AsyncGetAgentName(const Agent* agent, std::wstring& out);
+    }
+    namespace Items {
+        GW::Constants::Rarity GetRarity(const GW::Item* item);
+        ImColor GetRarityColor(const GW::Constants::Rarity rarity);
+        const char* GetAttributeName(const GW::Constants::AttributeByte attribute);
+        const char* GetDamageTypeName(const GW::Constants::DamageType type);
+        const char* GetRarityName(const GW::Constants::Rarity rarity);
+        const char* GetItemTypeName(const GW::Constants::ItemType item_type);
+
+        uint32_t GetUses(GW::Item* item);
+        uint32_t GetAlcoholPointsPerUse(GW::Item* item);
+        bool IsAlcohol(GW::Item* item);
     }
 }
 

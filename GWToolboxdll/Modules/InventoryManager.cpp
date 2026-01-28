@@ -33,7 +33,11 @@
 #include <Windows/MaterialsWindow.h>
 #include <Windows/DailyQuestsWindow.h>
 #include <Windows/ArmoryWindow.h>
+#include <Windows/GWMarketWindow.h>
+
 #include <GWCA/GameEntities/Frame.h>
+#include <Utils/ToolboxUtils.h>
+#include <Utils/TextUtils.h>
 
 namespace {
     InventoryManager& Instance()
@@ -60,6 +64,37 @@ namespace {
         "Bag 1",
         "Bag 2"
     };
+
+        bool show_item_context_menu = false;
+    bool is_identifying = false;
+    bool is_identifying_all = false;
+    bool is_salvaging = false;
+    bool is_salvaging_all = false;
+    bool has_prompted_salvage = false;
+    bool show_salvage_all_popup = true;
+    bool salvage_listeners_attached = false;
+    bool only_use_superior_salvage_kits = false;
+
+    bool hide_unsellable_items = false;
+    bool hide_weapon_sets_and_customized_items = false;
+    bool hide_golds_from_merchant = false;
+
+
+    std::map<uint32_t, std::string> hide_from_merchant_items{};
+    bool salvage_rare_mats = false;
+    bool salvage_nicholas_items = true;
+    bool show_transact_quantity_popup = false;
+    bool transaction_listeners_attached = false;
+
+    bool wiki_link_on_context_menu = false;
+    bool right_click_context_menu_in_explorable = true;
+    bool right_click_context_menu_in_outpost = true;
+
+    std::map<GW::Constants::Bag, bool> bags_to_salvage_from{};
+
+    size_t identified_count = 0;
+    size_t salvaged_count = 0;
+
 
     bool wcseq(const wchar_t* a, const wchar_t* b) {
         return a && b && wcscmp(a, b) == 0;
@@ -905,6 +940,51 @@ namespace {
             } break;
         }
     }
+
+
+    void DrawMerchantHiddenItemsSettings() {
+        // Two-column layout for merchant items
+        ImGui::Columns(2, nullptr, true);
+
+        // Left column: Hidden items list
+        ImGui::Text("Hide items from merchant sell window:");
+        const float list_height = 200.f;
+        ImGui::BeginChild("hide_from_merchant_items", ImVec2(0.0F, list_height));
+        for (const auto& [item_id, item_name] : hide_from_merchant_items) {
+            ImGui::PushID(static_cast<int>(item_id));
+            ImGui::Text("%s (%d)", item_name.c_str(), item_id);
+            ImGui::SameLine();
+            const bool clicked = ImGui::Button(" X ");
+            ImGui::PopID();
+            if (clicked) {
+                Log::Flash("Removed Item %s with ID (%d)", item_name.c_str(), item_id);
+                hide_from_merchant_items.erase(item_id);
+                break;
+            }
+        }
+        ImGui::EndChild();
+
+        // Right column: Add new item
+        ImGui::NextColumn();
+
+        ImGui::Text("Add new item from merchant window:");
+        static int new_item_id;
+        static char buf[50];
+        ImGui::InputText("Item Name", buf, 50);
+        ImGui::InputInt("Item Model ID", &new_item_id);
+        bool submitted = ImGui::Button("Add");
+        if (submitted && new_item_id > 0) {
+            const auto new_id = static_cast<uint16_t>(new_item_id);
+            if (!hide_from_merchant_items.contains(new_id)) {
+                hide_from_merchant_items[new_id] = std::string(buf);
+                Log::Flash("Added Item %s with ID (%d)", buf, new_id);
+                std::ranges::fill(buf, '\0');
+                new_item_id = 0;
+            }
+        }
+
+        ImGui::Columns(1);
+    }
 } // namespace
 void InventoryManager::OnUIMessage(GW::HookStatus* status, const GW::UI::UIMessage message_id, void* wparam, void*)
 {
@@ -925,7 +1005,7 @@ void InventoryManager::OnUIMessage(GW::HookStatus* status, const GW::UI::UIMessa
             instance.pending_transaction.type = requesting_quote_type;
             instance.pending_transaction.item_id = packet->item_id;
             instance.pending_transaction.price = 0;
-            instance.show_transact_quantity_popup = true;
+            show_transact_quantity_popup = true;
             status->blocked = true;
         } break;
         // About to move an item
@@ -1747,7 +1827,7 @@ bool InventoryManager::IsSameItem(const GW::Item* item1, const GW::Item* item2)
     return item1 && item2
         && (!item1->model_file_id || item1->model_file_id == item2->model_file_id)
         && (item1->type != GW::Constants::ItemType::Dye || memcmp(&item1->dye,&item2->dye,sizeof(item1->dye)) == 0)
-        && wcseq(item1->name_enc, item2->name_enc);
+        && ::wcseq(item1->name_enc, item2->name_enc);
 }
 
 bool InventoryManager::IsPendingIdentify() const
@@ -1793,11 +1873,9 @@ void InventoryManager::DrawSettingsInternal()
     ImGui::TextUnformatted("Move items to trade on:");
     ImGui::ShowHelp("When trading with another player, you normally have to drag an item from inventory to the trade window. Enable an option below to make it easier.");
     ImGui::Indent();
-    if (ImGui::Checkbox("Double Click", &move_to_trade_on_double_click) && move_to_trade_on_alt_click)
-        move_to_trade_on_alt_click = false;
+    if (ImGui::Checkbox("Double Click", &move_to_trade_on_double_click) && move_to_trade_on_alt_click) move_to_trade_on_alt_click = false;
     ImGui::SameLine();
-    if (ImGui::Checkbox("Alt+Click", &move_to_trade_on_alt_click) && move_to_trade_on_alt_click)
-        move_to_trade_on_double_click = false;
+    if (ImGui::Checkbox("Alt+Click", &move_to_trade_on_alt_click) && move_to_trade_on_alt_click) move_to_trade_on_double_click = false;
     ImGui::Unindent();
     ImGui::Checkbox("Show 'Guild Wars Wiki' link on item context menu", &wiki_link_on_context_menu);
     ImGui::Checkbox("Prompt to change secondary profession when using a tome", &change_secondary_for_tome);
@@ -1833,38 +1911,14 @@ void InventoryManager::DrawSettingsInternal()
     ImGui::Checkbox("Auto re-use identification kit", &auto_reuse_id_kit);
     ImGui::ShowHelp("When a identification kit is used up immediately by identifying an item,\ncheck this box to 're-use' the kit ready for the next item.");
     ImGui::Separator();
-    ImGui::Text("Hide items from merchant sell window:");
-    ImGui::BeginChild("hide_from_merchant_items", ImVec2(0.0F, hide_from_merchant_items.size() * 25.0F));
-    for (const auto& [item_id, item_name] : hide_from_merchant_items) {
-        ImGui::PushID(static_cast<int>(item_id));
-        ImGui::Text("%s (%d)", item_name.c_str(), item_id);
-        ImGui::SameLine();
-        const bool clicked = ImGui::Button(" X ");
-        ImGui::PopID();
-        if (clicked) {
-            Log::Flash("Removed Item %s with ID (%d)", item_name.c_str(), item_id);
-            hide_from_merchant_items.erase(item_id);
-            break;
-        }
+
+    if (ImGui::CollapsingHeader("Manage Hidden Merchant Items",ImGuiTreeNodeFlags_SpanTextWidth)) {
+        ImGui::Indent();
+        DrawMerchantHiddenItemsSettings();
+        ImGui::Unindent();
     }
-    ImGui::EndChild();
+
     ImGui::Separator();
-    bool submitted = false;
-    ImGui::Text("Add new item from merchant window:");
-    static int new_item_id;
-    static char buf[50];
-    ImGui::InputText("Item Name", buf, 50);
-    ImGui::InputInt("Item Model ID", &new_item_id);
-    submitted |= ImGui::Button("Add");
-    if (submitted && new_item_id > 0) {
-        const auto new_id = static_cast<uint16_t>(new_item_id);
-        if (!hide_from_merchant_items.contains(new_id)) {
-            hide_from_merchant_items[new_id] = std::string(buf);
-            Log::Flash("Added Item %s with ID (%d)", buf, new_id);
-            std::ranges::fill(buf, '\0');
-            new_item_id = 0;
-        }
-    }
 }
 
 void InventoryManager::Update(float)
@@ -2312,7 +2366,14 @@ bool InventoryManager::DrawItemContextMenu(const bool open)
             goto end_popup;
         }
     }
-end_popup:
+    if (GWMarketWindow::CanSellItem(context_item.item())) {
+        if (ImGui::Button("Sell Item on Market", size)) {
+            ImGui::CloseCurrentPopup();
+            GWMarketWindow::AddItemToSell(context_item.item());
+            goto end_popup;
+        }
+    }
+    end_popup:
     ImGui::PopStyleColor();
     ImGui::PopStyleVar();
     ImGui::EndPopup();
@@ -2340,7 +2401,7 @@ void InventoryManager::ItemClickCallback(GW::HookStatus* status, GW::UI::UIPacke
                     im.CancelIdentify();
                     if (im.context_item.set(item)) {
                         IdentifyAllType identify_type = IdentifyAllType::All;
-                        im.is_identifying_all = true;
+                        is_identifying_all = true;
                         im.identify_all_type = identify_type;
                         im.IdentifyAll(identify_type);
                     }
@@ -2401,10 +2462,10 @@ void InventoryManager::ItemClickCallback(GW::HookStatus* status, GW::UI::UIPacke
             }
             return;
         case static_cast<GW::UI::UIPacket::ActionState>(999u): // Right click (via GWToolbox)
-            if (!Instance().right_click_context_menu_in_explorable && GW::Map::GetInstanceType() == GW::Constants::InstanceType::Explorable) {
+            if (!right_click_context_menu_in_explorable && GW::Map::GetInstanceType() == GW::Constants::InstanceType::Explorable) {
                 return;
             }
-            if (!Instance().right_click_context_menu_in_outpost && GW::Map::GetInstanceType() == GW::Constants::InstanceType::Outpost) {
+            if (!right_click_context_menu_in_outpost && GW::Map::GetInstanceType() == GW::Constants::InstanceType::Outpost) {
                 return;
             }
             if (!item) {
@@ -2412,13 +2473,13 @@ void InventoryManager::ItemClickCallback(GW::HookStatus* status, GW::UI::UIPacke
             }
 
             // Context menu applies
-            if (im.context_item.item_id == item->item_id && im.show_item_context_menu) {
+            if (im.context_item.item_id == item->item_id && show_item_context_menu) {
                 return; // Double looped.
             }
             if (!im.context_item.set(item)) {
                 return;
             }
-            im.show_item_context_menu = true;
+            show_item_context_menu = true;
             status->blocked = true;
             return;
         default:
@@ -2467,6 +2528,22 @@ bool InventoryManager::Item::CanBeIdentified() const
             return false;
     }
     return true;
+}
+
+bool InventoryManager::Item::IsOldSchool() const
+{
+    // Not OS if inscribable (Nightfall/EotN) or not salvagable
+    if (GetIsInscribable() || !IsSalvagable(false)) return false;
+
+    // OS off-hands (wand/focus/shield) have 2 inherent mods, no upgrade slots
+    switch (type) {
+        case GW::Constants::ItemType::Wand:
+        case GW::Constants::ItemType::Offhand:
+            return !IsUpgradable();
+    }
+
+    // Other OS weapons have 1 inherent + 1 suffix slot (so they ARE upgradable)
+    return IsWeapon() && !IsPrefixUpgradable();
 }
 
 bool InventoryManager::Item::IsSalvagable(bool check_bag) const
@@ -2539,16 +2616,16 @@ bool InventoryManager::Item::IsArmor() const
 
 bool InventoryManager::Item::IsHiddenFromMerchants() const
 {
-    if (Instance().hide_unsellable_items && !value) {
+    if (hide_unsellable_items && !value) {
         return true;
     }
-    if (Instance().hide_weapon_sets_and_customized_items && (customized || equipped)) {
+    if (hide_weapon_sets_and_customized_items && (customized || equipped)) {
         return true;
     }
-    if (Instance().hide_from_merchant_items.contains(model_id)) {
+    if (hide_from_merchant_items.contains(model_id)) {
         return true;
     }
-    if (Instance().hide_golds_from_merchant && GetRarity() == GW::Constants::Rarity::Gold) {
+    if (hide_golds_from_merchant && GetRarity() == GW::Constants::Rarity::Gold) {
         return true;
     }
     return false;
@@ -2625,19 +2702,7 @@ bool InventoryManager::Item::IsStorageItem() const
 
 GW::Constants::Rarity InventoryManager::Item::GetRarity() const
 {
-    if (IsGreen()) {
-        return GW::Constants::Rarity::Green;
-    }
-    if (IsGold()) {
-        return GW::Constants::Rarity::Gold;
-    }
-    if (IsPurple()) {
-        return GW::Constants::Rarity::Purple;
-    }
-    if (IsBlue()) {
-        return GW::Constants::Rarity::Blue;
-    }
-    return GW::Constants::Rarity::White;
+    return GW::Items::GetRarity(this);
 }
 
 bool InventoryManager::PendingItem::set(const Item* item)

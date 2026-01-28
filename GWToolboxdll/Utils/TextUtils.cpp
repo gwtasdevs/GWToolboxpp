@@ -258,6 +258,19 @@ namespace TextUtils {
         return {};
     }
 
+    std::wstring Replace(const std::wstring_view subject, const std::wstring& pattern, const std::wstring& replacement)
+    {
+        std::wregex regex(pattern);
+        std::wstring subject_str(subject);
+        return std::regex_replace(subject_str, regex, replacement);
+    }
+    std::string Replace(const std::string_view subject, const std::string& pattern, const std::string& replacement)
+    {
+        std::regex regex(pattern);
+        std::string subject_str(subject);
+        return std::regex_replace(subject_str, regex, replacement);
+    }
+
     // Convert a wide Unicode string to an UTF8 string
     std::string WStringToString(const std::wstring_view str)
     {
@@ -411,6 +424,36 @@ namespace TextUtils {
         return result;
     }
 
+    std::wstring SanitizeForCSV(const std::wstring_view str)
+    {
+        std::wstring result;
+        bool needs_quotes = false;
+
+        for (wchar_t c : str) {
+            if (c == L'"') {
+                result += L"\"\"";
+                needs_quotes = true;
+            }
+            else if (c == L',' || c == L'\n' || c == L'\r') {
+                if (c == L'\n' || c == L'\r') {
+                    result += L' ';
+                }
+                else {
+                    result += c;
+                }
+                needs_quotes = true;
+            }
+            else {
+                result += c;
+            }
+        }
+
+        if (needs_quotes) {
+            return L"\"" + result + L"\"";
+        }
+        return result;
+    }
+
     // Extract first unencoded substring from gw encoded string. Pass second and third args to know where the player name was found in the original string.
     std::wstring GetPlayerNameFromEncodedString(const wchar_t* message, const wchar_t** start_pos_out, const wchar_t** end_pos_out)
     {
@@ -495,6 +538,31 @@ namespace TextUtils {
         return str != end && errno != ERANGE;
     }
 
+    std::string RelativeTime(time_t utc_timestamp)
+    {
+        time_t now;
+        time(&now);
+        auto time_since_message = now - utc_timestamp;
+        char timetext[128];
+        const char* fmt = "%lld %s ago";
+        // decide if days, hours, minutes, seconds...
+        if (time_since_message / (60 * 60 * 24)) {
+            const auto days = time_since_message / (60 * 60 * 24);
+            snprintf(timetext, _countof(timetext), fmt, (long long)days, days > 1 ? "days" : "day");
+        }
+        else if (time_since_message / (60 * 60)) {
+            const auto hours = time_since_message / (60 * 60);
+            snprintf(timetext, _countof(timetext), fmt, (long long)hours, hours > 1 ? "hours" : "hour");
+        }
+        else if (time_since_message / 60) {
+            const auto minutes = time_since_message / 60;
+            snprintf(timetext, _countof(timetext), fmt, (long long)minutes, minutes > 1 ? "minutes" : "minute");
+        }
+        else {
+            snprintf(timetext, _countof(timetext), fmt, (long long)time_since_message, time_since_message > 1 ? "seconds" : "second");
+        }
+        return timetext;
+    }
     std::string TimeToString(time_t utc_timestamp, bool include_seconds)
     {
         const time_t now = time(nullptr);
@@ -538,7 +606,7 @@ namespace TextUtils {
         size_t pos = 0;
 
         while ((pos = in.find(token, start)) != std::string::npos) {
-            std::string part = in.substr(start, pos - start);
+            auto part = in.substr(start, pos - start);
             if (!part.empty()) {
                 // Skip empty substrings
                 result.push_back(part);
@@ -547,7 +615,30 @@ namespace TextUtils {
         }
 
         // Add the last remaining part if it's not empty
-        std::string lastPart = in.substr(start);
+        auto lastPart = in.substr(start);
+        if (!lastPart.empty()) {
+            result.push_back(lastPart);
+        }
+
+        return result;
+    }
+    std::vector<std::wstring> Split(const std::wstring& in, const std::wstring& token)
+    {
+        std::vector<std::wstring> result;
+        size_t start = 0;
+        size_t pos = 0;
+
+        while ((pos = in.find(token, start)) != std::wstring::npos) {
+            auto part = in.substr(start, pos - start);
+            if (!part.empty()) {
+                // Skip empty substrings
+                result.push_back(part);
+            }
+            start = pos + token.length();
+        }
+
+        // Add the last remaining part if it's not empty
+        auto lastPart = in.substr(start);
         if (!lastPart.empty()) {
             result.push_back(lastPart);
         }
@@ -555,21 +646,34 @@ namespace TextUtils {
         return result;
     }
 
-    std::string Join(const std::vector<std::string>& parts, const std::string& token)
+    std::wstring Join(const std::vector<std::wstring>& parts, const std::wstring& token)
     {
-        std::string result;
-        bool first = true; // Track if it's the first valid part
-
+        std::wstring result;
+        bool first = true;
         for (const auto& part : parts) {
             if (!part.empty()) {
                 if (!first) {
-                    result += token; // Add the delimiter before non-first parts
+                    result += token;
                 }
                 result += part;
-                first = false; // Switch after adding the first valid part
+                first = false;
             }
         }
-
+        return result;
+    }
+    std::string Join(const std::vector<std::string>& parts, const std::string& token)
+    {
+        std::string result;
+        bool first = true;
+        for (const auto& part : parts) {
+            if (!part.empty()) {
+                if (!first) {
+                    result += token;
+                }
+                result += part;
+                first = false;
+            }
+        }
         return result;
     }
 

@@ -11,7 +11,7 @@
 #include <Modules/Updater.h>
 #include <Modules/Resources.h>
 #include <Modules/ChatFilter.h>
-#include <Modules/ItemFilter.h>
+#include <Modules/ItemDrops.h>
 #include <Modules/DiscordModule.h>
 #include <Modules/TwitchModule.h>
 #include <Modules/PartyWindowModule.h>
@@ -35,7 +35,7 @@
 #include <Modules/CodeOptimiserModule.h>
 #include <Modules/VendorFix.h>
 #include <Modules/AudioSettings.h>
-#include <Modules/NPCVoiceModule.h>
+#include <Modules/TextToSpeechModule.h>
 #include <Modules/FpsFix.h>
 #include <Modules/GamepadModule.h>
 
@@ -63,6 +63,7 @@
 #include <Windows/ArmoryWindow.h>
 #include <Windows/EnemyWindow.h>
 #include <Windows/Pathfinding/PathfindingWindow.h>
+#include <Windows/DropTrackerWindow.h>
 #ifdef _DEBUG
 #include <Windows/PacketLoggerWindow.h>
 #include <Windows/DoorMonitorWindow.h>
@@ -70,6 +71,8 @@
 #include <Windows/SkillListingWindow.h>
 #endif
 #include <Windows/TargetInfoWindow.h>
+#include <Windows/GWMarketWindow.h>
+#include <Windows/InventorySorting.h>
 
 #include <Widgets/TimerWidget.h>
 #include <Widgets/HealthWidget.h>
@@ -138,7 +141,7 @@ namespace {
 #endif
         PluginModule::Instance(),
         ChatFilter::Instance(),
-        ItemFilter::Instance(),
+        ItemDrops::Instance(),
         PartyWindowModule::Instance(),
         ToastNotifications::Instance(),
         DiscordModule::Instance(),
@@ -159,7 +162,7 @@ namespace {
 #if 0
         ExtraWeaponSets::Instance(),
 #endif
-        NPCVoiceModule::Instance(),
+        TextToSpeechModule::Instance(),
         AudioSettings::Instance(),   
         FpsFix::Instance(),          
         GamepadModule::Instance()
@@ -212,7 +215,10 @@ namespace {
         DupingWindow::Instance(),
         ArmoryWindow::Instance(),
         EnemyWindow::Instance(),
-        TargetInfoWindow::Instance()
+        TargetInfoWindow::Instance(),
+        DropTrackerWindow::Instance(),
+        GWMarketWindow::Instance(),
+        InventorySorting::Instance()
     };
 
     bool modules_sorted = false;

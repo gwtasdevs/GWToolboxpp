@@ -102,6 +102,19 @@ namespace {
 
 namespace GuiUtils {
 
+    int DecimalPlaces(float value, int max_places)
+    {
+        const float epsilon = 0.0001f;
+        for (int i = 0; i < max_places; i++) {
+            float rounded = std::round(value);
+            if (std::abs(value - rounded) < epsilon) {
+                return i;
+            }
+            value *= 10.0f;
+        }
+        return max_places;
+    }
+
     void DrawSkillbar(const char* build_code) {
         GW::SkillbarMgr::SkillTemplate skill_template;
         if (!(build_code && *build_code && GW::SkillbarMgr::DecodeSkillTemplate(skill_template, build_code)))

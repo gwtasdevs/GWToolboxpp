@@ -4,11 +4,11 @@ set(CMAKE_GENERATOR_PLATFORM win32)
 
 project(gwtoolbox)
 
-set(GWTOOLBOXEXE_VERSION "4.4")
-set(GWTOOLBOXEXE_MODULE_VERSION "4,4,0,0") # used for exe module info. See GWToolbox/GWToolbox.rc
-set(GWTOOLBOXDLL_VERSION "8.6")
+set(GWTOOLBOXEXE_VERSION "4.6")
+set(GWTOOLBOXEXE_MODULE_VERSION "4,6,0,0") # used for exe module info. See GWToolbox/GWToolbox.rc
+set(GWTOOLBOXDLL_VERSION "8.7")
 set(GWTOOLBOXDLL_VERSION_BETA "") # can be anything. Marks beta version if not empty.
-set(GWTOOLBOX_MODULE_VERSION "8,6,0,0") # used for Dll module info. See GWToolboxdll/GWToolbox.rc
+set(GWTOOLBOX_MODULE_VERSION "8,7,0,0") # used for Dll module info. See GWToolboxdll/GWToolbox.rc
 
 
 if(MSVC_TOOLSET_VERSION LESS 143)
@@ -24,6 +24,7 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 add_compile_definitions(
     "NOMINMAX"
     "WIN32_LEAN_AND_MEAN"
+	"WOLFSSL_NO_OPTIONS_H"
 
     "GWTOOLBOXEXE_VERSION=\"${GWTOOLBOXEXE_VERSION}\""
     "GWTOOLBOXEXE_MODULE_VERSION=${GWTOOLBOXEXE_MODULE_VERSION}"

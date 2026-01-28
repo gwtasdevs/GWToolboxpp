@@ -140,4 +140,6 @@ namespace GuiUtils {
 
     // Create an ImGui representation of the skill bar
     void DrawSkillbar(const char* build_code);
+
+    int DecimalPlaces(float value, int max_places = 4);
 };

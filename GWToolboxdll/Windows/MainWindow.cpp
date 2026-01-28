@@ -104,11 +104,11 @@ void MainWindow::Draw(IDirect3DDevice9*)
                         }
                         module->visible = false;
                     }
-                }
-                for (const auto plugin : PluginModule::GetPlugins() | std::views::filter([](ToolboxPlugin* p) {
-                    return p && p->GetVisiblePtr() && p->ShowInMainMenu();
-                })) {
-                    *plugin->GetVisiblePtr() = false;
+                    for (const auto plugin : PluginModule::GetPlugins() | std::views::filter([](ToolboxPlugin* p) {
+                        return p && p->GetVisiblePtr() && p->ShowInMainMenu();
+                    })) {
+                        *plugin->GetVisiblePtr() = false;
+                    }
                 }
             }
             ImGui::PopID();

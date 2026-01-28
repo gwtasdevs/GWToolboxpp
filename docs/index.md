@@ -51,32 +51,32 @@ GWToolbox++ (or just *toolbox*), is a collection of several tools and enhancemen
 		<tr>
 			<td><a href="settings">Settings</a></td>
 			<td><a href="widgets#vanquish">Vanquish Monitor</a></td>
-			<td><a href="theme">Theme editor</a></td>
+			<td><a href="text-to-speech">Text-to-Speech</a></td>
 		</tr>
 		<tr>
 			<td><a href="travel">Travel</a></td>
 			<td><a href="widgets#alcohol">Alcohol Monitor</a></td>
-			<td><a href="settings#game_settings">URLs in equipment templates</a></td>
+			<td><a href="theme">Theme editor</a></td>
 		</tr>
 		<tr>
 			<td><a href="herobuilds">Hero Builds</a></td>
                         <td><a href="misc_widgets">Miscellaneous Widgets</a></td>
-			<td><a href="integrations">Integrations</a></td>
+			<td><a href="settings#game_settings">URLs in equipment templates</a></td>
 		</tr>
 		<tr>
 			<td><a href="trade">Trade</a></td>
 			<td><a href="items">Items</a></td>
-			<td><a href="input_modules">Input</a></td>
+			<td><a href="integrations">Integrations</a></td>
 		</tr>
 		<tr>
 			<td><a href="hallofmonuments">Hall of Monuments</a></td>
 			<td><a href="quest">Quest Features</a></td>
-			<td><a href="plugins">Plugins</a></td>
+			<td><a href="input_modules">Input</a></td>
 		</tr>
 		<tr>
 			<td><a href="completion">Completion</a></td>
 			<td><a href="party_window">Party</a></td>
-            <td></td>
+            <td><a href="plugins">Plugins</a></td>
 		</tr>
 		<tr>
 			<td><a href="armory_window">Armory</a></td>

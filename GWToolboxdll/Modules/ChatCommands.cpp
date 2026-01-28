@@ -918,8 +918,6 @@ namespace {
         ImGui::Bullet();
         ImGui::Text("'/age2' prints the instance time to chat.");
         ImGui::Bullet();
-        ImGui::Text("'/animation [me|target] [animation_id (1-2076)]' to make you (or a target) do a specific animation");
-        ImGui::Bullet();
         ImGui::Text("'/armor' is an alias for '/pingitem armor'.");
         ImGui::Bullet();
         ImGui::Text("'/bonds [remove|add] [party_member_index|all] [all|skill_id]' remove or add bonds from a single party member, or all party members");
@@ -3106,7 +3104,10 @@ void CHAT_CMD_FUNC(ChatCommands::CmdHeroBehaviour)
     }
 
     auto flag_hero = [behaviour](uint32_t agent_id) {
-        if (behaviour == 0xff) return GW::PartyMgr::SetHeroTarget(agent_id, GW::Agents::GetTargetId());
+        if (behaviour == 0xff) {
+            if (!GW::Agents::IsAgentCarryingBundle(agent_id))
+                GW::PartyMgr::SetHeroTarget(agent_id, GW::Agents::GetTargetId());
+        }
         return GW::PartyMgr::SetHeroBehavior(agent_id, (GW::HeroBehavior)behaviour);
     };
 

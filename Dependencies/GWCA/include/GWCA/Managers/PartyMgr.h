@@ -97,6 +97,6 @@ namespace GW {
         // Cancel party advertisement
         GWCA_API bool SearchPartyCancel();
         // Accept or reject a party invitation via party search window
-        GWCA_API bool SearchPartyReply(bool accept);
+        GWCA_API bool SearchPartyReply(uint32_t party_search_id, bool accept);
     };
 }

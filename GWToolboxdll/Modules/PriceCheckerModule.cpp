@@ -603,6 +603,7 @@ void PriceCheckerModule::LoadSettings(ToolboxIni* ini)
 void PriceCheckerModule::DrawSettingsInternal()
 {
     ImGui::SliderFloat("Price Checker high price threshold", &high_price_threshold, 100, 50000);
+    ImGui::ShowHelp("Rune and mod prices are fetched from https://kamadan.gwtoolbox.com.\nWhen an item price is found to be above this price threshold, the mod price will be gold when an item is hovered.");
 }
 
 const std::unordered_map<std::string,uint32_t>& PriceCheckerModule::FetchPrices() {

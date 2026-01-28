@@ -270,6 +270,7 @@ bool SettingsWindow::DrawSettingsSection(const char* section)
 
     ImGui::PushID(section);
     size_t i = 0;
+    if (is_showing) ImGui::Indent();
     for (const auto& setting_callback : settings_section->second) {
         //if (i && is_showing) ImGui::Separator();
         ImGui::PushID(i);
@@ -277,6 +278,7 @@ bool SettingsWindow::DrawSettingsSection(const char* section)
         i++;
         ImGui::PopID();
     }
+    if (is_showing) ImGui::Unindent();
     ImGui::PopID();
     return true;
 }

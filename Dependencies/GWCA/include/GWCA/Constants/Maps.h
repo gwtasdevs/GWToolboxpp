@@ -53,8 +53,8 @@ namespace GW {
             Dry_Top,
             Tangle_Root,
             Henge_of_Denravi_outpost,
-
-            Senjis_Corner_outpost = 51,
+            Test_Map_species_art, // "This is a debug map to allow testing of species art."
+            Senjis_Corner_outpost,
             Burning_Isle_outpost,
             Tears_of_the_Fallen,
             Scoundrels_Rise,
@@ -69,16 +69,16 @@ namespace GW {
             Stingray_Strand,
             Kessex_Peak,
             DAlessio_Arena_mission,
-
-            Burning_Isle = 67,
+            All_Call_Click_Point_1,
+            Burning_Isle,
             Frozen_Isle,
             Nomads_Isle,
             Druids_Isle,
             Isle_of_the_Dead_guild_hall,
             The_Underworld,
             Riverside_Province,
-
-            The_Hall_of_Heroes_arena_mission = 75,
+            Tournament_6, // Shares description with HoH arena below
+            The_Hall_of_Heroes_arena_mission,
             Broken_Tower_mission,
             House_zu_Heltzer_outpost,
             The_Courtyard_arena_mission,
@@ -129,7 +129,6 @@ namespace GW {
             Abaddons_Mouth,
             Hells_Precipice,
             Titans_Tears,
-
             Golden_Gates_mission,
             Scarred_Earth2,
             The_Eternal_Grove,
@@ -147,15 +146,15 @@ namespace GW {
             Druids_Overlook_outpost,
             Maguuma_Stade_outpost,
             Quarrel_Falls_outpost,
-
-            Gyala_Hatchery = 144,
+            Ascalon_Academy_outpost, // not in live game
+            Gyala_Hatchery,
             The_Catacombs,
             Lakeside_County,
             The_Northlands,
             Ascalon_City_pre_searing,       // ?
-            Ascalon_Academy,
-            Ascalon_Academy_PvP_battle_mission,
-            Ascalon_Academy_unk,
+            Ascalon_Academy_PvP_battle_mission_1,
+            Ascalon_Academy_PvP_battle_mission_2,
+            Ascalon_Academy_explorable,
             Heroes_Audience_outpost,
             Seekers_Passage_outpost,
             Destinys_Gorge_outpost,
@@ -189,13 +188,15 @@ namespace GW {
             Amnoon_Arena_mission,
             Deldrimor_Arena_mission,
             The_Crag_mission,
-
-            Random_Arenas_outpost = 188,
+            The_Underworld_gvg_mission, // UW guild hall not in live game
+            The_Underworld_guild_hall,
+            The_Underworld_guild_hall_preview,
+            Random_Arenas_outpost,
             Team_Arenas_outpost,
             Sorrows_Furnace,
             Grenths_Footprint,
-
-            Cavalon_outpost = 193,
+            All_Call_Click_Point_2,
+            Cavalon_outpost,
             Kaineng_Center_outpost,
             Drazach_Thicket,
             Jaya_Bluffs,
@@ -209,8 +210,8 @@ namespace GW {
             Unwaking_Waters_mission,
             Morostav_Trail,
             Deldrimor_War_Camp_outpost,
-
-            Heroes_Crypt_mission = 208,
+            Dragons_Thieves,
+            Heroes_Crypt_mission,
             Mourning_Veil_Falls,
             Ferndale,
             Pongmei_Valley,
@@ -231,10 +232,10 @@ namespace GW {
             Imperial_Sanctum_outpost_mission,
             Unwaking_Waters,
             Grenz_Frontier_mission,
-
-            Amatz_Basin = 230,
-
-            Shadows_Passage = 232,
+            The_Ancestral_Lands_mission,
+            Amatz_Basin,
+            Kaanai_Canyon_mission,
+            Shadows_Passage,
             Raisu_Palace,
             The_Aurios_Mines,
             Panjiang_Peninsula,
@@ -256,15 +257,25 @@ namespace GW {
             Ran_Musu_Gardens_outpost,
             Linnok_Courtyard,
             Dwayna_Vs_Grenth,
-
-            Sunjiang_District_explorable = 256,
-
-            Nahpui_Quarter_explorable = 265,
+            Dwaynas_Camp,
+            Grenths_Camp,
+            Sunjiang_District_explorable,
+            Minister_Chos_Estate_cinematic,
+            Zen_Daijun_cinematic,
+            The_Jade_Quarry_Kurzick_cinematic,
+            Nahpui_Quarter_cinematic,
+            Tahnnaka_Temple_cinematic,
+            Arborstone_cinematic,
+            Boreas_Seabed_cinematic,
+            Sunjiang_District_cinematic,
+            Nahpui_Quarter_explorable,
             Urgozs_Warren,
-
-            Tahnnakai_Temple_explorable = 269,
-
-            Altrumm_Ruins = 272,
+            The_Eternal_Grove_cinematic,
+            Gyala_Hatchery_cinematic,
+            Tahnnakai_Temple_explorable,
+            Raisu_Palace_cinematic,
+            Imperial_Sanctum_cinematic,
+            Altrumm_Ruins,
             Zos_Shivros_Channel,
             Dragons_Throat,
             Isle_of_Weeping_Stone_outpost,
@@ -291,13 +302,15 @@ namespace GW {
             The_Jade_Quarry_Kurzick_outpost,
             Unwaking_Waters_Luxon_outpost,
             Unwaking_Waters_Kurzick_outpost,
-
-            Etnaran_Keys_mission = 300,
+            Saltspray_Beach_mission,
+            Etnaran_Keys_mission,
             Raisu_Pavilion,
             Kaineng_Docks,
             The_Marketplace_outpost,
-
-            The_Deep = 307,
+            Vizunah_Square_Local_Quarter_cinematic,
+            Vizunah_Square_Foreign_Quarter_cinematic,
+            The_Jade_Quarry_Luxon_cinematic,
+            The_Deep,
             Ascalon_Arena_mission,
             Annihilation_mission,
             Kill_Count_Training_mission,
@@ -306,13 +319,24 @@ namespace GW {
             Saoshang_Trail,
             Shiverpeak_Arena_mission,
 
+            // The boat map icon for cross-campaign travel.  NF one is later
+            Travel_Battle_Isles,
+            Travel_Tyria,
+            Travel_Cantha,
+            
+            // Zaishen battles
             DAlessio_Arena_mission3 = 318,
             Amnoon_Arena_mission3,
             Fort_Koga_mission3,
             Heroes_Crypt_mission3,
             Shiverpeak_Arena_mission3,
 
-            Saltspray_Beach_Luxon_outpost = 328,
+            Fort_Aspenwood_Kurzick_cinematic,
+            Fort_Aspenwood_Luxon_cinematic,
+            The_Harvest_Ceremony_Kurzick_cinematic, // same cinematic but different teleport destination
+            The_Harvest_Ceremony_Luxon_cinematic,   // same cinematic but different teleport destination
+            Imperial_Sanctum_explorable,
+            Saltspray_Beach_Luxon_outpost,
             Saltspray_Beach_Kurzick_outpost,
             Heroes_Ascent_outpost,
             Grenz_Frontier_Luxon_outpost,
@@ -349,17 +373,17 @@ namespace GW {
             Isle_of_Jade,
             Imperial_Isle,
             Isle_of_Meditation,
-
-            Shing_Jea_Arena_mission = 366,
-
-            Dragon_Arena = 368,
+            Random_Arenas_Test,
+            Shing_Jea_Arena_mission,
+            All_Skills, // "This is a debug map which forces download of all skill effects"
+            Dragon_Arena,
             Jahai_Bluffs,
             Kamadan_mission,
             Marga_Coast,
             Fahranur_mission,
             Sunward_Marches,
-
-            Barbarous_Shore = 375,
+            Vortex_Elona, // Vortex travel icon on the Elona world map
+            Barbarous_Shore,
             Camp_Hojanu_outpost,
             Bahdok_Caverns,
             Wehhan_Terraces_outpost,
@@ -367,8 +391,8 @@ namespace GW {
             Arkjok_Ward,
             Yohlon_Haven_outpost,
             Gandara_the_Moon_Fortress,
-
-            The_Floodplain_of_Mahnkelon = 384,
+            Vortex_Realm_of_Torment, // Vortex travel icon on the Realm of Torment world map
+            The_Floodplain_of_Mahnkelon,
             Lions_Arch_Sunspears_in_Kryta,
             Turais_Procession,
             Sunspear_Sanctuary_outpost,
@@ -385,19 +409,23 @@ namespace GW {
             Basalt_Grotto_outpost,
             Forum_Highlands,
             Kaineng_Center_Sunspears_in_Cantha,
-
-            Resplendent_Makuun = 402,
+            Sebelkeh_Basilica, // Not in live game
+            Resplendent_Makuun,
             Honur_Hill_outpost,
             Wilderness_of_Bahdza,
-
-            Vehtendi_Valley = 406,
+            Sun_Docks_cinematic, // Arriving in Elona?
+            Vehtendi_Valley,
             Yahnur_Market_outpost,
 
+            // 408-412 are explorable maps all called "Here Be Dragons"
+            
             The_Hidden_City_of_Ahdashim = 413,
             The_Kodash_Bazaar_outpost,
             Lions_Gate,
-
-            The_Mirror_of_Lyss = 419,
+            Monastery_Overlook_cinematic, // Factions opening cutscene
+            Bejunkan_Pier_cinematic,
+            Lions_Gate_cinematic,
+            The_Mirror_of_Lyss,
             Secure_the_Refuge,
             Venta_Cemetery,
             Kamadan_Jewel_of_Istan_explorable,
@@ -430,12 +458,16 @@ namespace GW {
             Kamadan_Jewel_of_Istan_outpost,
             Gate_of_Torment_outpost,
             Gate_of_Anguish_elite_mission,
-
-            Nightfallen_Garden = 455,
+            Secure_the_Refuge_cinematic,
+            Evacuation_cinematic,
+            Test_Map_solo_areas, // "This is a debug map to allow multiplayer testing of current solo areas."
+            Nightfallen_Garden,
             Churrhir_Fields,
             Beknur_Harbor_outpost,
-
-            The_Underworld2 = 461,
+            Kodonur_Crossroads_cinematic,
+            Rilohn_Refuge_cinematic,
+            Pogahn_Passage_cinematic,
+            The_Underworld2,
             Heart_of_Abaddon,
             The_Underworld3,
             Nightfallen_Coast,
@@ -449,8 +481,7 @@ namespace GW {
             Domain_of_Secrets,
             Gate_of_Secrets_outpost,
             Domain_of_Anguish,
-
-            Ooze_Pit_mission = 475,
+            Ooze_Pit_mission,
             Jennurs_Horde,
             Nundu_Bay,
             Gate_of_Desolation,
@@ -473,8 +504,8 @@ namespace GW {
             Gate_of_Madness,
             Abaddons_Gate,
             Sunspear_Arena,
-
-            Ice_Cliff_Chasms = 499,
+            Travel_Elona, // Boat travel icon in Elona
+            Ice_Cliff_Chasms,
             Bokka_Amphitheatre,
             Riven_Earth,
             The_Astralarium_outpost,
@@ -487,19 +518,31 @@ namespace GW {
             Tsumei_Village_mission,
             Seitung_Harbor_mission_2,
             Tsumei_Village_mission_2,
-
-            Drakkar_Lake = 513,
-
-            Minister_Chos_Estate_mission_2 = 512,
-
-            Uncharted_Isle_outpost = 529,
+            Minister_Chos_Estate_mission_2,
+            Drakkar_Lake,
+            Island_of_Shehkah_cinematic, // Nightfall opening cutscene
+            Jokanur_Diggings_cinematic,
+            Blacktide_Den_cinematic,
+            Consulate_Docks_cinematic,
+            Tihark_Orchard_cinematic,
+            Dzagonur_Bastion_cinematic,
+            Hidden_City_of_Ahdashim_cinematic,
+            Grand_Court_of_Sebelkeh_cinematic,
+            Jennurs_Horde_cinematic,
+            Nundu_Bay_cinematic,
+            Gates_of_Desolation_cinematic,
+            Ruins_of_Morah_cinematic,
+            Domain_of_Pain_cinematic,
+            Gate_of_Madness_cinematic,
+            Abaddons_Gate_cinematic,
+            Uncharted_Isle_outpost,
             Isle_of_Wurms_outpost,
             Uncharted_Isle,
             Isle_of_Wurms,
             Uncharted_Isle_mission,
             Isle_of_Wurms_mission,
-
-            Sunspear_Arena_mission = 536,
+            Ahmtur_Arena_mission, // Not in live game
+            Sunspear_Arena_mission,
             Corrupted_Isle_outpost,
             Isle_of_Solitude_outpost,
             Corrupted_Isle,
@@ -519,13 +562,20 @@ namespace GW {
             Varajar_Fells,
             Dajkah_Inlet,
             The_Shadow_Nexus,
-
-            Sparkfly_Swamp = 558,
+            Chahbek_Village_cutscene,
+            Throne_Of_Secrets_outpost, // Not in live game
+            Sparkfly_Swamp,
             Gate_of_the_Nightfallen_Lands_outpost,
             Cathedral_of_Flames_Level_1,
             The_Troubled_Keeper,
 
-            Verdant_Cascades = 566,
+            // Landmarks on the Elona world map
+            Fortress_of_Jahai,
+            Halls_of_Chokhin,
+            Citadel_of_Dzagon,
+            Dynastic_Tombs,
+            
+            Verdant_Cascades,
             Cathedral_of_Flames_Level_2,
             Cathedral_of_Flames_Level_3,
             Magus_Stones,
@@ -546,12 +596,20 @@ namespace GW {
             Arachnis_Haunt_Level_1,
             Arachnis_Haunt_Level_2,
 
-            Fetid_River_mission = 593,
+            // 586-591 are all dungeon maps called "TEMP"
+            
+            Five_Team_Test = 592, // "5 team test"
+            Fetid_River_mission,
+            Overlook_mission, // Heroes Ascent unused/prototype map
+            Cemetery_mission, // Heroes Ascent unused/prototype map
+            Forgotten_Shrines_mission,
+            Track_mission, // Heroes Ascent unused/prototype map
+            Antechamber_mission,
+            Collision_mission, // Heroes Ascent unused/prototype map
+            The_Hall_of_Heroes2, // Actual HA hall of heroes?  Unused?
 
-            Forgotten_Shrines_mission = 596,
-
-            Antechamber_mission = 598,
-
+            // 601-603 are all dungeon maps called "TEMP"
+            
             Vloxen_Excavations_Level_1 = 604,
             Vloxen_Excavations_Level_2,
             Vloxen_Excavations_Level_3,
@@ -559,6 +617,8 @@ namespace GW {
             Heart_of_the_Shiverpeaks_Level_2,
             Heart_of_the_Shiverpeaks_Level_3,
 
+            // 610,611 are dungeon maps with no name
+            
             Bloodstone_Caves_Level_1 = 612,
             Bloodstone_Caves_Level_2,
             Bloodstone_Caves_Level_3,
@@ -624,8 +684,8 @@ namespace GW {
             Warband_Training,
             Boreal_Station_outpost,
             Catacombs_of_Kathandrax_Level_3,
-
-            Attack_of_the_Nornbear = 678,
+            Hall_of_Primordus, // Unused explorable area
+            Attack_of_the_Nornbear,
             Cinematic_Cave_Norn_Cursed,
             Cinematic_Steppe_Interrogation,
             Cinematic_Interior_Research,
@@ -646,23 +706,29 @@ namespace GW {
             Mano_a_Norn_o,
             Service_Practice_Dummy,
             Hero_Tutorial,
-
+            Prototype_Map,
             The_Norn_Fighting_Tournament = 700,
             Secret_Lair_of_the_Snowmen,
             Norn_Brawling_Championship,
             Kilroys_Punchout_Training,
             Fronis_Irontoes_Lair_mission,
             The_Justiciars_End,
-
-            The_Great_Norn_Alemoot = 707,
-            Varajar_Fells_unknown,          // quest map? cinematic?
-
-            Epilogue = 710,
+            Designer_Test_Map,
+            The_Great_Norn_Alemoot,
+            Varajar_Fells_Bear_Club_quest,
+            The_Crossing_mission2, // Unused RA arena?
+            Epilogue,
             Insidious_Remnants,
-
-            Attack_on_Jaliss_Camp = 717,
-
-            Costume_Brawl_outpost = 721,
+            The_Beachhead_mission2, // Unused RA arena?
+            Bombardment_mission2, // Unused RA arena?
+            Desert_Sands_mission2, // Unused RA arena?
+            MISSION_CINEMATIC_MISSION_PACK_TYRIA_INTRODUCTION,
+            The_Battlefield_cinematic,
+            Attack_on_Jaliss_Camp,
+            The_Hierophants_Stronghold_cinematic,
+            The_Asura_Plan_cinematic,
+            Creature_Test_Map,
+            Costume_Brawl_outpost,
             Whitefury_Rapids_mission,
             Kysten_Shore_mission,
             Deepway_Ruins_mission,
@@ -671,13 +737,42 @@ namespace GW {
             Special_Ops_Flame_Temple_Corridor,
             Special_Ops_Dragons_Gullet,
             Special_Ops_Grendich_Courthouse,
-            The_Tengu_Accords,
-            The_Battle_of_Jahai,
-            The_Flight_North,
-            The_Rise_of_the_White_Mantle,
-
+            
+            // Cinematics replayed at the Scrying Pool in Hall of Monuments
+            Encounter_in_the_Depths_hom_cinematic,
+            Into_the_North_hom_cinematic,
+            Arrival_at_the_Eye_hom_cinematic,
+            Joras_Curse_hom_cinematic,
+            The_Nornbear_hom_cinematic,
+            Blood_Washes_Blood_hom_cinematic,
+            Joras_Redemption_hom_cinematic,
+            Sign_of_the_Raven_hom_cinematic,
+            Olaf_and_Ogden_hom_cinematic,
+            Audience_with_the_King_hom_cinematic,
+            The_Battlefield_hom_cinematic,
+            The_Charr_Prisoner_hom_cinematic,
+            The_Warband_hom_cinematic,
+            Questions_and_Answers_hom_cinematic,
+            The_Hierophants_Stronghold_hom_cinematic,
+            Revolution_hom_cinematic,
+            The_Asura_Plan_hom_cinematic,
+            Bookah_hom_cinematic,
+            Oola_hom_cinematic,
+            Gadd_hom_cinematic,
+            At_the_Bloodstone_hom_cinematic,
+            Before_the_Battle_hom_cinematic,
+            Price_of_Victory_hom_cinematic,
+            The_Great_Dwarf_hom_cinematic,
+            The_Great_Destroyer_hom_cinematic,
+            Ogdens_Benediction_hom_cinematic,
+            
+            // EotN map travel icons
+            Asura_Gate_Tyria,
+            Asura_Gate_Cantha,
+            Asura_Gate_Elona,
+            
             // "Mission" maps, used for icon status on world map
-            Finding_the_Bloodstone_mission = 759,
+            Finding_the_Bloodstone_mission,
             Genius_Operated_Living_Enchanted_Manifestation_mission,
             Against_the_Charr_mission,
             Warband_of_brothers_mission,
@@ -688,15 +783,27 @@ namespace GW {
             Blood_Washes_Blood_mission,
             A_Gate_Too_Far_mission,
             The_Elusive_Golemancer_mission,
+            The_Tengu_Accords,
+            The_Battle_of_Jahai,
+            The_Flight_North,
+            The_Rise_of_the_White_Mantle,
+            Battle_Isles_Marketplace, // Xunlai Marketplace?
+            MISSION_CINEMATIC_MISSION_PACK_CANTHA_INTRODUCTION,
+            Mission_Pack_Test,
+            MISSION_CINEMATIC_MISSION_PACK_ELONA_INTRODUCTION,
+            MISSION_CINEMATIC_MISSION_PACK_GWX_INTRODUCTION,
+            Piken_Square_pre_Searing_outpost,
 
-            Piken_Square_pre_Searing_outpost = 779,
-
+            // Map 780 has invalid continent, name and description
+            
             Secret_Lair_of_the_Snowmen2 = 781,  // ?
             Secret_Lair_of_the_Snowmen3,        // ?
             Droknars_Forge_cinematic,           // ?
             Isle_of_the_Nameless_PvP,
-
-            Temple_of_the_Ages_ROX = 788,
+            Rollerbeetle_Racing_HeroBattles,
+            Dragon_Arena_gvg,
+            Dwayna_vs_Grenth_gvg,
+            Temple_of_the_Ages_ROX,
             Wajjun_Bazaar_POX,
             Bokka_Amphitheatre_NOX,
             Secret_Underground_Lair,
@@ -705,6 +812,9 @@ namespace GW {
             Zaishen_Menagerie_Grounds,
             Zaishen_Menagerie_outpost,
             Codex_Arena_outpost,
+            
+            // Maps 797-805 are dungeon maps with the name "..."
+            
             The_Underworld_Something_Wicked_This_Way_Comes = 806,
             The_Underworld_Dont_Fear_the_Reapers,
             Lions_Arch_Halloween_outpost,
@@ -721,26 +831,49 @@ namespace GW {
             Kamadan_Jewel_of_Istan_Wintersday_outpost,
             Kamadan_Jewel_of_Istan_Canthan_New_Year_outpost,
             Eye_of_the_North_outpost_Wintersday_outpost,
-
-            War_in_Kryta_Talmark_Wilderness = 837,
+            Tester_HUB,
+            
+            DAlessio_Arena_mission4,
+            Amnoon_Arena_mission4,
+            Churranu_Island_Arena_mission2,
+            Fort_Koga_mission4,
+            Petrified_Arena_mission2,
+            Heroes_Crypt_mission4,
+            Seabed_Arena_mission2,
+            Deldrimor_Arena_mission2,
+            Brawlers_Pit_mission2,
+            The_Crag_mission2,
+            Sunspear_Arena_mission2,
+            Shing_Jea_Arena_mission2,
+            Ascalon_Arena_mission2,
+            Shiverpeak_Arena_mission4,
+            
+            War_in_Kryta_Talmark_Wilderness,
             War_in_Kryta_Trial_of_Zinn,
             War_in_Kryta_Divinity_Coast,
             War_in_Kryta_Lions_Arch_Keep,
             War_in_Kryta_DAlessio_Seaboard,
             War_in_Kryta_The_Battle_for_Lions_Arch,
-            War_in_Kryta_Riverside_Province, // cinematic ?
+            War_in_Kryta_Riverside_Province,
             War_in_Kryta_Lions_Arch,
             War_in_Kryta_The_Mausoleum,
             War_in_Kryta_Rise,
             War_in_Kryta_Shadows_in_the_Jungle,
             War_in_Kryta_A_Vengeance_of_Blades,
             War_in_Kryta_Auspicious_Beginnings,
-
-            Olafstead_cinematic = 854,
+            Beetletun_explorable, // Is this part of War in Kryta?  or Rise?
+            
+            // War in Kryta?  Festival event quests?
+            Aurora_Glade2, // explorable
+            Majestys_Rest2,
+            Watchtower_Coast2,
+            
+            Olafstead_cinematic,
             The_Great_Snowball_Fight_of_the_Gods__Operation_Crush_Spirits,
             The_Great_Snowball_Fight_of_the_Gods__Fighting_in_a_Winter_Wonderland,
             Embark_Beach,
-
+            Regent_Valley_1059_AE,
+            Lakeside_County_1059_AE,
             Dragons_Throat_area__What_Waits_in_Shadow = 860,
             Kaineng_Center_Winds_of_Change__A_Chance_Encounter,
             The_Marketplace_area__Tracking_the_Corruption,

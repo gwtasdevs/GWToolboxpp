@@ -1086,7 +1086,7 @@ namespace Pathing {
 
         {
             const size_t max_size = m_mp->m_aabbs.size();
-            std::unique_ptr<const AABB*[]> open(new const AABB*[max_size]);
+            std::unique_ptr<const AABB*[]> open(new const AABB*[max_size]());
             std::unique_ptr<bool[]> visited(new bool[max_size]()); // () for zero-init
             if (m_mp->HasLineOfSight(start, goal, open, visited, current_blocked_planes)) {
                 m_path.insertPoint(start);

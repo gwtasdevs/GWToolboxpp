@@ -26,6 +26,9 @@
 using nlohmann::json;
 namespace {
 
+    bool add_salvage_info_to_description = true;
+    bool add_nicholas_info_to_description = true;
+
     void SignalItemDescriptionUpdated(const wchar_t* enc_name) {
         // Now we've got the wiki info parsed, trigger an item update ui message; this will refresh the item tooltip
         GW::GameThread::Enqueue([enc_name] {
@@ -182,10 +185,10 @@ namespace {
         const auto current_time = time(nullptr);
         NewLineIfNotEmpty(description);
         if (collection_time <= current_time) {
-            description += std::format(L"{}\x10a\x108\x107Nicholas The Traveller collects {} of these right now!\x1\x1", GW::EncStrings::ItemUnique, nicholas_info->quantity);
+            description += std::format(L"{}\x10a\x108\x107Nicholas The Traveler collects {} of these right now!\x1\x1", GW::EncStrings::ItemUnique, nicholas_info->quantity);
         }
         else {
-            description += std::format(L"{}\x10a\x108\x107Nicholas The Traveller collects {} of these in {}!\x1\x1", GW::EncStrings::ItemUnique, nicholas_info->quantity, PrintRelativeTime(collection_time));
+            description += std::format(L"{}\x10a\x108\x107Nicholas The Traveler collects {} of these in {}!\x1\x1", GW::EncStrings::ItemUnique, nicholas_info->quantity, PrintRelativeTime(collection_time));
         }
     }
     std::wstring tmp_item_description;
@@ -195,8 +198,10 @@ namespace {
         if (*out_desc != tmp_item_description.data()) {
             tmp_item_description.assign(*out_desc ? *out_desc : L"");
         }
-        AppendSalvageInfoDescription(item_id, tmp_item_description);
-        AppendNicholasInfo(item_id, tmp_item_description);
+        if (add_salvage_info_to_description)
+            AppendSalvageInfoDescription(item_id, tmp_item_description);
+        if (add_nicholas_info_to_description)
+            AppendNicholasInfo(item_id, tmp_item_description);
         if (!tmp_item_description.empty()) {
             bool is_valid = GW::UI::IsValidEncStr(tmp_item_description.data());
             if (is_valid) {
@@ -222,8 +227,10 @@ namespace {
             if (agent->owner && agent->owner != GW::Agents::GetControlledCharacterId())
                 break;
             const auto item_id = agent->item_id;
-            AppendSalvageInfoDescription(item_id, tmp_item_name_tag);
-            AppendNicholasInfo(item_id, tmp_item_name_tag);
+            if (add_salvage_info_to_description)
+                AppendSalvageInfoDescription(item_id, tmp_item_name_tag);
+            if (add_nicholas_info_to_description)
+                AppendNicholasInfo(item_id, tmp_item_name_tag);
             packet->extra_info_enc = tmp_item_name_tag.data();
         }
 
@@ -249,13 +256,35 @@ void SalvageInfoModule::Terminate()
 void SalvageInfoModule::SaveSettings(ToolboxIni* ini)
 {
     ToolboxModule::SaveSettings(ini);
+    SAVE_BOOL(add_nicholas_info_to_description);
+    SAVE_BOOL(add_salvage_info_to_description);
 }
 
 void SalvageInfoModule::LoadSettings(ToolboxIni* ini)
 {
     ToolboxModule::LoadSettings(ini);
+    LOAD_BOOL(add_nicholas_info_to_description);
+    LOAD_BOOL(add_salvage_info_to_description);
+}
+
+void SalvageInfoModule::DrawSettingsInternal()
+{
+    ImGui::TextDisabled("This module adds salvage and Nicholas information to item tooltips");
+    ImGui::Checkbox("Show salvage materials in item description", &add_salvage_info_to_description);
+    ImGui::ShowHelp("When hovering over a salvageable item, display which common and rare materials can be salvaged from it");
+    ImGui::Checkbox("Show Nicholas the Traveler info in item description", &add_nicholas_info_to_description);
+    ImGui::ShowHelp("When hovering over an item that Nicholas collects, display when he will collect it and how many he wants");
 }
 
 void SalvageInfoModule::RegisterSettingsContent()
 {
+    ToolboxModule::RegisterSettingsContent(
+        "Inventory Settings", ICON_FA_BOXES,
+        [this](const std::string&, const bool is_showing) {
+            if (is_showing) {
+                DrawSettingsInternal();
+            }
+        },
+        1.1f
+    );
 }

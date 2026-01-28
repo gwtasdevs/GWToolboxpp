@@ -20,7 +20,7 @@ file(GLOB SOURCES
     "Windows/Pathfinding/*.h"
     "Windows/Pathfinding/*.cpp"
     ) 
-      
+       
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" FILES ${SOURCES})
 target_sources(GWToolboxdll PRIVATE ${SOURCES})
  
@@ -29,7 +29,7 @@ target_compile_definitions(GWToolboxdll PRIVATE
     "_USRDLL"
     "GWCA_IMPORT"
     )
-
+      
 target_compile_options(GWToolboxdll PRIVATE /W4 /WX /Gy /utf-8)
 target_compile_options(GWToolboxdll PRIVATE $<$<CONFIG:Debug>:/ZI /Od>)
 target_compile_options(GWToolboxdll PRIVATE $<$<CONFIG:RelWithDebInfo>:/Zi>)

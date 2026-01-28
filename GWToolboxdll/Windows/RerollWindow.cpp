@@ -652,7 +652,6 @@ void RerollWindow::Update(float)
                 GW::PartyInfo* player_party = GetPlayerParty();
                 if (player_party && player_party->GetPartySize() > 1) {
                     GW::PartyMgr::LeaveParty();
-                    GW::PartyMgr::KickAllHeroes();
                 }
                 reroll_stage = WaitForEmptyParty;
                 reroll_timeout = (reroll_stage_set = TIMER_INIT()) + 3000;

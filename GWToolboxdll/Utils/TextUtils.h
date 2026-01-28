@@ -16,6 +16,8 @@ namespace TextUtils {
     std::wstring SanitiseFilename(std::wstring_view str);
     std::string PrintFilename(std::string path);
     std::wstring PrintFilename(std::wstring path);
+    std::wstring Replace(const std::wstring_view subject, const std::wstring& pattern, const std::wstring& replacement);
+    std::string Replace(const std::string_view subject, const std::string& pattern, const std::string& replacement);
 
     std::string Base64Decode(std::string_view str);
 
@@ -34,6 +36,7 @@ namespace TextUtils {
     std::wstring RemoveDiacritics(std::wstring_view s);
 
     std::wstring SanitizePlayerName(std::wstring_view str);
+    std::wstring SanitizeForCSV(const std::wstring_view str);
     std::string SanitizePlayerName(std::string_view str);
     std::wstring GetPlayerNameFromEncodedString(const wchar_t* message, const wchar_t** start_pos_out = nullptr, const wchar_t** end_pos_out = nullptr);
 
@@ -44,11 +47,18 @@ namespace TextUtils {
     bool ParseFloat(const char* str, float* val);
     bool ParseFloat(const wchar_t* str, float* val);
 
+    // e.g. 8 Days ago
+    std::string RelativeTime(time_t utc_timestamp);
     std::string TimeToString(time_t utc_timestamp = 0, bool include_seconds = false);
     std::string TimeToString(uint32_t utc_timestamp, bool include_seconds = false);
     std::string TimeToString(FILETIME utc_timestamp, bool include_seconds = false);
+
     std::vector<std::string> Split(const std::string& in, const std::string& token);
-    // Turn and array of strings into a single string
+    std::vector<std::wstring> Split(const std::wstring& in, const std::wstring& token);
+
+
+    // Join function with string_view support
+    std::wstring Join(const std::vector<std::wstring>& parts, const std::wstring& token);
     std::string Join(const std::vector<std::string>& parts, const std::string& token);
     // Capitalise the first letter of each word. Replaces original.
     std::string UcWords(std::string_view input);
@@ -273,4 +283,5 @@ namespace TextUtils {
         }
         return subject;
     }
-}
+
+} // namespace TextUtils
