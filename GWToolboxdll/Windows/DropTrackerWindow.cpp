@@ -92,9 +92,9 @@ namespace {
 
                 ImGui::TextColored(GW::Items::GetRarityColor(drop->rarity), "%s", drop->GetItemName()->string().c_str());
                 ImGui::TableNextColumn();
-                ImGui::Text("%ls", GW::Items::GetItemTypeName(drop->type));
+                ImGui::Text("%s", GW::Items::GetItemTypeName(drop->type));
                 ImGui::TableNextColumn();
-                ImGui::Text("%ls", GW::Items::GetRarityName(drop->rarity));
+                ImGui::Text("%s", GW::Items::GetRarityName(drop->rarity));
                 ImGui::TableNextColumn();
                 ImGui::Text("%d", drop->quantity);
                 ImGui::TableNextColumn();
@@ -260,7 +260,7 @@ namespace {
 
                         ImGui::TableNextColumn();
                         if (drop->requirement_attribute != GW::Constants::AttributeByte::None) {
-                            ImGui::Text("%d %ls", drop->requirement_value, GW::Items::GetAttributeName(drop->requirement_attribute));
+                            ImGui::Text("%d %s", drop->requirement_value, GW::Items::GetAttributeName(drop->requirement_attribute));
                         }
 
                         ImGui::TableNextColumn();

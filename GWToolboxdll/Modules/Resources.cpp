@@ -632,11 +632,13 @@ bool Resources::Download(const std::string& url, std::string& response, int& sta
     r.SetUrl(url.c_str());
     r.Execute();
     statusCode = r.GetStatusCode();
+    response = std::move(r.GetContent());
     if (!r.IsSuccessful()) {
-        response = std::format("Failed to download {}, curl status {} {}", url, r.GetStatusCode(), r.GetStatusStr());
+        if (response.empty()) {
+            response = std::format("Failed to download {}, curl status {} {}", url, r.GetStatusCode(), r.GetStatusStr());
+        }
         return false;
     }
-    response = std::move(r.GetContent());
     return true;
 }
 

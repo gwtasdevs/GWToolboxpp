@@ -40,13 +40,13 @@ namespace GW {
 
     struct YNode : Node { // type = 1
         /* +h0008 */ Vec2f    pos;
-        /* +h0010 */ Node     *left;
-        /* +h0014 */ Node     *right;
+        /* +h0010 */ Node     *above;
+        /* +h0014 */ Node     *below;
     };
     static_assert(sizeof(YNode) == 24, "struct YNode has incorrect size");
 
     struct SinkNode : Node { // type = 2
-        /* +h0008 */ PathingTrapezoid **trapezoid;
+        /* +h0008 */ PathingTrapezoid *trapezoid;
     };
     static_assert(sizeof(SinkNode) == 12, "struct SinkNode has incorrect size");
 

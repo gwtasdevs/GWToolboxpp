@@ -1738,8 +1738,6 @@ namespace {
 void GWMarketWindow::Initialize()
 {
     ToolboxWindow::Initialize();
-    ConnectWebSocket();
-    Log::Log("Market Browser initialized");
 
     const GW::UI::UIMessage ui_messages[] = {GW::UI::UIMessage::kMapLoaded};
     for (auto ui_message : ui_messages) {

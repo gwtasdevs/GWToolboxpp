@@ -291,26 +291,18 @@ void HallOfMonumentsModule::AsyncGetAccountAchievements(const std::wstring& char
 {
     if (character_name.empty()) return;
     out->state = HallOfMonumentsAchievements::State::Loading;
-    std::string character_name_s = TextUtils::WStringToString(character_name);
-    for (size_t x = 0; x < character_name_s.length(); x++) {
-        if (x == 0) {
-            character_name_s[x] = static_cast<char>(toupper(character_name_s[x]));
-        }
-        else if (character_name_s[x - 1] == ' ') {
-            character_name_s[x] = static_cast<char>(toupper(character_name_s[x]));
-        }
-    }
     out->character_name = character_name;
 
     std::string char_name_escaped;
-    EscapeUrl(char_name_escaped, character_name_s.c_str());
+    EscapeUrl(char_name_escaped, TextUtils::UcWords(TextUtils::WStringToString(character_name)).c_str());
     const auto url_str = std::format("https://hom.guildwars2.com/character/{}", char_name_escaped);
     Resources::Instance().EnqueueWorkerTask([cpy = url_str, out, callback]() {
         out->state = HallOfMonumentsAchievements::State::Fetching;
         std::string response;
         bool success = Resources::Instance().Download(cpy, response);
         if (!success) {
-            Log::Log("Failed to load account hom code %s\n%s", out->character_name.c_str(), response.c_str());
+            Log::Log("Failed to load account hom code %s\n%s", TextUtils::WStringToString(out->character_name).c_str(), response.c_str());
+            out->error_str_from_request = std::move(response);
             out->state = HallOfMonumentsAchievements::State::Error;
             if (callback) {
                 callback(out);

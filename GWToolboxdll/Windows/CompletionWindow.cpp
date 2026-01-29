@@ -424,6 +424,13 @@ namespace {
     {
         if (result->state != HallOfMonumentsAchievements::State::Done) {
             Log::LogW(L"Failed to load Hall of Monuments achievements for %s", result->character_name.c_str());
+            if (result->error_str_from_request.contains("ErrCharacterNotFound")) {
+                auto found = character_completion.find(result->character_name);
+                if (found != character_completion.end()) {
+                    delete found->second;
+                    character_completion.erase(found);
+                }
+            }
             return;
         }
         //Log::InfoW(L"Loaded Hom for %s", result->character_name);

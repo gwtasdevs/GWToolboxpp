@@ -1326,8 +1326,7 @@ void ChatCommands::DrawSettingsInternal()
 
 void ChatCommands::LoadSettings(ToolboxIni* ini)
 {
-    LOAD_BOOL(forward_fix_z);
-    LOAD_FLOAT(cam_speed);
+
     LOAD_UINT(default_title_id);
 
     for (const auto* it : cmd_aliases) {
@@ -1366,8 +1365,6 @@ void ChatCommands::LoadSettings(ToolboxIni* ini)
 
 void ChatCommands::SaveSettings(ToolboxIni* ini)
 {
-    SAVE_BOOL(forward_fix_z);
-    SAVE_FLOAT(cam_speed);
     SAVE_UINT(default_title_id);
 
     const auto section_name = "Chat Command Aliases";
@@ -1433,8 +1430,6 @@ void ChatCommands::Initialize()
         {L"hide", CmdHide},
         {L"toggle", CmdToggle},
         {L"tb", CmdTB},
-        {L"camera", CmdCamera},
-        {L"cam", CmdCamera},
         {L"chest", CmdChest},
         {L"duncan", CmdDuncan},
         {L"xunlai", CmdChest},
@@ -1567,6 +1562,7 @@ void ChatCommands::Update(const float delta)
     skill_to_use.Update();
     npc_to_find.Update();
     quest_ping.Update();
+
 }
 
 void ChatCommands::QuestPing::Init()
@@ -2136,36 +2132,6 @@ void CHAT_CMD_FUNC(ChatCommands::CmdToggle)
                 break;
         }
         SetWindowVisible(gw_window, set);
-    }
-}
-
-void CHAT_CMD_FUNC(ChatCommands::CmdCamera)
-{
-    if (argc == 1) {
-        GW::CameraMgr::UnlockCam(false);
-    }
-    else {
-        const std::wstring arg1 = TextUtils::ToLower(argv[1]);
-        if (arg1 == L"lock") {
-            GW::CameraMgr::UnlockCam(false);
-        }
-        else if (arg1 == L"unlock") {
-            GW::CameraMgr::UnlockCam(true);
-        }
-        else if (arg1 == L"fog") {
-            if (argc == 3) {
-                const std::wstring arg2 = TextUtils::ToLower(argv[2]);
-                if (arg2 == L"on") {
-                    GW::CameraMgr::SetFog(true);
-                }
-                else if (arg2 == L"off") {
-                    GW::CameraMgr::SetFog(false);
-                }
-            }
-        }
-        else {
-            Log::Error("Invalid argument.");
-        }
     }
 }
 

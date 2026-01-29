@@ -519,6 +519,13 @@ namespace GW {
             }
             return false;
         }
+        void Screenshot() {
+            GW::GameThread::Enqueue([] {
+                const auto frame = GW::UI::GetFrameByLabel(L"Game");
+                Keypress(GW::UI::ControlAction_Screenshot, GW::UI::GetChildFrame(frame, 6));
+                Keypress(GW::UI::ControlAction_Screenshot, GW::UI::GetParentFrame(frame));
+            });
+        }
     }
 
     namespace Agents {

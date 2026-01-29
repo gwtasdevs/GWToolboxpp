@@ -20,6 +20,7 @@
 #include <Logger.h>
 
 #include <Modules/Resources.h>
+#include <Modules/CameraUnlockModule.h>
 #include <Modules/ChatCommands.h>
 #include <Modules/ToolboxTheme.h>
 #include <Modules/ToolboxSettings.h>
@@ -526,7 +527,7 @@ namespace {
                 }
 
                 // send input to chat commands for camera movement
-                if (ChatCommands::Instance().WndProc(Message, wParam, lParam)) {
+                if (CameraUnlockModule::Instance().WndProc(Message, wParam, lParam)) {
                     return true;
                 }
             case WM_ACTIVATE:
@@ -868,6 +869,8 @@ std::filesystem::path GWToolbox::SaveSettings()
 
 void GWToolbox::ForceTerminate(bool detach_wndproc_handler)
 {
+    if (gwtoolbox_state == GWToolboxState::Terminated) 
+        return;
     ASSERT(DetachGameLoopCallback());
     ASSERT(!detach_wndproc_handler || DetachWndProcHandler());
 
@@ -982,6 +985,7 @@ void GWToolbox::Update(GW::HookStatus*)
 
 void GWToolbox::Draw(IDirect3DDevice9* device)
 {
+    HookUiRoot();
     switch (gwtoolbox_state) {
         case GWToolboxState::DrawTerminating:
             return DrawTerminating(device);

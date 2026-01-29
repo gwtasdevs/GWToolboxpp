@@ -1,14 +1,14 @@
 #include "stdafx.h"
 
-#include <GWCA/Context/PartyContext.h>
-#include <GWCA/Context/CharContext.h>
+#include <queue>
 
-#include <GWCA/Managers/MapMgr.h>
+#include <GWCA/Context/CharContext.h>
+#include <GWCA/Context/PartyContext.h>
+
 #include <GWCA/Managers/AgentMgr.h>
+#include <GWCA/Managers/MapMgr.h>
 #include <GWCA/Managers/PlayerMgr.h>
 #include <GWCA/Managers/StoCMgr.h>
-
-#include <GWCA/Packets/StoC.h>
 
 #include <GWCA/GameEntities/Agent.h>
 #include <GWCA/GameEntities/Party.h>
@@ -17,8 +17,8 @@
 #include <GWCA/Utilities/Hooker.h>
 #include <GWCA/Utilities/Scanner.h>
 
-#include <Modules/Resources.h>
 #include <Modules/PartyBroadcastModule.h>
+#include <Modules/Resources.h>
 #include <Modules/Updater.h>
 
 #include <Utils/GuiUtils.h>
@@ -28,28 +28,28 @@
 #include <nlohmann/json.hpp>
 
 #include <Defines.h>
-#include <Timer.h>
-#include <GWCA/Context/GameContext.h>
 #include <GWCA/Context/AccountContext.h>
+#include <GWCA/Context/GameContext.h>
 #include <GWCA/Managers/GameThreadMgr.h>
 #include <GWCA/Managers/UIMgr.h>
+#include <Timer.h>
+#include <Utils/RateLimiter.h>
+#include <Utils/ToolboxUtils.h>
 #include <base64.h>
 #include <wincrypt.h>
-#include <Utils/ToolboxUtils.h>
-#include <Utils/RateLimiter.h>
 #include "ToolboxSettings.h"
 
 using json = nlohmann::json;
 
 namespace {
     std::string api_key;
-    
+
     std::string last_update_content;
     clock_t last_update_timestamp = 0;
-    bool need_to_send_party_searches = true;
+    clock_t need_to_send_party_searches = 0;
     clock_t failed_to_send_ts = 0;
-    
-    WSAData wsaData = { 0 };
+
+    WSAData wsaData = {0};
 
     static constexpr uint32_t COST_PER_CONNECTION_MS = 30 * 1000;
     static constexpr uint32_t COST_PER_CONNECTION_MAX_MS = 60 * 1000;
@@ -57,7 +57,7 @@ namespace {
     RateLimiter window_rate_limiter;
     easywsclient::WebSocket* ws = nullptr;
     const char* websocket_url = "wss://party.gwtoolbox.com";
-    std::vector<std::string> websocket_send_queue;
+    std::queue<std::string> websocket_send_queue;
     std::recursive_mutex websocket_mutex;
     std::thread* websocket_thread = nullptr;
     bool pending_websocket_disconnect = false;
@@ -70,13 +70,9 @@ namespace {
         int district_number = 0;
     };
 
-    MapDistrictInfo GetDistrictInfo() {
-        return {
-            GW::Map::GetMapID(),
-            GW::Map::GetRegion(),
-            GW::Map::GetLanguage(),
-            GW::Map::GetDistrict()
-        };
+    MapDistrictInfo GetDistrictInfo()
+    {
+        return {GW::Map::GetMapID(), GW::Map::GetRegion(), GW::Map::GetLanguage(), GW::Map::GetDistrict()};
     }
 
     struct PartySearchAdvertisement {
@@ -93,16 +89,16 @@ namespace {
         std::string message;
         std::string sender;
     };
-    std::map<uint32_t,PartySearchAdvertisement> server_parties;
+    std::map<uint32_t, PartySearchAdvertisement> server_parties;
     MapDistrictInfo last_sent_district_info;
 
     bool send_payload(const std::string& payload);
 
     void to_json(nlohmann::json& j, const PartySearchAdvertisement& p)
     {
-        j = nlohmann::json{ {"i", p.party_id} };
+        j = nlohmann::json{{"i", p.party_id}};
         if (!p.party_size) {
-             // Aka "remove"
+            // Aka "remove"
             j["r"] = 1;
             return;
         }
@@ -121,7 +117,8 @@ namespace {
         if (p.level != 20) j["l"] = p.level;
     }
 
-    bool get_api_key(std::string& out) {
+    bool get_api_key(std::string& out)
+    {
         GWToolboxRelease current_release;
         if (!Updater::GetCurrentVersionInfo(&current_release)) {
             Log::Error("Failed to get current toolbox version info");
@@ -131,19 +128,22 @@ namespace {
         return true;
     }
 
-    bool is_websocket_ready() {
+    bool is_websocket_ready()
+    {
         return ws && ws->getReadyState() == easywsclient::WebSocket::readyStateValues::OPEN;
     }
 
-    bool get_uuid(std::string& out) {
-         const auto account_uuid = GW::AccountMgr::GetPortalAccountUuid();
-         if (!account_uuid) return false;
-         out = TextUtils::GuidToString(account_uuid);
-         return true;
+    bool get_uuid(std::string& out)
+    {
+        const auto account_uuid = GW::AccountMgr::GetPortalAccountUuid();
+        if (!account_uuid) return false;
+        out = TextUtils::GuidToString(account_uuid);
+        return true;
     }
 
     // Run on game thread!
-    std::vector<PartySearchAdvertisement> collect_party_searches() {
+    std::vector<PartySearchAdvertisement> collect_party_searches()
+    {
         ASSERT(GW::GameThread::IsInGameThread());
 
         const auto pc = GW::GetPartyContext();
@@ -151,8 +151,7 @@ namespace {
         const auto district_number = GW::Map::GetDistrict();
         const auto district_language = GW::Map::GetLanguage();
         std::vector<PartySearchAdvertisement> ads;
-        if (GW::Map::GetInstanceType() != GW::Constants::InstanceType::Outpost)
-            return ads;
+        if (GW::Map::GetInstanceType() != GW::Constants::InstanceType::Outpost) return ads;
         if (searches) {
             for (const auto search : *searches) {
                 if (!search) {
@@ -179,17 +178,14 @@ namespace {
         const auto players = GW::PlayerMgr::GetPlayerArray();
         if (players) {
             for (const auto& player : *players) {
-                if (!(player.party_size > 1 && player.name))
-                    continue;
+                if (!(player.party_size > 1 && player.name)) continue;
                 const auto agent = static_cast<GW::AgentLiving*>(GW::Agents::GetAgentByID(player.agent_id));
-                if (!(agent && agent->GetIsLivingType()))
-                    continue; // Although the player might be present, the party size depends on the agent being in compass range
+                if (!(agent && agent->GetIsLivingType())) continue; // Although the player might be present, the party size depends on the agent being in compass range
                 const auto sender = TextUtils::WStringToString(player.name);
                 const auto found = std::ranges::find_if(ads.begin(), ads.end(), [sender](const PartySearchAdvertisement& e) {
                     return sender == e.sender;
-                    });
-                if (found != ads.end())
-                    continue; // Player has a party search entry
+                });
+                if (found != ads.end()) continue; // Player has a party search entry
                 PartySearchAdvertisement ad;
                 ad.party_id = (0xf00 | player.player_number);
                 ad.party_size = static_cast<uint8_t>(player.party_size);
@@ -208,7 +204,8 @@ namespace {
 
     std::string last_party_searches_payload = "";
     // Run on game thread!
-    bool send_all_party_searches() {
+    bool send_all_party_searches()
+    {
         if (!GW::Map::GetIsMapLoaded()) {
             return false;
         }
@@ -226,8 +223,7 @@ namespace {
         j["parties"] = parties;
 
         const auto payload = j.dump();
-        if (!send_payload(payload))
-            return false;
+        if (!send_payload(payload)) return false;
         last_sent_district_info = GetDistrictInfo();
 
         server_parties.clear();
@@ -236,10 +232,10 @@ namespace {
         }
         last_update_timestamp = TIMER_INIT();
         return true;
-
     }
 
-    bool send_changed_party_searches() {
+    bool send_changed_party_searches()
+    {
         if (!GW::Map::GetIsMapLoaded()) {
             return false;
         }
@@ -259,8 +255,7 @@ namespace {
 
         for (auto& existing_party : parties) {
             const auto found = server_parties.find(existing_party.party_id);
-            if (found != server_parties.end()
-                && memcmp(&existing_party, &found->second, sizeof(existing_party)) == 0) {
+            if (found != server_parties.end() && memcmp(&existing_party, &found->second, sizeof(existing_party)) == 0) {
                 continue; // No change, don't send
             }
             to_send.push_back(existing_party);
@@ -268,11 +263,10 @@ namespace {
 
         for (auto& it : server_parties) {
             const auto& last_sent_party = it.second;
-            if (!last_sent_party.party_size)
-                continue; // Already flagged for removal
+            if (!last_sent_party.party_size) continue; // Already flagged for removal
             const auto found = std::ranges::find_if(parties.begin(), parties.end(), [last_sent_party](const PartySearchAdvertisement& entry) {
                 return entry.party_id == last_sent_party.party_id;
-                });
+            });
             if (found == parties.end()) {
                 // Party no longer exists, flag for removal
                 auto cpy = last_sent_party;
@@ -281,8 +275,7 @@ namespace {
             }
         }
 
-        if (to_send.empty())
-            return true; // No change
+        if (to_send.empty()) return true; // No change
         json j;
         j["type"] = "updated_parties";
         j["map_id"] = (uint32_t)GW::Map::GetMapID();
@@ -290,8 +283,7 @@ namespace {
         j["parties"] = to_send;
 
         const auto payload = j.dump();
-        if (!send_payload(payload))
-            return false;
+        if (!send_payload(payload)) return false;
         last_sent_district_info = GetDistrictInfo();
         for (auto& party : to_send) {
             server_parties[party.party_id] = party;
@@ -300,105 +292,103 @@ namespace {
         return true;
     }
 
-    void on_websocket_closed() {
+    void on_websocket_closed()
+    {
         std::lock_guard<std::recursive_mutex> lk(websocket_mutex);
-        websocket_send_queue.clear();
+        while (!websocket_send_queue.empty())
+            websocket_send_queue.pop();
         last_update_content = "";
         last_update_timestamp = 0;
         server_parties.clear();
-        need_to_send_party_searches = true;
+        need_to_send_party_searches = TIMER_INIT();
         memset(&last_sent_district_info, 0, sizeof(last_sent_district_info));
         Log::Log("Websocket disconnected");
     }
 
-    void disconnect_ws() {
+    void disconnect_ws()
+    {
         if (!ws) return;
         ws->close();
         ws->poll();
         delete ws;
         ws = nullptr;
         on_websocket_closed();
-
     }
 
-    void on_websocket_message(const std::string&) {
-        //Log::Log("Websocket message\n%s", message.c_str());
+    void on_websocket_message(const std::string&)
+    {
+        // Log::Log("Websocket message\n%s", message.c_str());
     }
 
-    void websocket_thread_loop() {
+    void websocket_thread_loop()
+    {
         while (!pending_websocket_disconnect) {
             if (ws) {
                 switch (ws->getReadyState()) {
-                case easywsclient::WebSocket::CONNECTING:
-                case easywsclient::WebSocket::CLOSING:
-                case easywsclient::WebSocket::OPEN: {
-                    ws->poll();
-                    ws->dispatch(on_websocket_message);
-                } break;
-                case easywsclient::WebSocket::CLOSED: {
-                    delete ws;
-                    ws = nullptr;
-                    on_websocket_closed();
-                } break;
+                    case easywsclient::WebSocket::CONNECTING:
+                    case easywsclient::WebSocket::CLOSING:
+                    case easywsclient::WebSocket::OPEN: {
+                        ws->poll();
+                        ws->dispatch(on_websocket_message);
+                    } break;
+                    case easywsclient::WebSocket::CLOSED: {
+                        delete ws;
+                        ws = nullptr;
+                        on_websocket_closed();
+                    } break;
                 }
             }
             if (!(ws || websocket_send_queue.empty())) {
                 // Connect to websocket
-                if(!window_rate_limiter.AddTime(COST_PER_CONNECTION_MS, COST_PER_CONNECTION_MAX_MS))
-                    goto endloop;
-                if (!get_api_key(api_key))
-                    goto endloop;
+                if (!window_rate_limiter.AddTime(COST_PER_CONNECTION_MS, COST_PER_CONNECTION_MAX_MS)) goto endloop;
+                if (!get_api_key(api_key)) goto endloop;
                 std::string uuid;
-                if (!get_uuid(uuid))
-                    goto endloop;
+                if (!get_uuid(uuid)) goto endloop;
 
-                easywsclient::HeaderKeyValuePair headers = {
-                    {"User-Agent", "GWToolboxpp"},
-                    {"X-Api-Key", api_key},
-                    {"X-Account-Uuid", uuid},
-                    {"X-Bot-Version", "101"}
-                };
+                easywsclient::HeaderKeyValuePair headers = {{"User-Agent", "GWToolboxpp"}, {"X-Api-Key", api_key}, {"X-Account-Uuid", uuid}, {"X-Bot-Version", "101"}};
                 Log::Log("Connecting to %s (X-Api-Key: %s, X-Account-Uuid: %s)", websocket_url, headers["X-Api-Key"].c_str(), headers["X-Account-Uuid"].c_str());
 
                 ws = easywsclient::WebSocket::from_url(websocket_url, headers);
             }
             while (ws && !websocket_send_queue.empty()) {
-                std::lock_guard<std::recursive_mutex> lk(websocket_mutex);
-                const auto it = websocket_send_queue.begin();
-                //Log::Log("Websocket Send:\n%s", it->c_str());
-                ws->send(*it);
-                websocket_send_queue.erase(it);
+                std::string cpy;
+                {
+                    std::lock_guard<std::recursive_mutex> lk(websocket_mutex);
+                    if (websocket_send_queue.empty()) break;
+                    cpy = std::move(websocket_send_queue.front());
+                    websocket_send_queue.pop();
+                }
+                ws->send(cpy);
             }
 
-    endloop:
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        endloop:
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
         disconnect_ws();
     }
 
     // Run on worker thread!
-    bool send_payload(const std::string& payload) {
-        if (pending_websocket_disconnect)
-            return false;
+    bool send_payload(const std::string& payload)
+    {
+        if (pending_websocket_disconnect) return false;
         if (!websocket_thread) {
             websocket_thread = new std::thread(websocket_thread_loop);
         }
         std::lock_guard<std::recursive_mutex> lk(websocket_mutex);
-        websocket_send_queue.push_back(payload);
+        websocket_send_queue.push(payload);
         return true;
     }
 
     GW::HookEntry OnUIMessage_Hook;
 
-    void OnUIMessage(GW::HookStatus*, GW::UI::UIMessage, void*, void*) {
-        need_to_send_party_searches = true;
+    void OnUIMessage(GW::HookStatus*, GW::UI::UIMessage, void*, void*)
+    {
+        need_to_send_party_searches = TIMER_INIT();
     }
-    void OnStoCPacket(GW::HookStatus*, GW::Packet::StoC::PacketBase* ) {
-        need_to_send_party_searches = true;
-    }
-}
+} // namespace
 
-void PartyBroadcast::Update(float) {
+void PartyBroadcast::Update(float)
+{
     if (pending_websocket_disconnect) {
         if (websocket_thread) {
             ASSERT(websocket_thread->joinable());
@@ -416,16 +406,18 @@ void PartyBroadcast::Update(float) {
         return;
     }
 
-    if (need_to_send_party_searches) {
-        need_to_send_party_searches = !send_changed_party_searches();
+    if (need_to_send_party_searches && TIMER_DIFF(need_to_send_party_searches) > 250 && send_changed_party_searches()) {
+        need_to_send_party_searches = 0;
     }
 }
 
-bool PartyBroadcast::CanTerminate() {
+bool PartyBroadcast::CanTerminate()
+{
     return !websocket_thread;
 }
 
-void PartyBroadcast::SignalTerminate() {
+void PartyBroadcast::SignalTerminate()
+{
     GW::UI::RemoveUIMessageCallback(&OnUIMessage_Hook);
     GW::StoC::RemoveCallbacks(&OnUIMessage_Hook);
     terminating = true;
@@ -441,27 +433,28 @@ void PartyBroadcast::Initialize()
     }
     pending_websocket_disconnect = terminating = false;
 
-    need_to_send_party_searches = true;
+    need_to_send_party_searches = TIMER_INIT();
 
     const GW::UI::UIMessage ui_messages[] = {
-        GW::UI::UIMessage::kMapLoaded,
-        (GW::UI::UIMessage)0x10000134, // Party search updated
-        (GW::UI::UIMessage)0x10000132, // Party search updated
-        (GW::UI::UIMessage)0x10000133, // Party search Remove 
-        (GW::UI::UIMessage)0x10000131, // Party search Add
-        (GW::UI::UIMessage)0x10000048 // Player size updated (in current range)
+        GW::UI::UIMessage::kMapLoaded,           
+        (GW::UI::UIMessage)((uint32_t)GW::UI::UIMessage::kMoraleChange + 1), // wparam = player_id
+        GW::UI::UIMessage::kPartySearchRemoved,
+        GW::UI::UIMessage::kPartySearchUpdated, // Party search updated
+        GW::UI::UIMessage::kPartySearchCreated, // Party search updated
+        GW::UI::UIMessage::kPartySearchIdChanged // Party search Remove
     };
     for (auto message_id : ui_messages) {
         GW::UI::RegisterUIMessageCallback(&OnUIMessage_Hook, message_id, OnUIMessage, 0x8000);
     }
-    GW::StoC::RegisterPacketCallback(&OnUIMessage_Hook, GAME_SMSG_AGENT_DESPAWNED, OnStoCPacket, 0x8000);
 }
 
-void PartyBroadcast::Terminate() {
+void PartyBroadcast::Terminate()
+{
     ToolboxModule::Terminate();
+    GW::UI::RemoveUIMessageCallback(&OnUIMessage_Hook);
     if (wsaData.wVersion) {
         WSACleanup();
-        wsaData = { 0 };
+        wsaData = {0};
     }
     ASSERT(!websocket_thread);
 }

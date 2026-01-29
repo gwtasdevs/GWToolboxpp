@@ -47,6 +47,7 @@ public:
     void Initialize() override;
     void SignalTerminate() override;
     bool CanTerminate() override;
+    void Terminate() override;
 
     void Draw(IDirect3DDevice9* device) override;
     static void RenderSetupProjection(IDirect3DDevice9* device);

@@ -231,6 +231,7 @@ enum class DevotionDetail {
 
 struct HallOfMonumentsAchievements {
     std::wstring character_name;
+    std::string error_str_from_request;
 
     enum class State {
         Pending,

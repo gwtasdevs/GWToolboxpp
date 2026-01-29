@@ -217,8 +217,8 @@ namespace {
             t->RefreshLabels();
             t->RefreshProgress();
         }
-        std::sort(title_progress_by_id.begin(), title_progress_by_id.end(), CompareTitleProgress);
-        std::sort(title_progress_by_title.begin(), title_progress_by_title.end(), [](TitleProgress* t1, TitleProgress* t2) {
+        std::ranges::sort(title_progress_by_id, CompareTitleProgress);
+        std::ranges::sort(title_progress_by_title, [](TitleProgress* t1, TitleProgress* t2) {
             return t1->title_label.string() < t2->title_label.string();
         });
         title_for_bounty = automatically_show_title_progress_for_current_map ? GW::Map::GetBountyTitlesForMap(GW::Map::GetMapID()) : std::vector<GW::Constants::TitleID>();
@@ -340,16 +340,16 @@ void TitleTrackerWidget::Initialize()
 {
     ToolboxWidget::Initialize();
     pending_title_sort_order = true;
-    GW::GameThread::Enqueue([]() {
+    GW::GameThread::Enqueue([] {
         OverrideTitleSortOrder(override_title_sort_order);
         pending_title_sort_order = false;
     });
-    const GW::UI::UIMessage ui_messages[] = {GW::UI::UIMessage::kTitleProgressUpdated, GW::UI::UIMessage::kExperienceGained, GW::UI::UIMessage::kUIPositionChanged};
+    static constexpr GW::UI::UIMessage ui_messages[] = {GW::UI::UIMessage::kTitleProgressUpdated, GW::UI::UIMessage::kExperienceGained, GW::UI::UIMessage::kUIPositionChanged};
     for (const auto& msg : ui_messages) {
         GW::UI::RegisterUIMessageCallback(&OnPostUIMessage_HookEntry, msg, OnPostUIMessage, 0x8000);
     }
     for (size_t i = 0; i != (size_t)GW::Constants::TitleID::Codex; i++) {
-        title_progress_by_id.push_back(new TitleProgress((GW::Constants::TitleID)i));
+        title_progress_by_id.push_back(new TitleProgress(static_cast<GW::Constants::TitleID>(i)));
         title_progress_by_title.push_back(title_progress_by_id.back());
     }
     GW::GameThread::Enqueue(RefreshTitleProgress, true);
@@ -398,7 +398,7 @@ void TitleTrackerWidget::Draw(IDirect3DDevice9*)
         ImU32 color_start = progress_bar_foreground_color;
         ImU32 color_end = ImGui::ColorConvertFloat4ToU32(light_color);
 
-        for (auto p : title_progress_by_id) {
+        for (const auto p : title_progress_by_id) {
             if (p->percent == 1.f && hide_completed_titles) continue;
             if (!p->show && std::ranges::find(title_for_bounty.begin(), title_for_bounty.end(), p->title_id) == title_for_bounty.end()) {
                 continue;

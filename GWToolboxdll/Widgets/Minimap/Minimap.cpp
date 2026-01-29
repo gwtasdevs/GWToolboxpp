@@ -252,6 +252,8 @@ namespace {
         return true;
     }
 
+    bool pending_compass_hide = false;
+
     GW::UI::Frame* GetCompassFrame();
     bool EnsureCompassIsLoaded()
     {
@@ -260,8 +262,8 @@ namespace {
         if (!compass) return false;
         const auto context = (CompassContext*)GW::UI::GetFrameContext(compass);
         if (!context->compass_canvas) {
-            GW::UI::SetFrameVisible(compass, true);
-            GW::UI::TriggerFrameRedraw(compass);
+            SetWindowVisibleTmp(GW::UI::WindowID_Compass, true);
+            pending_compass_hide = true;
         }
         return context->compass_canvas;
     }
@@ -273,8 +275,16 @@ namespace {
     // Check whether the compass ought to be hidden or not depending on user settings
     bool OverrideCompassVisibility() {
         const auto frame = GetCompassFrame();
-        if (!(frame && !in_interface_settings))
+        if (!(frame && frame->IsCreated() && !in_interface_settings))
             return false;
+        const auto context = (CompassContext*)GW::UI::GetFrameContext(frame);
+        if (!(context && context->compass_canvas)) 
+            return false;
+        if (pending_compass_hide) {
+            SetWindowVisibleTmp(GW::UI::WindowID_Compass, false);
+            pending_compass_hide = false;
+        }
+
         if (hide_compass_when_minimap_draws && Minimap::IsActive()) {
             if (!(frame->IsCreated() && frame->IsVisible()))
                 return false;
@@ -328,7 +338,7 @@ namespace {
                 break;
             case GW::UI::UIMessage::kFrameMessage_0x13:
             case GW::UI::UIMessage::kRenderFrame_0x30:
-            case GW::UI::UIMessage::kRenderFrame_0x32:
+            case GW::UI::UIMessage::kFrameVisibilityChanged:
             case GW::UI::UIMessage::kSetLayout:
                 OnCompassFrame_UICallback_Ret(message, wParam, lParam);
                 compass_position_dirty = true; // Forces a recalculation
@@ -616,17 +626,13 @@ void Minimap::DrawHelp()
 void Minimap::SignalTerminate()
 {
     terminating = true;
-
-    range_renderer.Terminate();
-    pmap_renderer.Terminate();
-    agent_renderer.Terminate();
-    pingslines_renderer.Terminate();
-    symbols_renderer.Terminate();
-    custom_renderer.Terminate();
-    effect_renderer.Terminate();
-    GameWorldRenderer::Terminate();
-
-    hide_flagging_controls_patch.Reset();
+    GW::GameThread::Enqueue([] {
+        RefreshQuestMarker();
+        ResetWindowPosition(GW::UI::WindowID_Compass, compass_frame);
+        terminating = false;
+        });
+}
+void Minimap::Terminate() {
 
     GW::UI::RemoveKeydownCallback(&Generic_HookEntry);
     GW::UI::RemoveKeyupCallback(&Generic_HookEntry);
@@ -637,11 +643,21 @@ void Minimap::SignalTerminate()
 
     GW::Chat::DeleteCommand(&ChatCmd_HookEntry);
 
-    GW::GameThread::Enqueue([] {
-        RefreshQuestMarker();
-        ResetWindowPosition(GW::UI::WindowID_Compass, compass_frame);
-        terminating = false;
-        });
+    hide_flagging_controls_patch.Reset();
+
+    ToolboxWidget::Terminate();
+    range_renderer.Terminate();
+    pmap_renderer.Terminate();
+    agent_renderer.Terminate();
+    pingslines_renderer.Terminate();
+    symbols_renderer.Terminate();
+    custom_renderer.Terminate();
+    effect_renderer.Terminate();
+    GameWorldRenderer::Terminate();
+
+    
+
+
 }
 
 bool Minimap::CanTerminate()
@@ -658,9 +674,7 @@ void Minimap::Initialize()
         hide_flagging_controls_patch.SetPatch(address, "\xeb", 1);
     }
 
-    address = GW::Scanner::Find("\x68\x00\x09\x14\x00", "xxxxx");
-    if (address)
-        DrawCompassAgentsByType_Func = (DrawCompassAgentsByType_pt)GW::Scanner::FunctionFromNearCall(GW::Scanner::FindInRange("\xe8", "x", 0, address, address + 0xf));
+    DrawCompassAgentsByType_Func = (DrawCompassAgentsByType_pt)GW::Scanner::FunctionFromNearCall(GW::Scanner::Find("\x68\x00\x09\x14\x00\x57\x56\xe8", "xxxxxxxx",7));
 
 #ifdef _DEBUG
     ASSERT(DrawCompassAgentsByType_Func);
@@ -688,9 +702,10 @@ void Minimap::Initialize()
         GW::UI::UIMessage::kSkillActivated, 
         GW::UI::UIMessage::kCompassDraw,
         GW::UI::UIMessage::kEnableUIPositionOverlay,
+        GW::UI::UIMessage::kDestroyUIPositionOverlay
     };
     for (const auto message_id : hook_messages) {
-        RegisterUIMessageCallback(&Generic_HookEntry, message_id, OnUIMessage);
+        RegisterUIMessageCallback(&Generic_HookEntry, message_id, OnUIMessage,0x8000);
     }
 
     if (GW::Map::GetInstanceType() != GW::Constants::InstanceType::Loading) {
@@ -711,6 +726,7 @@ void Minimap::OnUIMessage(GW::HookStatus* status, const GW::UI::UIMessage msgid,
     instance.pingslines_renderer.OnUIMessage(status, msgid, wParam, lParam);
     switch (msgid) {
         case GW::UI::UIMessage::kEnableUIPositionOverlay:
+        case GW::UI::UIMessage::kDestroyUIPositionOverlay:
             in_interface_settings = (uint32_t)wParam == 1;
             compass_position_dirty = true;
         break;
@@ -721,6 +737,7 @@ void Minimap::OnUIMessage(GW::HookStatus* status, const GW::UI::UIMessage msgid,
         }
         break;
         case GW::UI::UIMessage::kMapLoaded: {
+            in_interface_settings = false;
             EnsureCompassIsLoaded();
             instance.pmap_renderer.Invalidate();
             loading = false;

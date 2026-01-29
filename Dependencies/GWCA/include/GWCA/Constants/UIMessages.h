@@ -48,7 +48,7 @@ namespace GW {
             kInitFrame,                     // 0x9
             kFrameMessage_0xa,
             kDestroyFrame,                  // 0xb
-            kFrameMessage_0xc,
+            kFrameDisabledChange,           // wparam = is_enabled
             kFrameMessage_0xd,
             kFrameMessage_0xe,
             kFrameMessage_0xf,
@@ -86,7 +86,7 @@ namespace GW {
             kMouseAction,                   // 0x2f, wparam = UIPacket::kMouseAction*
             kRenderFrame_0x30,              // 0x30
             kRenderFrame_0x31 = 0x35,              // 0x31
-            kRenderFrame_0x32,              // 0x32
+            kFrameVisibilityChanged,              // 0x32, wparam = is_visible
             kSetLayout,                     // 0x33
             kMeasureContent,                // 0x34
             kFrameMessage_0x35,             // 0x35
@@ -106,8 +106,8 @@ namespace GW {
             kRenderFrame_0x43,              // 0x43
             kFrameMessage_0x44 = 0x51,
             kFrameMessage_0x45,
-            kFrameMessage_0x46,
-            kFrameMessage_0x47 = 0x55,             // 0x47, Multiple uses depending on frame
+            kFrameMessage_0x46 = 0x55,
+            kFrameMessage_0x47,             // 0x47, Multiple uses depending on frame
             kFrameMessage_0x48,             // 0x48, Multiple uses depending on frame
             kFrameMessage_0x49,             // 0x49, Multiple uses depending on frame
             kFrameMessage_0x4a,             // 0x4a, Multiple uses depending on frame

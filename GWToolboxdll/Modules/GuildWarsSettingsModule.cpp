@@ -50,7 +50,6 @@ namespace {
         "SkillListViewMode",
         "SoundQuality",
         "StorageBagPage",
-        "Territory",
         "TextureLod",
         "TexFilterMode",
         "VolBackground",

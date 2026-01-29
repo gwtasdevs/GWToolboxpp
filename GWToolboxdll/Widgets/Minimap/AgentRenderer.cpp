@@ -172,52 +172,54 @@ unsigned int AgentRenderer::CustomAgent::cur_ui_id = 0;
 
 void AgentRenderer::LoadSettings(const ToolboxIni* ini, const char* section)
 {
-    auto Name = [section] {
+    const auto Name = [section] {
         return section;
     };
     LoadDefaultColors();
-    color_marked_target = Colors::Load(ini, section, VAR_NAME(color_marked_target), color_marked_target);
-    color_agent_modifier = Colors::Load(ini, section, VAR_NAME(color_agent_modifier), color_agent_modifier);
-    color_agent_damaged_modifier = Colors::Load(ini, section, VAR_NAME(color_agent_damaged_modifier), color_agent_damaged_modifier);
-    color_eoe = Colors::Load(ini, section, VAR_NAME(color_eoe), color_eoe);
-    color_qz = Colors::Load(ini, section, VAR_NAME(color_qz), color_qz);
-    color_winnowing = Colors::Load(ini, section, VAR_NAME(color_winnowing), color_winnowing);
-    color_target = Colors::Load(ini, section, VAR_NAME(color_target), color_target);
-    color_player = Colors::Load(ini, section, VAR_NAME(color_player), color_player);
-    color_player_dead = Colors::Load(ini, section, VAR_NAME(color_player_dead), color_player_dead);
-    color_signpost = Colors::Load(ini, section, VAR_NAME(color_signpost), color_signpost);
-    color_item = Colors::Load(ini, section, VAR_NAME(color_item), color_item);
-    color_hostile = Colors::Load(ini, section, VAR_NAME(color_hostile), color_hostile);
-    color_hostile_dead = Colors::Load(ini, section, VAR_NAME(color_hostile_dead), color_hostile_dead);
-    color_neutral = Colors::Load(ini, section, VAR_NAME(color_neutral), color_neutral);
-    color_ally = Colors::Load(ini, section, VAR_NAME(color_ally), color_ally);
-    color_ally_npc = Colors::Load(ini, section, VAR_NAME(color_ally_npc), color_ally_npc);
-    color_ally_npc_quest = Colors::Load(ini, section, VAR_NAME(color_ally_npc_quest), color_ally_npc_quest);
-    color_ally_spirit = Colors::Load(ini, section, VAR_NAME(color_ally_spirit), color_ally_spirit);
-    color_ally_minion = Colors::Load(ini, section, VAR_NAME(color_ally_minion), color_ally_minion);
-    color_ally_dead = Colors::Load(ini, section, VAR_NAME(color_ally_dead), color_ally_dead);
-    boss_colors = ini->GetBoolValue(section, VAR_NAME(boss_colors), boss_colors);
-    show_quest_npcs_on_minimap = ini->GetBoolValue(section, VAR_NAME(show_quest_npcs_on_minimap), show_quest_npcs_on_minimap);
+    LOAD_COLOR(color_marked_target);
+    LOAD_COLOR(color_agent_modifier);
+    LOAD_COLOR(color_agent_damaged_modifier);
+    LOAD_COLOR(color_eoe);
+    LOAD_COLOR(color_qz);
+    LOAD_COLOR(color_winnowing);
+    LOAD_COLOR(color_frozen_soil);
+    LOAD_COLOR(color_target);
+    LOAD_COLOR(color_player);
+    LOAD_COLOR(color_player_dead);
+    LOAD_COLOR(color_signpost);
+    LOAD_COLOR(color_item);
+    LOAD_COLOR(color_hostile);
+    LOAD_COLOR(color_hostile_dead);
+    LOAD_COLOR(color_neutral);
+    LOAD_COLOR(color_ally);
+    LOAD_COLOR(color_ally_npc);
+    LOAD_COLOR(color_ally_npc_quest);
+    LOAD_COLOR(color_ally_spirit);
+    LOAD_COLOR(color_ally_minion);
+    LOAD_COLOR(color_ally_dead);
+    LOAD_BOOL(boss_colors);
+    LOAD_BOOL(show_quest_npcs_on_minimap);
 
 #ifdef _DEBUG
     LOAD_BOOL(show_props_on_minimap);
 #endif
 
     LoadDefaultSizes();
-    size_marked_target = static_cast<float>(ini->GetDoubleValue(section, VAR_NAME(size_marked_target), size_marked_target));
-    size_default = static_cast<float>(ini->GetDoubleValue(section, VAR_NAME(size_default), size_default));
-    size_player = static_cast<float>(ini->GetDoubleValue(section, VAR_NAME(size_player), size_player));
-    size_signpost = static_cast<float>(ini->GetDoubleValue(section, VAR_NAME(size_signpost), size_signpost));
-    size_item = static_cast<float>(ini->GetDoubleValue(section, VAR_NAME(size_item), size_item));
-    size_boss = static_cast<float>(ini->GetDoubleValue(section, VAR_NAME(size_boss), size_boss));
-    size_minion = static_cast<float>(ini->GetDoubleValue(section, VAR_NAME(size_minion), size_minion));
+    
+    LOAD_FLOAT(size_marked_target);
+    LOAD_FLOAT(size_default);
+    LOAD_FLOAT(size_player);
+    LOAD_FLOAT(size_signpost);
+    LOAD_FLOAT(size_item);
+    LOAD_FLOAT(size_boss);
+    LOAD_FLOAT(size_minion);
+    LOAD_FLOAT(agent_border_thickness);
+    LOAD_FLOAT(target_border_thickness);
     default_shape = static_cast<Shape_e>(ini->GetLongValue(section, VAR_NAME(default_shape), default_shape));
     shape_player = static_cast<Shape_e>(ini->GetDoubleValue(section, VAR_NAME(shape_player), shape_player));
     shape_players = static_cast<Shape_e>(ini->GetDoubleValue(section, VAR_NAME(shape_players), shape_players));
-    agent_border_thickness = static_cast<float>(ini->GetDoubleValue(section, VAR_NAME(agent_border_thickness), agent_border_thickness));
-    target_border_thickness = static_cast<float>(ini->GetDoubleValue(section, VAR_NAME(target_border_thickness), target_border_thickness));
     
-    show_hidden_npcs = ini->GetBoolValue(section, VAR_NAME(show_hidden_npcs), show_hidden_npcs);
+    LOAD_BOOL(show_hidden_npcs);
 
     LoadCustomAgents();
 
@@ -231,9 +233,12 @@ void AgentRenderer::LoadCustomAgents()
     }
     ASSERT(agentcolorinifile->LoadIfExists(Resources::GetSettingFile(AGENTCOLOR_INIFILENAME)) == SI_OK);
 
-    custom_agents.clear();
     custom_agents_map.clear();
-
+    for (const CustomAgent* ca : custom_agents) {
+        delete ca;
+    }
+    custom_agents.clear();
+    
     ToolboxIni::TNamesDepend entries;
     agentcolorinifile->GetAllSections(entries);
 
@@ -253,44 +258,45 @@ void AgentRenderer::SaveSettings(ToolboxIni* ini, const char* section) const
         return section;
     };
 
-    Colors::Save(ini, section, VAR_NAME(color_agent_modifier), color_agent_modifier);
-    Colors::Save(ini, section, VAR_NAME(color_agent_damaged_modifier), color_agent_damaged_modifier);
-    Colors::Save(ini, section, VAR_NAME(color_eoe), color_eoe);
-    Colors::Save(ini, section, VAR_NAME(color_qz), color_qz);
-    Colors::Save(ini, section, VAR_NAME(color_winnowing), color_winnowing);
-    Colors::Save(ini, section, VAR_NAME(color_target), color_target);
-    Colors::Save(ini, section, VAR_NAME(color_player), color_player);
-    Colors::Save(ini, section, VAR_NAME(color_player_dead), color_player_dead);
-    Colors::Save(ini, section, VAR_NAME(color_signpost), color_signpost);
-    Colors::Save(ini, section, VAR_NAME(color_item), color_item);
-    Colors::Save(ini, section, VAR_NAME(color_hostile), color_hostile);
-    Colors::Save(ini, section, VAR_NAME(color_hostile_dead), color_hostile_dead);
-    Colors::Save(ini, section, VAR_NAME(color_neutral), color_neutral);
-    Colors::Save(ini, section, VAR_NAME(color_ally), color_ally);
-    Colors::Save(ini, section, VAR_NAME(color_ally_npc), color_ally_npc);
-    Colors::Save(ini, section, VAR_NAME(color_ally_npc_quest), color_ally_npc_quest);
-    Colors::Save(ini, section, VAR_NAME(color_ally_spirit), color_ally_spirit);
-    Colors::Save(ini, section, VAR_NAME(color_ally_minion), color_ally_minion);
-    Colors::Save(ini, section, VAR_NAME(color_ally_dead), color_ally_dead);
-    Colors::Save(ini, section, VAR_NAME(color_marked_target), color_marked_target);
+    SAVE_COLOR(color_agent_modifier);
+    SAVE_COLOR(color_agent_damaged_modifier);
+    SAVE_COLOR(color_eoe);
+    SAVE_COLOR(color_qz);
+    SAVE_COLOR(color_winnowing);
+    SAVE_COLOR(color_frozen_soil);
+    SAVE_COLOR(color_target);
+    SAVE_COLOR(color_player);
+    SAVE_COLOR(color_player_dead);
+    SAVE_COLOR(color_signpost);
+    SAVE_COLOR(color_item);
+    SAVE_COLOR(color_hostile);
+    SAVE_COLOR(color_hostile_dead);
+    SAVE_COLOR(color_neutral);
+    SAVE_COLOR(color_ally);
+    SAVE_COLOR(color_ally_npc);
+    SAVE_COLOR(color_ally_npc_quest);
+    SAVE_COLOR(color_ally_spirit);
+    SAVE_COLOR(color_ally_minion);
+    SAVE_COLOR(color_ally_dead);
+    SAVE_COLOR(color_marked_target);
 
-    ini->SetDoubleValue(section, VAR_NAME(size_default), size_default);
-    ini->SetDoubleValue(section, VAR_NAME(size_player), size_player);
-    ini->SetDoubleValue(section, VAR_NAME(size_signpost), size_signpost);
-    ini->SetDoubleValue(section, VAR_NAME(size_item), size_item);
-    ini->SetDoubleValue(section, VAR_NAME(size_boss), size_boss);
-    ini->SetDoubleValue(section, VAR_NAME(size_minion), size_minion);
-    ini->SetDoubleValue(section, VAR_NAME(size_marked_target), size_marked_target);
-    ini->SetLongValue(section, VAR_NAME(default_shape), default_shape);
-    ini->SetLongValue(section, VAR_NAME(shape_player), shape_player);
-    ini->SetLongValue(section, VAR_NAME(shape_players), shape_players);
-    ini->SetDoubleValue(section, VAR_NAME(target_border_thickness), target_border_thickness);
-    ini->SetDoubleValue(section, VAR_NAME(agent_border_thickness), agent_border_thickness);
+    SAVE_FLOAT(size_default);
+    SAVE_FLOAT(size_player);
+    SAVE_FLOAT(size_signpost);
+    SAVE_FLOAT(size_item);
+    SAVE_FLOAT(size_boss);
+    SAVE_FLOAT(size_minion);
+    SAVE_FLOAT(size_marked_target);
+    SAVE_UINT(default_shape);
+    SAVE_UINT(shape_player);
+    SAVE_UINT(shape_players);
+    SAVE_FLOAT(target_border_thickness);
+    SAVE_FLOAT(agent_border_thickness);
     SAVE_BOOL(show_props_on_minimap);
 
-    ini->SetBoolValue(section, VAR_NAME(show_hidden_npcs), show_hidden_npcs);
-    ini->SetBoolValue(section, VAR_NAME(boss_colors), boss_colors);
-    ini->SetBoolValue(section, VAR_NAME(show_quest_npcs_on_minimap), show_quest_npcs_on_minimap);
+    SAVE_BOOL(show_hidden_npcs);
+    SAVE_BOOL(boss_colors);
+    SAVE_BOOL(show_quest_npcs_on_minimap);
     SaveCustomAgents();
 }
 
@@ -331,6 +337,7 @@ void AgentRenderer::LoadDefaultColors()
     color_eoe = 0x3200FF00;
     color_qz = 0x320000FF;
     color_winnowing = 0x3200FFFF;
+    color_frozen_soil = 0x00FEFFFF;
     color_target = 0xFFFFFF00;
     color_player = 0xFFFF8000;
     color_player_dead = 0x64FF8000;
@@ -365,6 +372,8 @@ void AgentRenderer::DrawSettings()
         Colors::DrawSettingHueWheel("QZ", &color_qz);
         ImGui::ShowHelp("This is the color at the edge, the color in the middle is the same, with alpha-50");
         Colors::DrawSettingHueWheel("Winnowing", &color_winnowing, 0);
+        ImGui::ShowHelp("This is the color at the edge, the color in the middle is the same, with alpha-50");
+        Colors::DrawSettingHueWheel("Frozen Soil", &color_frozen_soil, 0);
         ImGui::ShowHelp("This is the color at the edge, the color in the middle is the same, with alpha-50");
         Colors::DrawSettingHueWheel("Target", &color_target);
         Colors::DrawSettingHueWheel("Player (alive)", &color_player);
@@ -490,11 +499,11 @@ void AgentRenderer::DrawSettings()
 void AgentRenderer::Terminate()
 {
     VBuffer::Terminate();
+    custom_agents_map.clear();
     for (const CustomAgent* ca : custom_agents) {
         delete ca;
     }
     custom_agents.clear();
-    custom_agents_map.clear();
     RemoveMarkedTarget();
     GW::Chat::DeleteCommand(&ChatCmd_HookEntry);
 }
@@ -745,6 +754,9 @@ void AgentRenderer::Render(IDirect3DDevice9* device)
                 break;
             case GW::Constants::ModelID::Winnowing:
                 Enqueue(BigCircle, agent, GW::Constants::Range::Spirit, color_winnowing);
+                break;
+            case GW::Constants::ModelID::FrozenSoil:
+                Enqueue(BigCircle, agent, GW::Constants::Range::Spirit, color_frozen_soil);
                 break;
             default:
                 break;

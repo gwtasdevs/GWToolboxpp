@@ -100,7 +100,8 @@ namespace {
                 }
                 std::ranges::transform(release->version, release->version.begin(), [](const auto chr) { return static_cast<char>(std::tolower(chr)); });
                 release->body = js["body"].get<std::string>();
-                release->size = asset["size"].get<uintmax_t>();
+                auto size_bytes = asset["size"].get<uintmax_t>(); // Slight rounding, GitHub isn't always correct down to the byte.
+                release->size = static_cast<uintmax_t>(std::ceil(size_bytes / 16.0) * 16);
                 return release;
             }
         }
@@ -196,7 +197,8 @@ const GWToolboxRelease* Updater::GetCurrentVersionInfo(GWToolboxRelease* out)
     if (GetModuleFileNameA(GWToolbox::GetDLLModule(), path, sizeof(path)) == 0) {
         return nullptr;
     }
-    out->size = std::filesystem::file_size(path);
+    auto size_bytes = std::filesystem::file_size(path);
+    out->size = static_cast<uintmax_t>(std::ceil(size_bytes / 16.0) * 16);
     out->version = GWTOOLBOXDLL_VERSION;
     out->version.append(GWTOOLBOXDLL_VERSION_BETA);
     std::ranges::transform(out->version, out->version.begin(), [](const auto chr) {

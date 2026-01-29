@@ -147,6 +147,7 @@ private:
     Color color_eoe = 0;
     Color color_qz = 0;
     Color color_winnowing = 0;
+    Color color_frozen_soil = 0;
     Color color_target = 0;
     Color color_player = 0;
     Color color_player_dead = 0;

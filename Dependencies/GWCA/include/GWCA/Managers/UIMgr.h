@@ -333,7 +333,6 @@ namespace GW {
             SkillListViewMode,
             SoundQuality,
             StorageBagPage,
-            Territory,
             TextureLod,
             TexFilterMode,
             VolBackground,
@@ -356,7 +355,7 @@ namespace GW {
             MobileUiScale,
             GamepadCursorSpeed,
             LastLoginMethod,
-            Count = 44
+            Count = 0x2b
         };
         enum class FlagPreference : uint32_t {
             FlagPref_0x0,
@@ -840,7 +839,7 @@ namespace GW {
 
         GWCA_API bool TriggerFrameRedraw(UI::Frame* frame);
 
-        GWCA_API bool SetFramePosition(UI::Frame* frame, UI::FramePosition& position);
+        GWCA_API bool SetFramePosition(UI::Frame* frame, const UI::FramePosition* position);
 
         // When the player is actively using a game controller
         GWCA_API bool IsInControllerMode();

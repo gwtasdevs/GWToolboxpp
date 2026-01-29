@@ -164,6 +164,8 @@ namespace GW {
         struct Frame;
         void AsyncDecodeStr(const wchar_t* enc_str, std::wstring* out, GW::Constants::Language language_id = (GW::Constants::Language)0xff);
         bool BelongsToFrame(GW::UI::Frame* parent, GW::UI::Frame* child);
+
+        void Screenshot();
     }
     namespace Agents {
         bool IsAgentCarryingBundle(uint32_t agent_id);

@@ -11,8 +11,7 @@
 #include <Modules/PluginModule.h>
 
 class ChatCommands : public ToolboxModule {
-    const float DEFAULT_CAM_SPEED = 1000.f;            // 600 units per sec
-    const float ROTATION_SPEED = DirectX::XM_PI / 3.f; // 6 seconds for full rotation
+
 public:
     static ChatCommands& Instance()
     {
@@ -117,8 +116,6 @@ private:
     static std::vector<ToolboxUIElement*> CHAT_CMD_FUNC(MatchingWindows);
     static GW::UI::WindowID CHAT_CMD_FUNC(MatchingGWWindow);
 
-    float cam_speed = DEFAULT_CAM_SPEED;
-    bool forward_fix_z = true;
     uint32_t default_title_id = std::to_underlying(GW::Constants::TitleID::Lightbringer);
 
     struct SearchAgent {

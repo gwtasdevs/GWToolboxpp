@@ -199,16 +199,6 @@ namespace {
         GW::Chat::WriteChatEnc(packet->channel, rewritten_message.c_str(), sender->name_enc);
     }
 
-    // NPC dialog messages to emote chat
-    void OnSpeechDialogue(GW::HookStatus* status, const GW::Packet::StoC::DisplayDialogue* pak)
-    {
-        if (!redirect_npc_messages_to_emote_chat) {
-            return; // Disabled or message pending
-        }
-        WriteChatEnc(GW::Chat::Channel::CHANNEL_EMOTE, pak->message, pak->name);
-        status->blocked = true; // consume original packet.
-    }
-
     // Turn /wiki into /wiki <location>
     bool converting_message_into_url = false;
     void OnSendChat(GW::HookStatus* status, GW::UI::UIMessage message_id, void* wparam, void*)
@@ -318,8 +308,12 @@ namespace {
             return;
         switch (message_id) {
             case GW::UI::UIMessage::kDialogueMessage: {
-                auto packet = (uint32_t*)wParam;
-                (packet);
+                const auto packet = (GW::UI::UIPacket::kDialogueMessage*)wParam;
+                if (!redirect_npc_messages_to_emote_chat) {
+                    break; // Disabled or message pending
+                }
+                GW::Chat::WriteChatEnc(GW::Chat::Channel::CHANNEL_EMOTE, packet->message, packet->sender);
+                status->blocked = true; // consume original packet.
                 break;
             } break;
             case GW::UI::UIMessage::kAgentSpeechBubble: {
@@ -400,12 +394,6 @@ namespace {
 void ChatSettings::Initialize()
 {
     ToolboxModule::Initialize();
-
-    //GW::StoC::RegisterPacketCallback<GW::Packet::StoC::DisplayDialogue>(&DisplayDialogue_Entry, OnSpeechDialogue);
-
-    #ifdef _DEBUG
-    Log::Warning("TODO: OnSpeechDialogue UI message");
-    #endif
 
     constexpr GW::UI::UIMessage ui_messages[] = {
         GW::UI::UIMessage::kAgentSpeechBubble,

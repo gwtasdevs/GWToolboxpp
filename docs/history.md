@@ -7,6 +7,20 @@ layout: default
 Previous releases are available on Github as dll files. There is no support for older releases. If you are looking for
 the latest version, go to the [Home Page](./) instead.
 
+## Version 8.8
+* [Fix] Updated to work with GW 38092
+* [Fix] Fixed more compass related display and flagging issues
+* [Fix] Fixed occasional crash on shutdown and start related to minimap code
+* [Fix] Fixed gwtoolbox settings not saving to disk when closing gw via close button in top right
+* [Fix] Fixed repeated prompts to update toolbox caused by filesize rounding error
+* [Fix] Fixed occasional delayed loading caused by networking issues
+* [Fix] Fixed crash when trying to travel to nearest outpost and failing to find a suitable unlocked outpost
+* [Minor] Only play TTS when GW is in focus
+* [Minor] "Automatically cancel unyielding aura when re-casting" now also applies to heroes
+* [Minor] Added elite skills on world map for GW Beyond, and lots of other community amends for the elite skill locations on the world map :)
+* [New] Added options in game settings to automatically screenshot on vq/mission/title max
+* [New] Added camera unlock module; re-introduces stuff like camera speed and vertical movement from previous version of tb, but in a separate module.
+
 ## Version 8.7
 * [Fix] Fixed bug preventing gamepads from working as intended when toolbox is running (again)
 * [Fix] Fixed crash when using the reroll feature in some situations

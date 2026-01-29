@@ -32,6 +32,7 @@
 #include <Functiondiscoverykeys_devpkey.h>
 #include <endpointvolume.h>
 #include <mmdeviceapi.h>
+#include <GWCA/Managers/MemoryMgr.h>
 
 namespace {
 
@@ -1332,6 +1333,12 @@ return audio_data;
     {
         if (generating_voice || !audio) return;
         generating_voice = true;
+        if (GW::MemoryMgr::GetGWWindowHandle() != GetActiveWindow()) {
+            VoiceLog("Guild Wars not in focus");
+            delete audio;
+            generating_voice = false;
+            return;
+        }
         if (audio->gender == Gender::Unknown) {
             VoiceLog("Unknown Gender");
             delete audio;
@@ -1839,6 +1846,8 @@ void TextToSpeechModule::LoadSettings(ToolboxIni* ini)
     LOAD_BOOL(play_speech_bubbles_in_outpost);
     LOAD_BOOL(play_speech_bubbles_from_party_members);
     LOAD_BOOL(play_speech_from_vendors);
+    LOAD_BOOL(play_tts_in_explorable_areas);
+    LOAD_BOOL(play_tts_in_outposts);
 
     LOAD_FLOAT(npc_speech_bubble_range);
 
@@ -1858,6 +1867,13 @@ void TextToSpeechModule::LoadSettings(ToolboxIni* ini)
             VoiceProfile profile(voice_id, 0.5f, 0.5f, 0.5f, 1.0f, "");
             special_npc_voices[npc_id] = profile;
         }
+    }
+
+    // Load play_speech_from_race map
+    for (uint32_t i = 0; i < static_cast<uint32_t>(GWRace::Count); i++) {
+        GWRace race = static_cast<GWRace>(i);
+        std::string key = std::format("play_speech_from_race_{}", GetRaceName(race));
+        play_speech_from_race[race] = ini->GetBoolValue(Name(), key.c_str(), true);
     }
 }
 
@@ -1887,6 +1903,9 @@ void TextToSpeechModule::SaveSettings(ToolboxIni* ini)
     SAVE_BOOL(play_speech_bubbles_from_party_members);
     SAVE_BOOL(play_speech_from_vendors);
 
+    SAVE_BOOL(play_tts_in_explorable_areas);
+    SAVE_BOOL(play_tts_in_outposts);
+
     SAVE_FLOAT(npc_speech_bubble_range);
 
 
@@ -1905,6 +1924,12 @@ void TextToSpeechModule::SaveSettings(ToolboxIni* ini)
     for (const auto& [npc_id, voice_profile] : special_npc_voices) {
         std::string key = std::format("npc_voice_{}", npc_id);
         ini->SetValue(Name(), key.c_str(), voice_profile.voice_id.c_str());
+    }
+
+    // Save play_speech_from_race map
+    for (const auto& [race, enabled] : play_speech_from_race) {
+        std::string key = std::format("play_speech_from_race_{}", GetRaceName(race));
+        ini->SetBoolValue(Name(), key.c_str(), enabled);
     }
 }
 
