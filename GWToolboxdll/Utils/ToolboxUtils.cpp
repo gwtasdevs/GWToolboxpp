@@ -521,6 +521,7 @@ namespace GW {
         }
         void Screenshot() {
             GW::GameThread::Enqueue([] {
+                if (!GW::Map::GetIsMapLoaded() || !GW::Agents::GetControlledCharacter()) return;
                 const auto frame = GW::UI::GetFrameByLabel(L"Game");
                 Keypress(GW::UI::ControlAction_Screenshot, GW::UI::GetChildFrame(frame, 6));
                 Keypress(GW::UI::ControlAction_Screenshot, GW::UI::GetParentFrame(frame));
