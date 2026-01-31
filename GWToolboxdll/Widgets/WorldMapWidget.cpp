@@ -365,6 +365,7 @@ namespace {
             case GW::UI::UIMessage::kMapLoaded:
                 map_portals.clear();
                 AppendMapPortals();
+                QuestModule::FetchMissingQuestInfo();
                 break;
         }
     }
@@ -759,7 +760,7 @@ void WorldMapWidget::Initialize()
 
     const GW::UI::UIMessage ui_messages[] = {GW::UI::UIMessage::kQuestAdded, GW::UI::UIMessage::kSendSetActiveQuest, GW::UI::UIMessage::kMapLoaded, GW::UI::UIMessage::kOnScreenMessage, GW::UI::UIMessage::kSendAbandonQuest};
     for (auto ui_message : ui_messages) {
-        GW::UI::RegisterUIMessageCallback(&OnUIMessage_HookEntry, ui_message, OnUIMessage);
+        GW::UI::RegisterUIMessageCallback(&OnUIMessage_HookEntry, ui_message, OnUIMessage,0x8000);
     }
 }
 

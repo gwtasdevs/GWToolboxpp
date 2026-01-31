@@ -36,7 +36,8 @@ namespace GW {
     static_assert(sizeof(TitleTier) == 0xc, "struct TitleTier has incorrect size");
 
     struct TitleClientData {
-        uint32_t title_id;
+        uint32_t title_flags;
+        GW::Constants::TitleID title_id;
         uint32_t name_id;
     };
     typedef Array<Title> TitleArray;

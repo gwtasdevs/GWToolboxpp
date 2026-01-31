@@ -274,7 +274,9 @@ namespace {
             }
             case 0x200C: {
                 // Zero Width Non-Joiner - location on disk
-                const std::filesystem::path p(&name[1]);
+                std::wstring path = &name[1];
+                path = TextUtils::str_replace_all(path, L"\x00A0", L" ");
+                const std::filesystem::path p(path);
                 ShellExecuteW(nullptr, L"open", p.parent_path().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
                 status->blocked = true;
                 return;

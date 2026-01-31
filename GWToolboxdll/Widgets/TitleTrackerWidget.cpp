@@ -202,7 +202,7 @@ namespace {
     GW::ScrollableFrame::SortHandler_pt OriginalSortHandler = 0;
     bool OverrideTitleSortOrder(bool _override = true)
     {
-        const auto frame = (GW::ScrollableFrame*)GW::UI::GetChildFrame(GW::UI::GetFrameByLabel(L"Attributes"), 2, 2, 0);
+        const auto frame = (GW::ScrollableFrame*)GW::UI::GetChildFrame(GW::UI::GetFrameByLabel(L"Attributes"), 5, 2, 0);
         if (!frame) return false;
         if (!OriginalSortHandler) {
             OriginalSortHandler = frame->GetSortHandler();

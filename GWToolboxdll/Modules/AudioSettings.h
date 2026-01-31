@@ -46,8 +46,11 @@ public:
     static bool StopSound(void* handle);
     static void RegisterPlaySoundCallback(GW::HookEntry* hook_entry, PlaySoundCallback callback);
     static void RemovePlaySoundCallback(GW::HookEntry* hook_entry);
+    static void BlockSoundForMs(const wchar_t* filename, clock_t ms);
+
     void Initialize() override;
     void SignalTerminate() override;
+    void Update(float) override;
     void LoadSettings(ToolboxIni*) override;
     void SaveSettings(ToolboxIni*) override;
     void DrawSettingsInternal() override;

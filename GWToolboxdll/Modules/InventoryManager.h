@@ -74,10 +74,6 @@ public:
     static uint16_t CountItemsByName(const wchar_t* name_enc);
 
     bool DrawItemContextMenu(bool open = false);
-    void IdentifyAll(IdentifyAllType type);
-    void SalvageAll(SalvageAllType type);
-    [[nodiscard]] bool IsPendingIdentify() const;
-    [[nodiscard]] bool IsPendingSalvage() const;
     // Find an empty (or partially empty) inventory slot that this item can go into
     static std::pair<GW::Bag*, uint32_t> GetAvailableInventorySlot(GW::Item* like_item = nullptr);
     static uint16_t RefillUpToQuantity(uint16_t quantity, const std::vector<uint32_t>& model_ids);
@@ -88,39 +84,11 @@ public:
     static bool IsSameItem(const GW::Item* item1, const GW::Item* item2);
 
     static void ItemClickCallback(GW::HookStatus*, GW::UI::UIPacket::kMouseAction*, GW::Item*);
-    static void OnUIMessage(GW::HookStatus*, GW::UI::UIMessage, void*, void*);
 
 
-    IdentifyAllType identify_all_type = IdentifyAllType::None;
-    SalvageAllType salvage_all_type = SalvageAllType::None;
 
 protected:
     void ShowVisibleRadio() override { }
-
-private:
-
-
-
-    void ContinueIdentify();
-
-    // Process ongoing logic for salvaging on the update loop
-    void ContinueSalvage();
-
-    GW::HookEntry on_map_change_entry;
-    GW::HookEntry salvage_hook_entry;
-    GW::HookEntry transaction_hook_entry;
-    GW::HookEntry ItemClick_Entry;
-
-
-    void FetchPotentialItems();
-    void CancelSalvage();
-    void CancelIdentify();
-    void CancelAll();
-    void ContinueTransaction();
-    void CancelTransaction();
-    static void ClearTransactionSession(GW::HookStatus* status = nullptr, void* packet = nullptr);
-    void AttachTransactionListeners();
-    void DetachTransactionListeners();
 
 public:
     struct Item : GW::Item {
@@ -212,119 +180,5 @@ public:
         }
     };
 
-    Item* GetNextUnsalvagedItem(const Item* salvage_kit = nullptr, const Item* start_after_item = nullptr);
-    Item* GetNextUnidentifiedItem(const Item* start_after_item = nullptr) const;
-    void Identify(const Item* item, const Item* kit);
-    void Salvage(Item* item, const Item* kit);
-
-    uint32_t stack_prompt_item_id = 0;
-
-private:
-    struct TransactItems {
-        uint32_t type = 0;
-        uint32_t gold_give = 0;
-        uint32_t item_give_count = 0;
-        uint32_t item_give_ids[16]{};
-        uint32_t item_give_quantities[16]{};
-        uint32_t gold_recv = 0;
-        uint32_t item_recv_count = 0;
-        uint32_t item_recv_ids[16]{};
-        uint32_t item_recv_quantities[16]{};
-    };
-
-    struct CtoS_QuoteItem {
-        uint32_t header = 0;
-        uint32_t type = 0;
-        uint32_t unk1 = 0;
-        uint32_t gold_give = 0;
-        uint32_t item_give_count = 0;
-        uint32_t item_give_ids[16]{};
-        uint32_t gold_recv = 0;
-        uint32_t item_recv_count = 0;
-        uint32_t item_recv_ids[16]{};
-    };
-
-    static_assert(sizeof(CtoS_QuoteItem) == 0x9C);
-
-    struct PendingTransaction {
-        enum State : uint8_t {
-            None,
-            Prompt,
-            Pending,
-            Quoting,
-            Quoted,
-            Transacting
-        } state = None;
-
-        GW::Merchant::TransactionType type = (GW::Merchant::TransactionType)0;
-        uint32_t price = 0;
-        uint32_t item_id = 0;
-        clock_t state_timestamp = 0;
-        uint8_t retries = 0;
-
-        void setState(const State _state)
-        {
-            state = _state;
-            state_timestamp = clock();
-        }
-        Item* item() const;
-        bool in_progress() const { return state > Prompt; }
-        bool selling();
-    };
-
-
-    struct PendingItem {
-        uint32_t item_id = 0;
-        uint32_t slot = 0;
-        GW::Constants::Bag bag = (GW::Constants::Bag)0;
-        uint32_t uses = 0;
-        uint32_t quantity = 0;
-        bool set(const Item* item = nullptr);
-        GuiUtils::EncString* name = nullptr;
-        GuiUtils::EncString* desc = nullptr;
-        GuiUtils::EncString* wiki_name = nullptr;
-
-        class PluralEncString : public GuiUtils::EncString {
-        protected:
-            void sanitise() override;
-        };
-
-        PluralEncString* plural_item_name = nullptr;
-
-        Item* item() const;
-        PendingItem() { 
-            plural_item_name = new PluralEncString{}; 
-            name = new GuiUtils::EncString{};
-            desc = new GuiUtils::EncString{};
-            wiki_name = new GuiUtils::EncString{};
-        }
-        ~PendingItem() { 
-            plural_item_name->Release(); 
-            name->Release();
-            desc->Release();
-            wiki_name->Release(); 
-        }
-    };
-
-    struct PotentialItem : PendingItem {
-        bool proceed = true;
-    };
-
-    std::vector<PotentialItem*> potential_salvage_all_items{}; // List of items that would be processed if user confirms Salvage All
-    void ClearPotentialItems();
-    PendingItem pending_identify_item;
-    PendingItem pending_identify_kit;
-    PendingItem pending_salvage_item;
-    PendingItem pending_salvage_kit;
-    PendingTransaction pending_transaction;
-
-    int pending_transaction_amount = 0;
-    bool pending_cancel_transaction = false;
-    bool is_transacting = false;
-    bool has_prompted_transaction = false;
-
-    clock_t pending_salvage_at = 0;
-    clock_t pending_identify_at = 0;
-    PendingItem context_item;
-    bool pending_cancel_salvage = false;
+    static Item* GetNextUnsalvagedItem(const Item* salvage_kit = nullptr, const Item* start_after_item = nullptr);
 };

@@ -11,6 +11,7 @@
 #include <GWCA/Managers/GameThreadMgr.h>
 #include <GWCA/Managers/UIMgr.h>
 #include <Utils/GuiUtils.h>
+#include <Timer.h>
 
 namespace {
 
@@ -22,6 +23,8 @@ namespace {
 
     std::map<GW::HookEntry*, PlaySoundCallback> play_sound_callbacks;
     std::map<GW::HookEntry*, PlaySoundCallback> play_music_callbacks;
+
+    std::map<std::wstring, clock_t> blocked_sounds_until;
 
 struct MusicData {
         uint32_t h0000[10];
@@ -95,14 +98,19 @@ struct MusicData {
 
         // Check if sound should be played
         if (!status.blocked) {
-            const auto found = force_play_sound ? blocked_sounds.end() : std::ranges::find(blocked_sounds, filename);
-
-            if (found == blocked_sounds.end()) {
+            if (!force_play_sound) {
+                bool found = std::ranges::find(blocked_sounds, filename) != blocked_sounds.end();
+                if (!found) {
+                    found = blocked_sounds_until.contains(filename);
+                }
+                if (!found) {
+                    ret = ret_func(filename, props);
+                }
+            }
+            else {
                 ret = ret_func(filename, props);
             }
         }
-
-
 
         GW::Hook::LeaveHook();
         return ret;
@@ -196,6 +204,9 @@ void AudioSettings::RemovePlaySoundCallback(GW::HookEntry* hook_entry)
         play_sound_callbacks.erase(found);
     }
 }
+void AudioSettings::BlockSoundForMs(const wchar_t* filename, clock_t ms) {
+    blocked_sounds_until[filename] = TIMER_INIT() + ms;
+}
 void AudioSettings::Initialize()
 {
     ToolboxModule::Initialize();
@@ -226,6 +237,14 @@ void AudioSettings::Initialize()
     #endif
     GW::UI::RegisterUIMessageCallback(&OnUIMessage_HookEntry, GW::UI::UIMessage::kMapChange, OnPostUIMessage, 0x8000);
 
+}
+void AudioSettings::Update(float) {
+    for (auto& it : blocked_sounds_until) {
+        if (it.second < TIMER_INIT()) {
+            blocked_sounds_until.erase(it.first);
+            break;
+        }
+    }
 }
 void AudioSettings::SignalTerminate()
 {

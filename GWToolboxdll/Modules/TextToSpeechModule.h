@@ -32,6 +32,7 @@ public:
 
     void Initialize() override;
     void Terminate() override;
+    void Update(float) override;
     void LoadSettings(ToolboxIni* ini) override;
     void SaveSettings(ToolboxIni* ini) override;
     void DrawSettingsInternal() override;

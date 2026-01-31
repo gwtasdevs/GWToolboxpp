@@ -422,10 +422,14 @@ void Resources::Initialize()
 
 void Resources::Cleanup()
 {
+    should_stop = true;
     for (const auto worker : workers) {
-        while (worker->is_running)
+        for (size_t i = 0; i < 5000; i += 10) {
+            if (!worker->is_running) 
+                break;
             Sleep(10);
-        delete worker;
+        }
+        delete worker; // Will trigger assertion
     }
     workers.clear();
     for (const auto& tex : skill_images | std::views::values) {

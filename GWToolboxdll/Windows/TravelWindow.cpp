@@ -857,6 +857,7 @@ GW::Constants::MapID TravelWindow::GetNearestOutpost(const GW::Constants::MapID 
     }
 
     const GW::AreaInfo* this_map = GW::Map::GetMapInfo(map_to);
+    if (!this_map) return GW::Constants::MapID::None;
     float nearest_distance = std::numeric_limits<float>::max();
     auto nearest_map_id = GW::Constants::MapID::None;
 
@@ -884,7 +885,7 @@ GW::Constants::MapID TravelWindow::GetNearestOutpost(const GW::Constants::MapID 
         if (!(IsValidOutpost(map_id) && GW::Map::GetMapInfo(map_id)->GetIsOnWorldMap()))
             continue;
         const auto map_info = GW::Map::GetMapInfo(map_id);
-        if (map_info->continent != this_map->continent)
+        if (!(map_info && map_info->continent == this_map->continent))
             continue;
         //if ((map_info->flags & 0x5000000) != 0)
         //   continue; // e.g. "wrong" augury rock is map 119, no NPCs

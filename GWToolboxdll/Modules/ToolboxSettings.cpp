@@ -164,7 +164,6 @@ namespace {
         ExtraWeaponSets::Instance(),
 #endif
         {TextToSpeechModule::Instance(), false},
-        AudioSettings::Instance(),   
         FpsFix::Instance(),          
         GamepadModule::Instance(),
         CameraUnlockModule::Instance()
@@ -252,6 +251,7 @@ void ToolboxSettings::LoadModules(ToolboxIni* ini)
 #endif
     GWToolbox::ToggleModule(PathfindingWindow::Instance());
     GWToolbox::ToggleModule(VendorFix::Instance());
+    GWToolbox::ToggleModule(AudioSettings::Instance()); 
 
     for (const auto& m : optional_modules) {
         GWToolbox::ToggleModule(*m.toolbox_module, m.enabled);

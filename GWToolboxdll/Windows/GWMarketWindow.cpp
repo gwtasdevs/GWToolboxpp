@@ -46,7 +46,7 @@ namespace {
     using easywsclient::WebSocket;
     using json = nlohmann::json;
 
-    const char* market_host = "v2.gwmarket.net";
+    const char* market_host = "gwmarket.net";
     const char* market_name = "GWMarket.net";
     std::string market_uuid = "";
 

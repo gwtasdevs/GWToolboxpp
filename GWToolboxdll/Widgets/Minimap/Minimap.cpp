@@ -40,6 +40,7 @@
 #include "Minimap.h"
 #include <Defines.h>
 #include <Modules/Resources.h>
+#include <Modules/QuestModule.h>
 #include <Utils/TextUtils.h>
 
 namespace {
@@ -244,7 +245,7 @@ namespace {
             position->state |= 1;
         }
         else {
-            position->state &= 0xfffffff0;
+            position->state &= ~1;
         }
         // Swap position out, send UI message to cascade to frames, then set back to original
         GW::UI::SendUIMessage(GW::UI::UIMessage::kUIPositionChanged, &packet);
@@ -545,30 +546,7 @@ namespace {
 
     void PreloadQuestMarkers()
     {
-        if (const auto quest_log = GW::QuestMgr::GetQuestLog()) {
-            GW::GameThread::Enqueue([quest_log] {
-                if (!quest_log || !quest_log->size()) {
-                    return;
-                }
-                const auto active_quest_id = GW::QuestMgr::GetActiveQuestId();
-                const auto map_id = GW::Map::GetMapID();
-
-                for (const auto& quest : *quest_log) {
-                    // Limit requests to the server:
-                    // * Don't load the marker for the active quest - the game already handles that
-                    //   and us doing it will trigger an extra unwanted UI event
-                    // * Only request quests whose markers are not yet loaded (marker = (INF,INF))
-                    // * Only request quests whose destination zone is unknown or the current zone
-                    if (quest.quest_id != active_quest_id &&
-                        quest.marker.x == std::numeric_limits<float>::infinity() && quest.marker.y == std::numeric_limits<float>::infinity() &&
-                        (quest.map_to == GW::Constants::MapID::Count || quest.map_to == map_id)) {
-                        GW::QuestMgr::RequestQuestInfoId(quest.quest_id, true);
-                    }
-                }
-
-                GW::QuestMgr::SetActiveQuestId(active_quest_id);
-            });
-        }
+        QuestModule::FetchMissingQuestInfo();
     }
 
 

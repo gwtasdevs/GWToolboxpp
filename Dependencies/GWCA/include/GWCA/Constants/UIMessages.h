@@ -258,9 +258,10 @@ namespace GW {
             kGetInventoryAgentId = 0x100001A1,           // 0x100001A1, wparam = 0, lparam = uint32_t* agent_id_out. Used to fetch which agent is selected
             kEquipItem = 0x100001A2,                     // 0x100001A2, wparam = { item_id, agent_id }
             kMoveItem = 0x100001A3,                      // 0x100001A3, wparam = { item_id, to_bag, to_slot, bool prompt }
-            kInitiateTrade = 0x100001A5,                 // 0x100001A5
-            kInventoryAgentChanged = 0x100001B5,         // 0x100001B5, Triggered when inventory needs updating due to agent change; no args
-            kOpenTemplate = 0x100001BE,                  // 0x100001BE, wparam = GW::UI::ChatTemplate*
+            kInitiateTrade = 0x100001A6,                 // 0x100001A5
+            kInventoryAgentChanged = 0x100001B6,         // 0x100001B5, Triggered when inventory needs updating due to agent change; no args
+            kPromptSaveTemplate = 0x100001be,
+            kOpenTemplate = 0x100001Bf,                  // 0x100001BE, wparam = GW::UI::ChatTemplate*
 
             // GWCA Client to Server commands. Only added the ones that are used for hooks, everything else goes straight into GW
 
@@ -286,7 +287,8 @@ namespace GW {
             kPrintChatMessage = 0x30000000 | 0x1F, // wparam = UIPacket::kPrintChatMessage*. Triggered when a message wants to be added to the in-game chat window.
             kSendWorldAction = 0x30000000 | 0x20, // wparam = UIPacket::kSendWorldAction*
             kSetRendererValue = 0x30000000 | 0x21, // wparam = UIPacket::kSetRendererValue
-            kIdentifyItem = 0x30000000 | 0x22  // wparam = UIPacket::kIdentifyItem
+            kIdentifyItem = 0x30000000 | 0x22,  // wparam = UIPacket::kUseKitOnItem
+            kSalvageItem = 0x30000000 | 0x23  // wparam = UIPacket::kUseKitOnItem
         };
 
         namespace UIPacket {
@@ -323,7 +325,7 @@ namespace GW {
                 uint32_t* h0010;
                 uint32_t h0014;
             };
-            struct kIdentifyItem {
+            struct kUseKitOnItem {
                 uint32_t item_id;
                 uint32_t kit_id;
             };
@@ -487,8 +489,8 @@ namespace GW {
 
             struct kKeyAction {
                 uint32_t gw_key;
-                uint32_t h0004 = 0x4000;
-                uint32_t h0008 = 6;
+                uint32_t modifiers = 0;
+                uint32_t state_flags = 0; // shift held = 0x4, ctrl = 0x2, alt = 0x1
             };
             struct kMouseClick {
                 uint32_t mouse_button; // 0x0 = left, 0x1 = middle, 0x2 = right

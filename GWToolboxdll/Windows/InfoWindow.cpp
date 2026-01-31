@@ -196,6 +196,10 @@ namespace {
                 if (GW::UI::UInt32ToEncStr(map_info->name_id, name_enc, 8)) {
                     EncInfoField("Name Enc", name_enc);
                 }
+                static wchar_t desc_enc[8];
+                if (GW::UI::UInt32ToEncStr(map_info->description_id, desc_enc, 8)) {
+                    EncInfoField("Desc Enc", desc_enc);
+                }
             }
             ImGui::TreePop();
         }

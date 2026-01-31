@@ -492,26 +492,26 @@ namespace GW
 
             namespace SummoningStone
             {
-                constexpr int ImperialCripplingSlash = 9041;
-                constexpr int ImperialTripleChop = 9042;
-                constexpr int ImperialBarrage = 9043;
-                constexpr int ImperialQuiveringBlade = 9044;
-                constexpr int TenguHundredBlades = 9045;
-                constexpr int TenguBroadHeadArrow = 9046;
-                constexpr int TenguPalmStrike = 9047;
-                constexpr int TenguLifeSheath = 9048;
-                constexpr int TenguAngchuElementalist = 9049;
-                constexpr int TenguFeveredDreams = 9050;
-                constexpr int TenguSpitefulSpirit = 9051;
-                constexpr int TenguPreservation = 9052;
-                constexpr int TenguPrimalRage = 9053;
-                constexpr int TenguGlassArrows = 9054;
-                constexpr int TenguWayOftheAssassin = 9055;
-                constexpr int TenguPeaceandHarmony = 9056;
-                constexpr int TenguSandstorm = 9057;
-                constexpr int TenguPanic = 9058;
-                constexpr int TenguAuraOftheLich = 9059;
-                constexpr int TenguDefiantWasXinrae = 9060;
+                constexpr int ImperialCripplingSlash = 9043;
+                constexpr int ImperialTripleChop = 9044;
+                constexpr int ImperialBarrage = 9045;
+                constexpr int ImperialQuiveringBlade = 9046;
+                constexpr int TenguHundredBlades = 9047;
+                constexpr int TenguBroadHeadArrow = 9048;
+                constexpr int TenguPalmStrike = 9049;
+                constexpr int TenguLifeSheath = 9050;
+                constexpr int TenguAngchuElementalist = 9051;
+                constexpr int TenguFeveredDreams = 9052;
+                constexpr int TenguSpitefulSpirit = 9053;
+                constexpr int TenguPreservation = 9054;
+                constexpr int TenguPrimalRage = 9055;
+                constexpr int TenguGlassArrows = 9056;
+                constexpr int TenguWayOftheAssassin = 9057;
+                constexpr int TenguPeaceandHarmony = 9058;
+                constexpr int TenguSandstorm = 9059;
+                constexpr int TenguPanic = 9060;
+                constexpr int TenguAuraOftheLich = 9061;
+                constexpr int TenguDefiantWasXinrae = 9062;
             }
         }
     }

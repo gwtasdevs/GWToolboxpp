@@ -7,6 +7,20 @@ layout: default
 Previous releases are available on Github as dll files. There is no support for older releases. If you are looking for
 the latest version, go to the [Home Page](./) instead.
 
+## Version 8.9
+* [Fix] Fixed crash when trying to save a skillbar in-game whilst toolbox is running
+* [Fix] Fixed issues with title display/use after gw update 38106
+* [Fix] Fixed issue causing minimap to reset position on map load
+* [Fix] Fixed title sort order not doing anything in the title widget
+* [Fix] Tengu/imperial summoning stones now match their skill properly when the setting is enabled
+* [Fix] Fixed bug preventing rerolling if you have an empty character slot in some situations
+* [Fix] Fixed bug causing some NPC dialogue messages from being processed twice for TTS
+* [Fix] Fixed some issues preventing quest markers for non-active quests from being displayed on world map when enabled
+* [Fix] Fixed bug preventing the "salvage all" feature from working with a lesser kit on purple/gold items
+* [Fix] Automatic screenshots now include the UI when taken; was previously emulating the shift+screenshot functionality
+* [Minor] Changed ui for managing items that you want to hide from the merchant - you can't add via model id anymore, but you can add via item context menu instead.
+* [New] Added item context menu option to prevent some items from being salvaged accidentally - you can remove these entries in inventory settings
+
 ## Version 8.8
 * [Fix] Updated to work with GW 38092
 * [Fix] Fixed more compass related display and flagging issues

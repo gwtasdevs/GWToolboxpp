@@ -69,7 +69,8 @@ namespace {
     };
     static_assert(sizeof(DialogueFrameContext) == 0x14);
 
-    uint32_t current_dialogue_1_agent_id = 0;
+    uint32_t last_dialogue_message_agent_id = 0;
+    clock_t last_dialogue_message_time = 0;
 
     DialogueFrameContext* GetCurrentlyShowingDialogue() {
         struct UIFrameQueue_Context {
@@ -533,6 +534,7 @@ namespace {
         ~PendingNPCAudio();
     };
     std::vector<PendingNPCAudio*> pending_audio; // Maps agent ID to pending audio generation requests
+    std::recursive_mutex playing_audio_mutex;
     std::map<uint32_t, PendingNPCAudio*> playing_audio_map; // Maps agent ID to currently playing audio
 
         // Function to estimate audio duration from file size (rough approximation)
@@ -558,6 +560,7 @@ namespace {
 
     void CancelDialogSpeech(uint32_t agent_id)
     {
+        std::lock_guard<std::recursive_mutex> lock(playing_audio_mutex);
         const auto found = playing_audio_map.find(agent_id);
         if (found != playing_audio_map.end()) {
             delete found->second;
@@ -566,6 +569,7 @@ namespace {
 
     void ClearSounds()
     {
+        std::lock_guard<std::recursive_mutex> lock(playing_audio_mutex);
         while (playing_audio_map.size()) {
             delete playing_audio_map.begin()->second;
         }
@@ -575,10 +579,16 @@ namespace {
     }
     void PendingNPCAudio::Play()
     {
+        std::lock_guard<std::recursive_mutex> lock(playing_audio_mutex);
         const auto found = playing_audio_map.find(agent_id);
-        if (found != playing_audio_map.end() && found->second != this) {
-            delete found->second;
+        if (found != playing_audio_map.end()) {
+            if (found->second->path == this->path && found->second->IsPlaying()) {
+                delete this; // Don't play the same audio
+                return;
+            }
+            if (found->second != this) delete found->second;
         }
+
         // Don't play more than one dialog track at once
         Stop();
         if (!duration)
@@ -609,6 +619,7 @@ namespace {
     PendingNPCAudio::~PendingNPCAudio()
     {
         Stop();
+        std::lock_guard<std::recursive_mutex> lock(playing_audio_mutex);
         const auto found = playing_audio_map.find(agent_id);
         if (found != playing_audio_map.end()) {
             playing_audio_map.erase(found);
@@ -630,10 +641,21 @@ namespace {
         encoded_message = NeedToPreprocessEncodedStr() ? PreprocessEncodedTextForTTS(message) : message;
         profile = GetVoiceProfile(agent_id, GW::Map::GetMapID());
         language = GetAudioLanguage();
+        std::lock_guard<std::recursive_mutex> lock(playing_audio_mutex);
         pending_audio.push_back(this);
     }
 
     bool generating_voice = false;
+
+    PendingNPCAudio* FindAlreadyProcessingAudio(PendingNPCAudio* compare) {
+        if(!compare) return nullptr;
+        std::lock_guard<std::recursive_mutex> lock(playing_audio_mutex);
+        for (auto audio : pending_audio) {
+            if (audio != compare && audio->agent_id == compare->agent_id && audio->encoded_message == compare->encoded_message && audio->IsPlaying()) 
+                return audio;
+        }
+        return nullptr;
+    }
 
 
     GW::GamePos GetPlayerPosition()
@@ -860,6 +882,10 @@ namespace {
             delete audio;
             return;
         }
+        if (FindAlreadyProcessingAudio(audio)) {
+            delete audio;
+            return;
+        }
         GW::UI::AsyncDecodeStr(
             audio->encoded_message.c_str(),
             [](void* param, const wchar_t* s) {
@@ -992,19 +1018,21 @@ namespace {
                 // Enqueue for next thread; GetCurrentlyShowingDialogue hasn't been cleared just yet.
                 GW::GameThread::Enqueue([]() {
                     const auto current = GetCurrentlyShowingDialogue();
-                    CancelDialogSpeech(current_dialogue_1_agent_id);
                     if (current) {
                         const auto frame = GW::UI::GetFrameById(current->frame_id);
                         const auto message_frame = (GW::MultiLineTextLabelFrame*)GW::UI::GetChildFrame(frame, 1);
                         const auto message_enc = message_frame ? message_frame->GetEncodedLabel() : nullptr;
                         if (message_enc && current->agent_id) {
+                            if (TIMER_DIFF(last_dialogue_message_time) < 2000 && current->agent_id == last_dialogue_message_agent_id) 
+                                return;
                             CancelDialogSpeech(current->agent_id);
+                            Log::Log("GenerateVoiceFromEncodedString for %d (Dialogue Message)", current->agent_id);
                             GenerateVoiceFromEncodedString(new PendingNPCAudio(current->agent_id, message_enc, true));
-                            current_dialogue_1_agent_id = current->agent_id;
+                            last_dialogue_message_time = TIMER_INIT();
+                            last_dialogue_message_agent_id = current->agent_id;
                             return;
                         }
                     }
-                    current_dialogue_1_agent_id = 0;
                 });
             } break;
             case GW::UI::UIMessage::kMapChange:
@@ -1374,8 +1402,10 @@ return audio_data;
         }
 
         Resources::EnqueueWorkerTask([audio]() {
-            if (std::ranges::find(pending_audio, audio) == pending_audio.end())
-                return generating_voice = false;
+            {
+                std::lock_guard<std::recursive_mutex> lock(playing_audio_mutex);
+                if (std::ranges::find(pending_audio, audio) == pending_audio.end()) return generating_voice = false;
+            }
 
             const auto api_config = GetCurrentAPIConfig();
 
@@ -1391,7 +1421,10 @@ return audio_data;
             std::string audio_data = "";
             
             audio_data = api_config ? api_config->callback(audio) : "";
-            if (std::ranges::find(pending_audio, audio) == pending_audio.end()) return generating_voice = false;
+            {
+                std::lock_guard<std::recursive_mutex> lock(playing_audio_mutex);
+                if (std::ranges::find(pending_audio, audio) == pending_audio.end()) return generating_voice = false;
+            }
             if (!audio_data.size()) {
                 VoiceLog("Failed to generate voice data");
                 delete audio;
@@ -1413,7 +1446,11 @@ return audio_data;
                 delete audio;
                 return generating_voice = false;
             }
-            if (std::ranges::find(pending_audio, audio) == pending_audio.end()) return generating_voice = false;
+            {
+                std::lock_guard<std::recursive_mutex> lock(playing_audio_mutex);
+                if (std::ranges::find(pending_audio, audio) == pending_audio.end()) return generating_voice = false;
+            }
+            
             audio->Play();
             return generating_voice = false;
             });
@@ -1439,6 +1476,7 @@ return audio_data;
             status->blocked = true;
             return;
         }
+        std::lock_guard<std::recursive_mutex> lock(playing_audio_mutex);
         const auto found = playing_audio_map.find(agent_id);
         if (found != playing_audio_map.end() && found->second->IsPlaying()) {
             // If we already have a playing audio for this agent, block the sound
@@ -1481,6 +1519,7 @@ return audio_data;
                     break;
                 if (GW::GetDistance(agent->pos, GetPlayerPosition()) > npc_speech_bubble_range)
                     break; // Ignore distant NPCs
+                Log::Log("GenerateVoiceFromEncodedString for %d (Speech Bubble)", agent_id);
                 GenerateVoiceFromEncodedString(new PendingNPCAudio(agent_id, message_enc));
             } break;
         }
@@ -1489,6 +1528,20 @@ return audio_data;
     
 
 } // namespace
+
+void TextToSpeechModule::Update(float delta) {
+    static float last_check = 0.f;
+    last_check += delta;
+    if (last_check < 1.f) return;
+    last_check = 0.f;
+    std::lock_guard<std::recursive_mutex> lock(playing_audio_mutex);
+    for (auto& it : playing_audio_map) {
+        if (TIMER_DIFF(it.second->started) > std::max(it.second->duration, (clock_t)10000)) {
+            delete it.second;
+            break;
+        }
+    }
+}
 
 void TextToSpeechModule::Initialize()
 {

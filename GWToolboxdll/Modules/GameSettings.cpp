@@ -2898,28 +2898,33 @@ void GameSettings::OnWriteChat(GW::HookStatus* status, GW::UI::UIMessage, void* 
         return;
     }
     status->blocked = true;
-    wchar_t file_path[256];
-    size_t file_path_len = 0;
-    wchar_t new_message[256];
-    size_t new_message_len = 0;
-    wcscpy(&new_message[new_message_len], L"\x846\x107<a=1>\x200C");
-    new_message_len += 8;
+    std::wstring file_path;
+    std::wstring new_message;
+    file_path.reserve(256);
+    new_message.reserve(256);
+    new_message.append(L"\x846\x107<a=1>\x200C");
     for (size_t i = 2; msg->message[i] && msg->message[i] != 0x1; i++) {
-        new_message[new_message_len++] = msg->message[i];
-        if (msg->message[i] == '\\' && msg->message[i - 1] == '\\') {
+        const wchar_t ch = msg->message[i];
+        if (ch == L'\r' || ch == L'\n') {
+            new_message.push_back(L' ');
+            continue;
+        }
+        if (ch == L' ') {
+            new_message.push_back(L'\x00A0'); // NBSP keeps the link intact while looking like a space
+        } else {
+            new_message.push_back(ch);
+        }
+        if (ch == '\\' && msg->message[i - 1] == '\\') {
             continue; // Skip double escaped directory separators when getting the actual file name
         }
-        file_path[file_path_len++] = msg->message[i];
+        file_path.push_back(ch);
     }
-    file_path[file_path_len] = 0;
-    wcscpy(&new_message[new_message_len], L"</a>\x1");
-    new_message_len += 5;
-    new_message[new_message_len] = 0;
+    new_message.append(L"</a>\x1");
     is_redirecting = true;
-    WriteChatEnc(static_cast<GW::Chat::Channel>(msg->channel), new_message);
+    WriteChatEnc(static_cast<GW::Chat::Channel>(msg->channel), new_message.c_str());
     // Copy file to clipboard
 
-    const auto size = sizeof(DROPFILES) + (file_path_len + 2) * sizeof(wchar_t);
+    const auto size = sizeof(DROPFILES) + (file_path.size() + 2) * sizeof(wchar_t);
     const HGLOBAL hGlobal = GlobalAlloc(GMEM_MOVEABLE, size);
     ASSERT(hGlobal != nullptr);
     const auto df = static_cast<DROPFILES*>(GlobalLock(hGlobal));
@@ -2928,7 +2933,7 @@ void GameSettings::OnWriteChat(GW::HookStatus* status, GW::UI::UIMessage, void* 
     df->pFiles = sizeof(DROPFILES);
     df->fWide = TRUE;
     const auto ptr = (LPWSTR)(df + 1);
-    lstrcpyW(ptr, file_path);
+    lstrcpyW(ptr, file_path.c_str());
     GlobalUnlock(hGlobal);
 
     // prepare the clipboard

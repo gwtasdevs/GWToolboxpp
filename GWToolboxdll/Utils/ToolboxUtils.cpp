@@ -349,27 +349,61 @@ namespace GW {
 
             uint32_t selected_idx = 0;
             GW::UI::SendFrameUIMessage(panes, GW::UI::UIMessage::kFrameMessage_0x4a, 0, (void*)&selected_idx);
+
+            uint32_t target_idx = 0xffff;
+
+            const auto len = ctx->chars.size();
+
             bool chosen = false;
-            for (size_t i = 0; !chosen && i < ctx->chars.size(); i++) {
+            for (size_t i = 0; !chosen && i < len; i++) {
                 const auto c = ctx->chars[i];
                 if (!(c && wcscmp(c->name, name) == 0)) 
                     continue; // Not this character
-                while (selected_idx != i) {
-                    // Traverse the character panes until the correct index is selected
-                    GW::UI::UIPacket::kKeyAction action;
-                    action.gw_key = 0x1c; // Emulate keypress
-                    GW::UI::SendFrameUIMessage(panes, GW::UI::UIMessage::kKeyDown, &action);
-                    auto new_idx = selected_idx;
-                    GW::UI::SendFrameUIMessage(panes, GW::UI::UIMessage::kFrameMessage_0x4a, 0, (void*)&new_idx);
-                    if (new_idx == selected_idx) {
-                        break; // This shouln't happen - the character should have changed
-                    }
-                    selected_idx = new_idx;
-                }
-                chosen = selected_idx == i;
+                target_idx = i;
                 break;
             }
-            if (!chosen) return false;
+            if (target_idx > len) 
+                return false;
+
+
+            auto select_char = [&](size_t idx) {
+                GW::UI::UIPacket::kMouseAction action{};
+                action.frame_id = selector->frame_id;
+                action.child_offset_id = selector->child_offset_id;
+                struct button_param {
+                    const wchar_t* name;
+                    uint32_t play;
+                };
+                button_param wparam = {ctx->chars[idx]->name, 0u};
+                action.wparam = &wparam;
+                action.current_state = GW::UI::UIPacket::ActionState::MouseClick;
+
+                if (!GW::UI::SendFrameUIMessage(GW::UI::GetParentFrame(selector), GW::UI::UIMessage::kMouseClick2, &action)) 
+                    return false;
+                GW::UI::SendFrameUIMessage(panes, GW::UI::UIMessage::kFrameMessage_0x4a, 0, (void*)&selected_idx);
+                return selected_idx == idx;
+            };
+
+            // Navigate to target character by selecting previous/next until we reach it
+            while (target_idx < selected_idx) {
+                // Need to go backwards - select the previous character
+                if (selected_idx == 0) 
+                    break; // Can't go before first character
+                if (!select_char(selected_idx - 1)) 
+                    return false;
+            }
+
+            while (target_idx > selected_idx) {
+                // Need to go forwards - select the next character
+                if (selected_idx >= ctx->chars.size() - 1) 
+                    break; // Can't go past last character
+                if (!select_char(selected_idx + 1)) 
+                    return false;
+            }
+            chosen = selected_idx == target_idx;
+
+            if (!chosen) 
+                return false;
 
             return (!play || GW::UI::ButtonClick(GW::UI::GetFrameByLabel(L"Play")));
         }
@@ -521,6 +555,7 @@ namespace GW {
         }
         void Screenshot() {
             GW::GameThread::Enqueue([] {
+                if (!GW::Map::GetIsMapLoaded() || !GW::Agents::GetControlledCharacter()) return;
                 const auto frame = GW::UI::GetFrameByLabel(L"Game");
                 Keypress(GW::UI::ControlAction_Screenshot, GW::UI::GetChildFrame(frame, 6));
                 Keypress(GW::UI::ControlAction_Screenshot, GW::UI::GetParentFrame(frame));
