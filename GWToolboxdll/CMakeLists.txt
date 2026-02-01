@@ -18,6 +18,7 @@ file(GLOB SOURCES
     "Windows/*.h" 
     "Windows/*.cpp"
     "Windows/Pathfinding/*.h"
+    "Windows/Pathfinding/*.hpp"
     "Windows/Pathfinding/*.cpp"
     )  
        

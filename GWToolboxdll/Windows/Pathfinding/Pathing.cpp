@@ -7,6 +7,7 @@
 #include <Logger.h>
 #include "MathUtility.h"
 #include "Pathing.h"
+#include "constant_vector.hpp"
 
 namespace {
     __forceinline float Cross(const GW::Vec2f& lhs, const GW::Vec2f& rhs)
@@ -84,7 +85,7 @@ namespace Pathing {
                 {
                     GW::YNode* yn = static_cast<GW::YNode*>(n);
                     if (point.y > yn->pos.y) {
-                        n = yn->above; // TODO: rename members in this struct from "left/right" to "above/below" like it is in opentyria
+                        n = yn->above;
                     }
                     else if (point.y < yn->pos.y) {
                         n = yn->below;
@@ -100,7 +101,7 @@ namespace Pathing {
                 case 2: // SinkNode = 2
                 {
                     GW::SinkNode* sn = static_cast<GW::SinkNode*>(n);
-                    return sn ? reinterpret_cast<GW::PathingTrapezoid*>(sn->trapezoid) /*TODO: fix type in GWCA*/ : nullptr;
+                    return sn ? sn->trapezoid : nullptr;
                 }
             }
         }
@@ -384,7 +385,6 @@ namespace Pathing {
 
     typedef struct {
         const GW::PathingTrapezoid *t;
-        Edge t_rel_to_came_from;
         const GW::PathingTrapezoid *came_from;
     } Explore;
 
@@ -396,23 +396,23 @@ namespace Pathing {
 	};
 	
 	struct VisitedState {
-		std::vector<Portal::id> visited;   // size = portals.size()
-		std::vector<Portal::id> stack;     // change history
-		uint32_t stamp = 1;
+		cv::vector<uint16_t> visited;   // size = portals.size()
+		cv::vector<Portal::id> stack;     // change history
+		uint16_t stamp = 1;
 
 		void init(size_t n) {
-			visited.assign(n, 0);
-			stack.reserve(1024);
+			visited.resize(n);
+			stack.reserve(2048);
 			stamp = 1;
 		}
 
 		inline bool is_visited(Portal::id id) const {
-			return visited[static_cast<uint32_t>(id)] == stamp;
+			return visited[static_cast<uint16_t>(id)] == stamp;
 		}
 
 		inline void visit(Portal::id id) {
-			if (visited[static_cast<uint32_t>(id)] != stamp) {
-				visited[id] = static_cast<Portal::id>(stamp);
+			if (visited[static_cast<uint16_t>(id)] != stamp) {
+				visited[id] = stamp;
 				stack.push_back(id);
 			}
 		}
@@ -431,11 +431,11 @@ namespace Pathing {
 
 
 	struct VisitedPoints {
-		std::vector<uint32_t> gen;
+		cv::vector<uint32_t> gen;
 		uint32_t cur = 1;
 
 		void init(size_t n) {
-			gen.assign(n, 0);
+			gen.resize(n);
 			cur = 1;
 		}
 
@@ -530,7 +530,7 @@ namespace Pathing {
         visited.clear();														// and reserve an unordered map. -> cca. 20x faster
         visited.reserve(mc->path->pathNodes.size());							//
 
-        to_explore.push_back({ trapezoid, Edge::top, nullptr });
+        to_explore.push_back({ trapezoid, nullptr });
         visited[trapezoid] = true;
 
         while (to_explore.size()) {
@@ -555,7 +555,7 @@ namespace Pathing {
                                 between((*it)->XBR, trapezoid->XTL, trapezoid->XTR) ||
                                 between((*it)->XBL, trapezoid->XTL, trapezoid->XTR))
                             {
-                                to_explore.emplace_back(*it, Edge::top, n.t);
+                                to_explore.emplace_back(*it, n.t);
                                 visited[(*it)] = true;
                             }
                         }
@@ -589,7 +589,7 @@ namespace Pathing {
                                 between(trapezoid->XBR, (*it)->XTL, (*it)->XTR) ||
                                 between((*it)->XTR, trapezoid->XBL, trapezoid->XBR) ||
                                 between((*it)->XTL, trapezoid->XBL, trapezoid->XBR)) {
-                                to_explore.emplace_back(*it, Edge::bottom, n.t);
+                                to_explore.emplace_back(*it, n.t);
                                 visited[(*it)] = true;
                             }
                         }
@@ -610,7 +610,7 @@ namespace Pathing {
                     if (!t || t == came_from) return;
                     if (visited[t]) return;
                     if (t->YB == t->YT) {
-                        to_explore.emplace_back(t, loc, came_from);
+                        to_explore.emplace_back(t, came_from);
                         visited[t] = true;
                     }
                     else {
@@ -874,7 +874,8 @@ namespace Pathing {
         ptneighbours.clear();
         ptneighbours.reserve(mapContex->path->pathNodes.size());
 
-        for (uint8_t i = 0; i < map->size(); ++i) {
+        auto size = map->size();
+        for (uint8_t i = 0; i < size; ++i) {
             auto& m = (*map)[i];
             for (uint32_t j = 0; j < m.trapezoid_count; j++) {
                 const GW::PathingTrapezoid* t = &m.trapezoids[j];
@@ -941,10 +942,12 @@ namespace Pathing {
             idx++;
             });
 
+        #ifdef DEBUG_PATHING
         Log::Info("total trapezoid count: %d", mapContex->path->pathNodes.size());
         Log::Info("new portals: %d", portals.size());
         Log::Info("viable points: %d", std::ranges::count_if(points, [](const auto& point) { return point.is_viable; }));
         Log::Info("total points: %d", points.size()); ;
+        #endif
     }
 
 	// Generate distance graph among teleports
@@ -968,9 +971,10 @@ namespace Pathing {
 
         m_teleportGraph.clear();
 
-        for (size_t i = 0; i < m_teleports.size(); ++i) {
+        auto size = m_teleports.size();
+        for (size_t i = 0; i < size; ++i) {
             auto& p1 = m_teleports[i];
-            for (size_t j = i; j < m_teleports.size(); ++j) {
+            for (size_t j = i; j < size; ++j) {
                 auto& p2 = m_teleports[j];
 
                 if (p1.m_directionality == Teleport::direction::both_ways &&
@@ -1191,9 +1195,10 @@ namespace Pathing {
             VisitedPoints vis_points;    // points (per source)
             visited.init(portals.size());
             vis_points.init(points.size());
+            auto size = (int)points.size();
 
 #pragma omp for schedule(static, 4)
-            for (int i = 0; i < (int)points.size(); ++i) {
+            for (int i = 0; i < size; ++i) {
                 if (m_terminateThread) 
                     break;
                 const auto& point = points[i];
@@ -1292,14 +1297,16 @@ namespace Pathing {
             total += v.size();
         }
 
+        #ifdef DEBUG_PATHING
         Log::Info("m_visGraph total elements = %d", total);
+        #endif
     }
 #pragma optimize("", on) // Restore global optimizations to project default
 
 #define mImpl ((Impl*)opaque)
 	}; // Impl
 }
-#include <assert.h>
+
 namespace Pathing {
     //using namespace MathUtil;
     
@@ -1321,7 +1328,7 @@ namespace Pathing {
 
     MilePath::MilePath()
     {
-        static_assert(sizeof(opaque) == sizeof(Impl));
+        static_assert(sizeof(opaque) >= sizeof(Impl));
 		new(opaque)Impl();		
 		
         m_processing = true;
