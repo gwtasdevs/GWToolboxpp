@@ -1,6 +1,7 @@
 #include "stdafx.h"
 
 #include <queue>
+#include <atomic>
 
 #include <GWCA/Context/PartyContext.h>
 
@@ -51,6 +52,7 @@ namespace {
     std::queue<std::string> websocket_send_queue;
     std::recursive_mutex websocket_mutex;
     std::thread* websocket_thread = nullptr;
+    std::atomic websocket_thread_done = true;
     bool pending_websocket_disconnect = false;
     bool terminating = false;
 
@@ -356,6 +358,7 @@ namespace {
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
         disconnect_ws();
+        websocket_thread_done = true;
     }
 
     // Run on worker thread!
@@ -364,6 +367,7 @@ namespace {
         if (pending_websocket_disconnect) return false;
         if (!websocket_thread) {
             websocket_thread = new std::thread(websocket_thread_loop);
+            websocket_thread_done = false;
         }
         std::lock_guard lk(websocket_mutex);
         websocket_send_queue.push(payload);
@@ -382,6 +386,9 @@ void PartyBroadcast::Update(float)
 {
     if (pending_websocket_disconnect) {
         if (websocket_thread) {
+            if (!websocket_thread_done.load()) {
+                return; // Wait for worker thread to finish without blocking the game thread.
+            }
             ASSERT(websocket_thread->joinable());
             websocket_thread->join();
             delete websocket_thread;
