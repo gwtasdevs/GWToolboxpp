@@ -195,15 +195,15 @@ namespace {
         ArenaNetFileParser::ArenaNetFile asset;
         if (!asset.readFromDat(file_id)) return false;
 
-        auto animations_chunk = (ArenaNetFileParser::FileNamesChunk*)asset.FindChunk(ArenaNetFileParser::ChunkType::FILENAMES_BBC);
+        auto animations_chunk = (ArenaNetFileParser::FileNamesChunk*)asset.FindChunk(ArenaNetFileParser::ChunkType::BBC_FileReferences);
         if (!animations_chunk) {
-            animations_chunk = (ArenaNetFileParser::FileNamesChunk*)asset.FindChunk(ArenaNetFileParser::ChunkType::FILENAMES_BBD);
+            animations_chunk = (ArenaNetFileParser::FileNamesChunk*)asset.FindChunk(ArenaNetFileParser::ChunkType::BBD_AnimationRefs);
             if (!(animations_chunk && asset.readFromDat(animations_chunk->filenames[0].filename))) return false;
-            animations_chunk = (ArenaNetFileParser::FileNamesChunk*)asset.FindChunk(ArenaNetFileParser::ChunkType::FILENAMES_BBC);
+            animations_chunk = (ArenaNetFileParser::FileNamesChunk*)asset.FindChunk(ArenaNetFileParser::ChunkType::BBC_FileReferences);
         }
         if (!(animations_chunk && asset.readFromDat(animations_chunk->filenames[0].filename))) return false;
         if (asset.getFFNAType() != 8) return false;
-        const auto soundtracks_chunk = (ArenaNetFileParser::FileNamesChunkWithoutLength*)asset.FindChunk(ArenaNetFileParser::ChunkType::SOUND_FILES_1);
+        const auto soundtracks_chunk = (ArenaNetFileParser::FileNamesChunkWithoutLength*)asset.FindChunk(ArenaNetFileParser::ChunkType::Type8_AssetRefs);
         if (!(soundtracks_chunk && soundtracks_chunk->num_filenames() > 0)) return false;
         *file_id_out = ArenaNetFileParser::FileHashToFileId(soundtracks_chunk->filenames[0].filename);
         return true;
