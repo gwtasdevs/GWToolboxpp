@@ -1134,6 +1134,7 @@ void WorldMapWidget::Draw(IDirect3DDevice9*)
         controls_window_rect.Translate(mouse_offset);
     }
     hovered_map_portal = 0;
+    #ifdef _DEBUG
     DrawAreaOverlays();
     for (auto& [_, map_info] : map_info_by_file_id) {
         for (auto& portal : map_info.portals) {
@@ -1142,6 +1143,7 @@ void WorldMapWidget::Draw(IDirect3DDevice9*)
             }
         }
     }
+    #endif
 
 
     hovered_boss = nullptr;
