@@ -60,6 +60,7 @@ namespace {
     GW::Constants::MapID current_map_id = GW::Constants::MapID::None;
 
     struct MapFileInfo {
+        GW::Continent continent;
         GW::Vec2f world_pos_start; // top left of bounds
         GW::Vec2f world_pos_end;   // bottom right of bounds
         uint32_t map_file_id;      // unique identifier for this map
@@ -91,10 +92,11 @@ namespace {
             return other_portal == other_map_portals.end() ? nullptr : &other_portal[0];
         }
 
-        void checkForLinkedPortal()
+        void checkForLinkedPortal(GW::Continent continent)
         {
             if (linked_portal_map_file_id) return;
             for (auto& it : map_info_by_file_id) {
+                if (it.second.continent != continent) continue;
                 auto& other_map_portals = it.second.portals;
                 auto other_portal = std::ranges::find_if(other_map_portals.begin(), other_map_portals.end(), [this](const MapPortal& other) {
                     return other.map_file_id != this->map_file_id && other.world_pos.x == this->world_pos.x && other.world_pos.y == this->world_pos.y;
@@ -104,6 +106,7 @@ namespace {
                     linked_portal_prop_index = other_portal->prop_index;
                     other_portal->linked_portal_map_file_id = map_file_id;
                     other_portal->linked_portal_prop_index = prop_index;
+                    return;
                 }
             }
         }
@@ -423,8 +426,15 @@ namespace {
     {
         if (!current_map_file_id || map_info_by_file_id.contains(current_map_file_id)) 
             return;
+        MapFileInfo info;
+        const auto map_context = GW::GetMapContext();
+        info.map_file_id = current_map_file_id;
+        info.map_id = map_context->map_id;
+        info.continent = GW::Map::GetMapInfo(info.map_id)->continent;
+
         std::vector<MapPortal> portals;
         const auto props = GW::Map::GetMapProps();
+
         if (!props) return;
         for (auto prop : *props) {
             if (IsTravelPortal(prop)) {
@@ -434,12 +444,9 @@ namespace {
             }
         }
         for (auto& portal : portals) {
-            portal.checkForLinkedPortal();
+            portal.checkForLinkedPortal(info.continent);
         }
-        MapFileInfo info;
-        const auto map_context = GW::GetMapContext();
-        info.map_file_id = current_map_file_id;
-        info.map_id = map_context->map_id;
+
         WorldMapWidget::GamePosToWorldMap(map_context->start_pos, info.world_pos_start);
         WorldMapWidget::GamePosToWorldMap(map_context->end_pos, info.world_pos_end);
         info.portals = std::move(portals);
@@ -873,7 +880,7 @@ void WorldMapWidget::Initialize()
     memset(show_elite_capture_locations, true, sizeof(show_elite_capture_locations));
     quest_icon_texture = GwDatTextureModule::LoadTextureFromFileId(0x1b4d5);
     player_icon_texture = GwDatTextureModule::LoadTextureFromFileId(0x5d3b);
-    portal_icon_texture = GwDatTextureModule::LoadTextureFromFileId(0x26822);
+    portal_icon_texture = GwDatTextureModule::LoadTextureFromFileId(0x246c); // IDirect3DTexture9**
 
     uintptr_t address = GW::Scanner::Find("\x8b\x45\xfc\xf7\x40\x10\x00\x00\x01\x00", "xxxxxxxxxx", 0xa);
     if (address) {
@@ -987,8 +994,10 @@ void WorldMapWidget::LoadSettings(ToolboxIni* ini)
                 MapFileInfo info;
                 size_t portal_count = 0;
                 uint32_t map_id = 0;
-                if (!(ss >> info.map_file_id >> info.world_pos_start.x >> info.world_pos_start.y >> info.world_pos_end.x >> info.world_pos_end.y >> portal_count >> map_id)) continue;
+                uint32_t continent = 0;
+                if (!(ss >> continent >> info.map_file_id >> info.world_pos_start.x >> info.world_pos_start.y >> info.world_pos_end.x >> info.world_pos_end.y >> portal_count >> map_id)) continue;
                 info.map_id = static_cast<GW::Constants::MapID>(map_id);
+                info.continent = static_cast<GW::Continent>(continent);
                 info.portals.reserve(portal_count);
                 for (size_t i = 0; i < portal_count && std::getline(in, line); i++) {
                     if (line.substr(0, 7) != "PORTAL ") {
@@ -1007,7 +1016,7 @@ void WorldMapWidget::LoadSettings(ToolboxIni* ini)
         // once the entire file has been loaded.
         for (auto& [_, info] : map_info_by_file_id) {
             for (auto& portal : info.portals) {
-                portal.checkForLinkedPortal();
+                portal.checkForLinkedPortal(info.continent);
             }
         }
     }
@@ -1038,7 +1047,7 @@ void WorldMapWidget::SaveSettings(ToolboxIni* ini)
     std::ofstream out(map_info_by_file_id_file);
     if (!out.is_open()) return;
     for (const auto& [file_id, info] : map_info_by_file_id) {
-        out << "MAP " << info.map_file_id << " " << info.world_pos_start.x << " " << info.world_pos_start.y << " " << info.world_pos_end.x << " " << info.world_pos_end.y << " " << info.portals.size() << " " << static_cast<uint32_t>(info.map_id) << "\n";
+        out << "MAP " << static_cast<uint32_t>(info.map_id)  << info.map_file_id << " " << info.world_pos_start.x << " " << info.world_pos_start.y << " " << info.world_pos_end.x << " " << info.world_pos_end.y << " " << info.portals.size() << " " << static_cast<uint32_t>(info.map_id) << "\n";
         for (const auto& portal : info.portals) {
             out << "PORTAL " << portal.map_file_id << " " << portal.prop_index << " " << portal.world_pos.x << " " << portal.world_pos.y << "\n";
         }
@@ -1136,7 +1145,9 @@ void WorldMapWidget::Draw(IDirect3DDevice9*)
     hovered_map_portal = 0;
     #ifdef _DEBUG
     DrawAreaOverlays();
+    const auto current_map_info = GW::Map::GetMapInfo();
     for (auto& [_, map_info] : map_info_by_file_id) {
+        if (!(current_map_info && map_info.continent == current_map_info->continent)) continue;
         for (auto& portal : map_info.portals) {
             if (DrawPortalOnWorldMap(portal)) {
                 hovered_map_portal = &portal;
