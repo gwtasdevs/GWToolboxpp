@@ -872,7 +872,7 @@ std::filesystem::path GWToolbox::SaveSettings()
 
 void GWToolbox::ForceTerminate(bool detach_wndproc_handler)
 {
-    if (gwtoolbox_state == GWToolboxState::Terminated) 
+    if (gwtoolbox_state == GWToolboxState::Terminated)
         return;
     ASSERT(DetachGameLoopCallback());
     ASSERT(!detach_wndproc_handler || DetachWndProcHandler());
@@ -1027,8 +1027,6 @@ void GWToolbox::Draw(IDirect3DDevice9* device)
     const bool world_map_showing = GW::UI::GetIsWorldMapShowing();
 
     if (!world_map_showing && GW::UI::GetIsUIDrawn()) {
-        if (minimap_enabled)
-            Minimap::Render(device);
         GameWorldRenderer::Render(device);
     }
 

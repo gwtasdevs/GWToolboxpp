@@ -15,9 +15,39 @@
 #include <Widgets/Minimap/RangeRenderer.h>
 #include <Widgets/Minimap/SymbolsRenderer.h>
 
+// Context structure that encapsulates all rendering parameters
+struct MinimapRenderContext {
+    // Position and size
+    DirectX::XMFLOAT2 screen_position; // Top-left corner in screen coordinates
+    DirectX::XMFLOAT2 size; // Width and height in pixels (typically square)
+
+    // Camera/view parameters
+    GW::Vec2f translation; // World-space translation (for panning)
+    float zoom_scale; // Zoom level (scale factor)
+    float rotation; // Map rotation in radians
+
+    // Visual options
+    bool circular_map; // Whether to render as circle or square
+    bool draw_center_marker; // Whether to draw center marker when panned
+    D3DCOLOR background_color; // Background color (or 0 to use renderer's default)
+
+    // Clipping rectangle (calculated from screen_position and size)
+    RECT clipping_rect;
+
+    // Helper to create context from current widget state
+    static MinimapRenderContext FromWidget(const class Minimap& minimap);
+
+    // Helper to calculate clipping rect from position and size
+    void UpdateClippingRect()
+    {
+        clipping_rect.left = static_cast<LONG>(screen_position.x);
+        clipping_rect.top = static_cast<LONG>(screen_position.y);
+        clipping_rect.right = static_cast<LONG>(screen_position.x + size.x);
+        clipping_rect.bottom = static_cast<LONG>(screen_position.y + size.y);
+    }
+};
+
 class Minimap final : public ToolboxWidget {
-
-
     Minimap()
     {
         is_resizable = false;
@@ -49,8 +79,14 @@ public:
     bool CanTerminate() override;
     void Terminate() override;
 
+    // Widget-based rendering (uses internal state)
     void Draw(IDirect3DDevice9* device) override;
-    static void RenderSetupProjection(IDirect3DDevice9* device);
+
+    // Static rendering with explicit context (for multiple minimaps)
+    static void Render(IDirect3DDevice9* device, const MinimapRenderContext& context);
+
+    // Setup projection matrix for a given context
+    static void RenderSetupProjection(IDirect3DDevice9* device, const MinimapRenderContext& context);
 
     bool FlagHeros(LPARAM lParam);
     bool OnMouseDown(UINT Message, WPARAM wParam, LPARAM lParam);
@@ -66,7 +102,6 @@ public:
     void DrawSettingsInternal() override;
 
     [[nodiscard]] float GetMapRotation() const;
-    [[nodiscard]] static DirectX::XMFLOAT2 GetGwinchScale();
     [[nodiscard]] GW::Vec2f ShadowstepLocation() const;
 
     // 0 is 'all' flag, 1 to 7 is each hero
@@ -82,12 +117,10 @@ public:
 
     static bool ShouldMarkersDrawOnMap();
     static bool ShouldDrawAllQuests();
-    static void Render(IDirect3DDevice9* device);
 
     [[nodiscard]] static bool IsActive();
 
 private:
-
     [[nodiscard]] bool IsInside(int x, int y) const;
     // returns true if the map is visible, valid, not loading, etc
 
@@ -95,4 +128,7 @@ private:
     static size_t GetPlayerHeroes(const GW::PartyInfo* party, std::vector<GW::AgentID>& _player_heroes, bool* has_flags = nullptr);
 
     static void OnUIMessage(GW::HookStatus*, GW::UI::UIMessage /*msgid*/, void* /*wParam*/, void*);
+
+    // Get context from current widget state
+    [[nodiscard]] MinimapRenderContext GetCurrentContext() const;
 };
