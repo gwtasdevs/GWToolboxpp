@@ -68,7 +68,7 @@ jobs:
         path: ${{runner.workspace}}/GWToolboxpp/bin/RelWithDebInfo/
 
     - name: Check version and create release
-      if: github.ref == 'refs/heads/main'
+      if: github.ref == 'refs/heads/master'
       shell: bash
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
