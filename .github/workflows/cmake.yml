@@ -5,7 +5,9 @@ on: [push]
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    permissions:
+      contents: write
 
     steps:
     - name: Setup Windows 10 SDK Action
@@ -15,6 +17,8 @@ jobs:
 
     - name: Checkout repository
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
     - name: Checkout submodules
       shell: bash
@@ -62,3 +66,51 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         path: ${{runner.workspace}}/GWToolboxpp/bin/RelWithDebInfo/
+
+    - name: Check version and create release
+      if: github.ref == 'refs/heads/master'
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        VERSION=$(sed -n 's/.*set(GWTOOLBOXDLL_VERSION "\(.*\)").*/\1/p' CMakeLists.txt | tr -d '\r')
+        BETA=$(sed -n 's/.*set(GWTOOLBOXDLL_VERSION_BETA "\(.*\)").*/\1/p' CMakeLists.txt | tr -d '\r')
+        
+        if [ -z "$VERSION" ]; then
+          echo "Could not find version in CMakeLists.txt"
+          exit 1
+        fi
+        
+        if [ -z "$BETA" ]; then
+          TAG_NAME="${VERSION}_Release"
+        else
+          TAG_NAME="${VERSION}_${BETA}"
+        fi
+        
+        echo "Detected version: $VERSION"
+        echo "Detected beta: $BETA"
+        echo "Target tag: $TAG_NAME"
+        
+        # Check if tag exists
+        if git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
+          echo "Tag $TAG_NAME already exists. Skipping release."
+          exit 0
+        fi
+        
+        echo "Tag $TAG_NAME does not exist. Creating release."
+          
+        # Create tag
+        git config user.name "GitHub Actions"
+        git config user.email "actions@github.com"
+        git tag "$TAG_NAME"
+        git push origin "$TAG_NAME"
+        
+        # Prepare artifacts
+        BIN_DIR="${{runner.workspace}}/GWToolboxpp/bin/RelWithDebInfo"
+        cp "$BIN_DIR/GWToolboxdll.dll" .
+        gzip -c "$BIN_DIR/GWToolboxdll.pdb" > GWToolboxdll.pdb.gz
+        
+        # Create release
+        gh release create "$TAG_NAME" \
+          --title "$TAG_NAME" \
+          GWToolboxdll.dll GWToolboxdll.pdb.gz

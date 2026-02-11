@@ -124,14 +124,18 @@ bool Install(const bool quiet, std::wstring& error)
     if (!DownloadWindow::DownloadAllFiles(error))
         return false;
     const auto dll_path = install_path.parent_path() / "GWToolboxdll.dll";
-    if (!exists(dll_path)) {
-        return error = std::format(L"Application @ {} not found after installation; it may have been quarantined by anti virus software!\n\nExclude the {} directory in your anti virus settings and re-launch.", dll_path.wstring(),
-                                   dll_path.parent_path().wstring()), false;
+    if (!fs::exists(dll_path)) {
+        return error = std::format(
+                   L"Application @ {} not found after installation; it may have been quarantined by anti virus software!\n\nExclude the {} directory in your anti virus settings and re-launch.", dll_path.wstring(),
+                   dll_path.parent_path().wstring()
+               ), false;
     }
     AddDefenderExclusion(install_path.parent_path(), quiet, error); // Silent fail, it'll show messages etc
     if (!IsInstalled()) {
-        return error = std::format(L"IsInstalled() returned false after installation; it may have been quarantined by anti virus software!\n\nExclude the {} directory in your anti virus settings and re-launch.", dll_path.wstring(),
-                                   dll_path.parent_path().wstring()), false;
+        return error = std::format(
+                   L"IsInstalled() returned false after installation; it may have been quarantined by anti virus software!\n\nExclude the {} directory in your anti virus settings and re-launch.", dll_path.wstring(),
+                   dll_path.parent_path().wstring()
+               ), false;
     }
     if (!quiet) {
         MessageBoxW(nullptr, L"Installation successful", L"Installation", 0);

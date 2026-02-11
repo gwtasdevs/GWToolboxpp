@@ -190,6 +190,7 @@ bool Process::GetModule(ProcessModule* module, const wchar_t* module_name) const
         }
     }
 
+    fprintf(stderr, "GetModuleInformation returned no module with the name: %S\n", module_name);
     return false;
 }
 

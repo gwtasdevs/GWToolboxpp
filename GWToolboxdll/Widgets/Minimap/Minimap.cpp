@@ -315,7 +315,6 @@ namespace {
 
         compass_context = message->wParam ? * (CompassContext**)message->wParam : nullptr;
         switch (message->message_id) {
-             
             case GW::UI::UIMessage::kFrameMessage_0x44: {
                 if (OverrideCompassVisibility()) {
                     break;
@@ -518,7 +517,6 @@ namespace {
 
     bool pending_refresh_quest_marker = true;
     bool RefreshQuestMarker() {
-        ASSERT(GW::Render::GetIsInRenderLoop() || GW::GameThread::IsInGameThread());
         const auto frame = GetCompassFrame();
         if (!(frame && frame->IsCreated()))
             return false;
@@ -718,6 +716,7 @@ void Minimap::OnUIMessage(GW::HookStatus* status, const GW::UI::UIMessage msgid,
             in_interface_settings = false;
             EnsureCompassIsLoaded();
             instance.pmap_renderer.Invalidate();
+            GameWorldRenderer::TriggerSyncAllMarkers();
             loading = false;
             is_observing = GW::Map::GetIsObserving();
             // Cycle active quests to cache their markers

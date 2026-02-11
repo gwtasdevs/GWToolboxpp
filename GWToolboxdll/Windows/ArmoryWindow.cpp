@@ -550,6 +550,23 @@ namespace GWArmory {
 
     GW::HookEntry ChatCmd_HookEntry;
 
+    bool Reset()
+    {
+        const auto equip = GetPlayerEquipment();
+        if (!equip) return false;
+
+        current_campaign = Campaign::BonusMissionPack;
+        current_profession = GetPlayerProfession();
+
+        for (size_t slot = 0; slot < _countof(GW::NPCEquipment::items); slot++) {
+            ClearArmorItem((ItemSlot)slot);
+            SetArmorItem(&original_pieces[slot]);
+        }
+
+        UpdateArmorsFilter();
+        return true;
+    }
+
     void CHAT_CMD_FUNC(CmdArmory)
     {
         const auto syntax = "Syntax: '/armory [armor_item_name] [dye1] [dye2] [dye3] [dye4]' (e.g. '/armory \"Elite Sunspear Raiment\"  2 1 10 4')";
@@ -558,6 +575,11 @@ namespace GWArmory {
             return;
         }
         const auto item_name = TextUtils::WStringToString(argv[1]);
+        if (item_name == "reset") {
+            GW::GameThread::Enqueue(Reset);
+            return;
+        }
+
         const auto found = FindArmorItem(item_name);
         if (!found) {
             Log::Warning("Failed to find armor item: %s", item_name.c_str());
@@ -609,24 +631,6 @@ namespace GWArmory {
         GW::GameThread::Enqueue([cpy = data]() {
             SetArmorItem(&cpy);
         });
-    }
-
-    bool Reset()
-    {
-        const auto equip = GetPlayerEquipment();
-        if (!equip)
-            return false;
-
-        current_campaign = Campaign::BonusMissionPack;
-        current_profession = GetPlayerProfession();
-
-        for (size_t slot = 0; slot < _countof(GW::NPCEquipment::items); slot++) {
-            ClearArmorItem((ItemSlot)slot);
-            SetArmorItem(&original_pieces[slot]);
-        }
-
-        UpdateArmorsFilter();
-        return true;
     }
 
     bool DyePicker(const char* label, GW::DyeColor* color)
