@@ -83,6 +83,7 @@
 #include <Widgets/BondsWidget.h>
 #include <Widgets/ClockWidget.h>
 #include <Widgets/VanquishWidget.h>
+#include <Widgets/ExploitableCorpseWidget.h>
 #include <Widgets/AlcoholWidget.h>
 #include <Widgets/SkillbarWidget.h>
 #include <Widgets/SkillMonitorWidget.h>
@@ -179,6 +180,7 @@ namespace {
         BondsWidget::Instance(), 
         ClockWidget::Instance(),
         VanquishWidget::Instance(),
+        ExploitableCorpseWidget::Instance(),
         AlcoholWidget::Instance(),
         WorldMapWidget::Instance(),
         EffectsMonitorWidget::Instance(),
