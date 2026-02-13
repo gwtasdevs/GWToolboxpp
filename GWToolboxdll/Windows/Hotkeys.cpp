@@ -330,8 +330,12 @@ bool TBHotkey::Draw(Op* op, bool first, bool last)
 
         // Draw buttons from right to left
 
-        auto current_pos = ImGui::GetCursorPos();
-        current_pos.x = ImGui::GetContentRegionAvail().x + ImGui::GetIndent();
+        auto current_pos = ImVec2({
+            ImGui::GetContentRegionAvail().x + ImGui::GetIndent(),
+            0.f
+        });
+        ImGui::SameLine();
+        current_pos.y = ImGui::GetCursorPosY();
 
         if (show_run_in_header) {
             current_pos.x -= run_btn_width;
@@ -370,11 +374,13 @@ bool TBHotkey::Draw(Op* op, bool first, bool last)
         current_pos.x -= spacing;
 
         if (show_active_in_header) {
+            current_pos.x -= btn_size;
             ImGui::SetCursorPos(current_pos);
             hotkey_changed |= ImGui::Checkbox("##active", &active);
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("The hotkey can trigger only when selected");
             }
+            current_pos.x -= spacing;
         }
         
         ImGui::PopID();
