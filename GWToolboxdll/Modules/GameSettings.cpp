@@ -211,7 +211,6 @@ namespace {
     bool auto_screenshot_on_title_maxed = false;
     bool auto_open_locked_chest = false;
     bool auto_open_locked_chest_with_key = false;
-    bool keep_current_quest_when_new_quest_added = false;
     bool automatically_flag_pet_to_fight_called_target = true;
     bool remove_window_border_in_windowed_mode = false;
     bool prevent_weapon_spell_animation_on_player = false;
@@ -1066,32 +1065,7 @@ namespace {
 
     GW::HookEntry OnQuestUIMessage_HookEntry;
 
-    void OnQuestAdded(uint32_t)
-    {
-        if (GW::QuestMgr::GetActiveQuestId() == player_requested_active_quest_id) {
-            return;
-        }
-        if (keep_current_quest_when_new_quest_added) {
-            // Re-request a quest change
-            const auto quest = GW::QuestMgr::GetQuest(player_requested_active_quest_id);
-            if (!quest) {
-                return;
-            }
-            // Emulate the StoC packet because the packet handler itself sorts memory out, and then calls affected modules via UI messages with the new (current) data...
-            GW::Packet::StoC::QuestAdd packet;
-            packet.quest_id = quest->quest_id;
-            packet.marker = quest->marker;
-            packet.map_to = quest->map_to;
-            packet.log_state = quest->log_state;
-            packet.map_from = quest->map_from;
-            wcscpy(packet.location, quest->location);
-            wcscpy(packet.name, quest->name);
-            wcscpy(packet.npc, quest->npc);
-            // ...We do this because sending UI messages doesn't actually update the quest data, it only notifies te ui that stuff has changed
-            GW::StoC::EmulatePacket(&packet);
-            GW::QuestMgr::SetActiveQuestId(quest->quest_id);
-        }
-    }
+
 
     void CHAT_CMD_FUNC(CmdReinvite)
     {
@@ -1404,7 +1378,7 @@ namespace {
                 player_requested_active_quest_id = GW::QuestMgr::GetActiveQuestId();
                 break;
             case GW::UI::UIMessage::kQuestAdded:
-                OnQuestAdded(*static_cast<uint32_t*>(wParam));
+                //OnQuestAdded(*static_cast<uint32_t*>(wParam));
                 break;
             case GW::UI::UIMessage::kTradeSessionStart: {
                 if (flash_window_on_trade) {
@@ -2076,8 +2050,6 @@ void GameSettings::LoadSettings(ToolboxIni* ini)
 
     LOAD_BOOL(block_enter_area_message);
 
-    LOAD_BOOL(keep_current_quest_when_new_quest_added);
-
     LOAD_BOOL(automatically_flag_pet_to_fight_called_target);
 
     LOAD_UINT(last_online_status);
@@ -2271,8 +2243,6 @@ void GameSettings::SaveSettings(ToolboxIni* ini)
     SAVE_COLOR(nametag_color_player_other);
     SAVE_COLOR(nametag_color_player_self);
 
-    SAVE_BOOL(keep_current_quest_when_new_quest_added);
-
     SAVE_BOOL(automatically_flag_pet_to_fight_called_target);
     SAVE_BOOL(block_vanquish_complete_popup);
 }
@@ -2405,11 +2375,6 @@ void GameSettings::DrawSettingsInternal()
     ImGui::ShowHelp("Disable the confirmation request when\n"
         "selling Gold and Green items introduced\n"
         "in February 5, 2019 update.");
-
-    ImGui::Checkbox("Keep current quest when accepting a new one", &keep_current_quest_when_new_quest_added);
-    ImGui::ShowHelp(
-        "By default, Guild Wars changes your currently selected quest to the one you've just taken from an NPC.\nThis can be annoying if you don't realise your quest marker is now taking you somewhere different!\nTick this to make sure your current quest isn't changed when a new quest is added to your log."
-    );
 
     ImGui::Checkbox("Limit signet of capture to 10 in skills window", &limit_signets_of_capture);
     ImGui::ShowHelp("If your character has purchased more than 10 signets of capture, only show 10 of them in the skills window");
