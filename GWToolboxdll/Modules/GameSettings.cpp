@@ -3035,8 +3035,11 @@ void GameSettings::OnAgentNameTag(GW::HookStatus*, const GW::UI::UIMessage msgid
             break;
     }
     if (show_amount_of_lockpicks_under_locked_chest_nametag && tag->name_enc && wcscmp(tag->name_enc, L"\x8101\x6303\xf5ca\x9a4c\x71ff") == 0 && !tag->underline) {
-        static wchar_t you_have_n_lockpicks[32];
-        swprintf(you_have_n_lockpicks, _countof(you_have_n_lockpicks), L"\x108\x107You have %d Lockpicks\x1", GW::Items::CountItemByModelId(GW::Constants::ItemID::Lockpick, (int)GW::Constants::Bag::Backpack, (int)GW::Constants::Bag::Bag_2));
+        static wchar_t you_have_n_lockpicks[12];
+        const auto count = GW::Items::CountItemByModelId(GW::Constants::ItemID::Lockpick, (int)GW::Constants::Bag::Backpack, (int)GW::Constants::Bag::Bag_2);
+        static wchar_t item_count[4];
+        GW::UI::UInt32ToEncStr(count, item_count, _countof(item_count));
+        swprintf(you_have_n_lockpicks, _countof(you_have_n_lockpicks), L"\xa35\x101%s\x10a\x8101\x730e\x1", item_count);
         tag->extra_info_enc = you_have_n_lockpicks;
     }
 }
