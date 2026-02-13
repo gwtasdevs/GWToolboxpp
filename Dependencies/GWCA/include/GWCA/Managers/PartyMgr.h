@@ -8,6 +8,7 @@ namespace GW {
     struct PartySearch;
     struct PetInfo;
     struct HeroInfo;
+    struct HeroConstData;
 
     struct Attribute;
     enum class HeroBehavior : uint32_t;
@@ -16,6 +17,9 @@ namespace GW {
 
     struct Module;
     extern Module PartyModule;
+    namespace Constants {
+        enum HeroID : uint32_t;
+    }
 
     namespace PartyMgr {
 
@@ -67,8 +71,8 @@ namespace GW {
         GWCA_API bool LeaveParty();
 
         // hero managment
-        GWCA_API bool AddHero(uint32_t heroid);
-        GWCA_API bool KickHero(uint32_t heroid);
+        GWCA_API bool AddHero(GW::Constants::HeroID heroid);
+        GWCA_API bool KickHero(GW::Constants::HeroID heroid);
         GWCA_API bool KickAllHeroes();
         GWCA_API bool AddHenchman(uint32_t agent_id);
         GWCA_API bool KickHenchman(uint32_t agent_id);
@@ -90,7 +94,9 @@ namespace GW {
 
         GWCA_API uint32_t GetHeroAgentID(uint32_t hero_index);
 
-        GWCA_API HeroInfo* GetHeroInfo(uint32_t hero_id);
+        GWCA_API HeroInfo* GetHeroInfo(GW::Constants::HeroID hero_id);
+
+        GWCA_API HeroConstData* GetHeroConstData(GW::Constants::HeroID hero_id);
 
         // Advertise your party in party search window
         GWCA_API bool SearchParty(uint32_t search_type, const wchar_t* advertisement = nullptr);
