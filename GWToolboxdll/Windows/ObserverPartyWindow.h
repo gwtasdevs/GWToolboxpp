@@ -53,6 +53,11 @@ protected:
     bool show_received_party_skills = true;
     bool show_dealt_party_skills = true;
     bool show_skills_used = true;
+    bool show_damage_dealt = true;
+    bool show_damage_received = true;
+    bool show_healing_dealt = true;
+    bool show_healing_received = true;
+    bool show_max_hp = false;
 
 private:
     // ini
