@@ -408,17 +408,17 @@ namespace {
         swprintf(buf, _countof(buf) - 1, L"%s (%d users)",
                  TextUtils::StringToWString(teamspeak_server->name).c_str(),
                  teamspeak_server->user_count);
-        GW::Chat::SendChat('#', buf);
+        GW::Chat::SendChat(GW::Chat::CHANNEL_GROUP, buf);
 
         swprintf(buf, _countof(buf) - 1, L"TS3: [https://invite.teamspeak.com/%S/?port=%S;xx]",
                  teamspeak_server->host.c_str(),
                  teamspeak_server->port.c_str());
-        GW::Chat::SendChat('#', buf);
+        GW::Chat::SendChat(GW::Chat::CHANNEL_GROUP, buf);
 
         GetServerInviteLink(teamspeak_server, teamspeak_server->my_channel_id, [](const std::string& url) {
             wchar_t buf[120];
             swprintf(buf, _countof(buf) - 1, L"TS5: [%S;xx]", url.c_str());
-            GW::Chat::SendChat('#', buf);
+            GW::Chat::SendChat(GW::Chat::CHANNEL_GROUP, buf);
         });
     }
 

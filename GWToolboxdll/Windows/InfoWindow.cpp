@@ -106,6 +106,7 @@ namespace {
     bool record_event_messages = false;
     bool record_enc_strings = false;
 
+
     bool EncInfoField(const char* label, const wchar_t* enc_string)
     {
         std::string info_string;
@@ -478,7 +479,7 @@ namespace {
                 continue;
             ImGui::PushID(static_cast<int>(partymember.login_number));
             if (ImGui::Button("Send")) {
-                GW::Chat::SendChat('#', buf.c_str());
+                GW::Chat::SendChat(GW::Chat::CHANNEL_GROUP, buf.c_str());
             }
             ImGui::SameLine();
             ImGui::TextUnformatted(TextUtils::WStringToString(buf).c_str());
@@ -1072,7 +1073,6 @@ namespace {
                 Log::Info("Done");
             });
         }
-
 
         // For debugging changes to flags/arrays etc
         [[maybe_unused]] const GW::GameContext* g = GW::GetGameContext();

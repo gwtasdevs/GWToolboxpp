@@ -1389,9 +1389,9 @@ void ObjectiveTimerWindow::Objective::Draw()
         ImGui::Indent();
     }
     if (ImGui::Button(name, ImVec2(label_width - indent * style.IndentSpacing, 0))) {
-        char buf[256];
-        sprintf(buf, "[%s] ~ Start: %s ~ End: %s ~ Time: %s", name, GetStartTimeStr(), GetEndTimeStr(), GetDurationStr());
-        GW::Chat::SendChat('#', buf);
+        wchar_t buf[256];
+        swprintf(buf, _countof(buf),L"[%S] ~ Start: %S ~ End: %S ~ Time: %S", name, GetStartTimeStr(), GetEndTimeStr(), GetDurationStr());
+        GW::Chat::SendChat(GW::Chat::CHANNEL_GROUP, buf);
     }
     style.ButtonTextAlign.x = 0.5f;
     ImGui::PopStyleColor();
@@ -1539,7 +1539,7 @@ void ObjectiveTimerWindow::ObjectiveSet::CheckSetDone()
         duration = std::max((*max)->done, duration);
         active = false;
         if (Instance().auto_send_age) {
-            GW::Chat::SendChat('/', "age");
+            GW::Chat::SendChat(GW::Chat::CHANNEL_EMOTE, L"age");
         }
         TimerWidget::Instance().SetRunCompleted(GameSettings::GetSettingBool("auto_age2_on_age"));
     }

@@ -372,7 +372,7 @@ namespace {
         // In map - try to join party!
         wchar_t buf[128] = { 0 };
         swprintf(buf, 128, L"invite %s", join_in_progress.player);
-        GW::Chat::SendChat('/', buf);
+        GW::Chat::SendChat(GW::Chat::Channel::CHANNEL_EMOTE, buf);
         const HWND hwnd = GW::MemoryMgr::GetGWWindowHandle();
         SetForegroundWindow(hwnd);
         ShowWindow(hwnd, SW_RESTORE);

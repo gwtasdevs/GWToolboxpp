@@ -1596,36 +1596,36 @@ void DailyQuests::Initialize()
         {L"weekly", CmdWeeklyBonus},
         {L"today", [](GW::HookStatus*, const wchar_t*, const int, const LPWSTR*) -> void {
             if (GetIsPreSearing()) {
-                GW::Chat::SendChat('/', "vanguard");
-                GW::Chat::SendChat('/', "nicholas");
+                GW::Chat::SendChat(GW::Chat::CHANNEL_EMOTE, L"vanguard");
+                GW::Chat::SendChat(GW::Chat::CHANNEL_EMOTE, L"nicholas");
                 return;
             }
-            GW::Chat::SendChat('/', "zm");
-            GW::Chat::SendChat('/', "zb");
-            GW::Chat::SendChat('/', "zc");
-            GW::Chat::SendChat('/', "zv");
-            GW::Chat::SendChat('/', "wanted");
-            GW::Chat::SendChat('/', "nicholas");
-            GW::Chat::SendChat('/', "weekly");
+            GW::Chat::SendChat(GW::Chat::CHANNEL_EMOTE, L"zm");
+            GW::Chat::SendChat(GW::Chat::CHANNEL_EMOTE, L"zb");
+            GW::Chat::SendChat(GW::Chat::CHANNEL_EMOTE, L"zc");
+            GW::Chat::SendChat(GW::Chat::CHANNEL_EMOTE, L"zv");
+            GW::Chat::SendChat(GW::Chat::CHANNEL_EMOTE, L"wanted");
+            GW::Chat::SendChat(GW::Chat::CHANNEL_EMOTE, L"nicholas");
+            GW::Chat::SendChat(GW::Chat::CHANNEL_EMOTE, L"weekly");
         }},
         {L"daily", [](GW::HookStatus*, const wchar_t*, const int, const LPWSTR*) -> void {
-            GW::Chat::SendChat('/', "today");
+            GW::Chat::SendChat(GW::Chat::CHANNEL_EMOTE, L"today");
         }},
         {L"dailies", [](GW::HookStatus*, const wchar_t*, const int, const LPWSTR*) -> void {
-            GW::Chat::SendChat('/', "today");
+            GW::Chat::SendChat(GW::Chat::CHANNEL_EMOTE, L"today");
         }},
         {L"tomorrow", [](GW::HookStatus*, const wchar_t*, const int, const LPWSTR*) -> void {
             if (GetIsPreSearing()) {
-                GW::Chat::SendChat('/', "vanguard tomorrow");
-                GW::Chat::SendChat('/', "nicholas tomorrow");
+                GW::Chat::SendChat(GW::Chat::CHANNEL_EMOTE, L"vanguard tomorrow");
+                GW::Chat::SendChat(GW::Chat::CHANNEL_EMOTE, L"nicholas tomorrow");
                 return;
             }
-            GW::Chat::SendChat('/', "zm tomorrow");
-            GW::Chat::SendChat('/', "zb tomorrow");
-            GW::Chat::SendChat('/', "zc tomorrow");
-            GW::Chat::SendChat('/', "zv tomorrow");
-            GW::Chat::SendChat('/', "wanted tomorrow");
-            GW::Chat::SendChat('/', "nicholas tomorrow");
+            GW::Chat::SendChat(GW::Chat::CHANNEL_EMOTE, L"zm tomorrow");
+            GW::Chat::SendChat(GW::Chat::CHANNEL_EMOTE, L"zb tomorrow");
+            GW::Chat::SendChat(GW::Chat::CHANNEL_EMOTE, L"zc tomorrow");
+            GW::Chat::SendChat(GW::Chat::CHANNEL_EMOTE, L"zv tomorrow");
+            GW::Chat::SendChat(GW::Chat::CHANNEL_EMOTE, L"wanted tomorrow");
+            GW::Chat::SendChat(GW::Chat::CHANNEL_EMOTE, L"nicholas tomorrow");
         }}
     };
     for (const auto& it : chat_commands) {

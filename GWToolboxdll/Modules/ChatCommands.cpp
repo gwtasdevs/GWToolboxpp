@@ -299,7 +299,7 @@ namespace {
             }
         }
         GW::UI::AsyncDecodeStr(out_message.c_str(), [](void*, const wchar_t* s) {
-            GW::Chat::SendChat('#', s);
+                GW::Chat::SendChat(GW::Chat::Channel::CHANNEL_GROUP, s);
         }, nullptr, GW::Constants::Language::English);
     }
 
@@ -681,7 +681,7 @@ namespace {
                 while (std::getline(wss, tmp, L'\n')) {
                     if (tmp.length() < 2)
                         continue;
-                    GW::Chat::SendChat((char)tmp[0], &tmp[1]);
+                    GW::Chat::SendChat(GW::Chat::GetChannel(tmp[0]), &tmp[1]);
                 }
                 alias->processing = false;
             }
@@ -1729,7 +1729,7 @@ void ChatCommands::QuestPing::Update()
     if (!name.wstring().empty()) {
         wchar_t print_buf[128];
         swprintf(print_buf, _countof(print_buf), L"Current Quest: %s", name.wstring().c_str());
-        GW::Chat::SendChat('#', print_buf);
+        GW::Chat::SendChat(GW::Chat::CHANNEL_GROUP, print_buf);
     }
     if (!objectives.wstring().empty()) {
         static constexpr ctll::fixed_string current_obj_pattern = LR"(\{s\}([^\{]+))";
@@ -1737,14 +1737,14 @@ void ChatCommands::QuestPing::Update()
         if (auto m = ctre::match<current_obj_pattern>(objectives.wstring())) {
             wchar_t print_buf[128];
             swprintf(print_buf, _countof(print_buf), L" - %s", m.get<1>().to_string().c_str());
-            GW::Chat::SendChat('#', print_buf);
+            GW::Chat::SendChat(GW::Chat::CHANNEL_GROUP, print_buf);
         }
         objectives.reset(nullptr);
     }
     if (!name.wstring().empty()) {
         wchar_t url_buf[64];
         swprintf(url_buf, _countof(url_buf), L"%SGame_link:Quest_%d", GuiUtils::WikiUrl(L"").c_str(), quest_id);
-        GW::Chat::SendChat('#', url_buf);
+        GW::Chat::SendChat(GW::Chat::CHANNEL_GROUP, url_buf);
         name.reset(nullptr);
     }
 }
@@ -1938,7 +1938,7 @@ void CHAT_CMD_FUNC(ChatCommands::CmdEnterMission)
 void CHAT_CMD_FUNC(ChatCommands::CmdMorale)
 {
     if (GW::GetGameContext()->world->morale == 100) {
-        GW::Chat::SendChat('#', L"I have no Morale Boost or Death Penalty!");
+        GW::Chat::SendChat(GW::Chat::CHANNEL_GROUP, L"I have no Morale Boost or Death Penalty!");
     }
     else {
         auto packet = GW::UI::UIPacket::kSendCallTarget{
@@ -2186,7 +2186,7 @@ void CHAT_CMD_FUNC(ChatCommands::CmdShow)
     std::wstring cmd = L"toggle ";
     cmd.append(GetRemainingArgsWstr(message, 1));
     cmd.append(L" on");
-    GW::Chat::SendChat('/', cmd.c_str());
+    GW::Chat::SendChat(GW::Chat::CHANNEL_EMOTE, cmd.c_str());
 }
 
 void CHAT_CMD_FUNC(ChatCommands::CmdHide)
@@ -2194,7 +2194,7 @@ void CHAT_CMD_FUNC(ChatCommands::CmdHide)
     std::wstring cmd = L"toggle ";
     cmd.append(GetRemainingArgsWstr(message, 1));
     cmd.append(L" off");
-    GW::Chat::SendChat('/', cmd.c_str());
+    GW::Chat::SendChat(GW::Chat::CHANNEL_EMOTE, cmd.c_str());
 }
 
 void CHAT_CMD_FUNC(ChatCommands::CmdToggle)
@@ -2548,7 +2548,7 @@ void CHAT_CMD_FUNC(ChatCommands::CmdPingBuild)
             continue;
         }
 
-        GW::Chat::SendChat('#', std::format(L"[{};{}]", arg, TextUtils::StringToWString(content)).c_str());
+        GW::Chat::SendChat(GW::Chat::CHANNEL_GROUP, std::format(L"[{};{}]", arg, TextUtils::StringToWString(content)).c_str());
     }
 }
 

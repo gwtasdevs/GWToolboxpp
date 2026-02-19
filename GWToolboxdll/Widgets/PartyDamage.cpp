@@ -318,7 +318,7 @@ void PartyDamage::Update(const float)
         send_timer = TIMER_INIT();
         if (GW::Map::GetInstanceType() != GW::Constants::InstanceType::Loading
             && GW::Agents::GetControlledCharacter()) {
-            GW::Chat::SendChat('#', send_queue.front().c_str());
+            GW::Chat::SendChat(GW::Chat::CHANNEL_GROUP, send_queue.front().c_str());
             send_queue.pop();
         }
     }

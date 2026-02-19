@@ -264,7 +264,7 @@ namespace {
             // If they're online, send the original message...
             ASSERT(lf->current_char);
             is_redirecting_whisper = true;
-            GW::Chat::SendChat(lf->current_char->getNameW().c_str(), pending_whisper.message.c_str());
+            GW::Chat::SendWhisper(lf->current_char->getNameW().c_str(), pending_whisper.message.c_str());
             is_redirecting_whisper = false;
         }
         pending_whisper.reset();
@@ -296,7 +296,7 @@ namespace {
             // If this player is already in my friend list, send the message directly.
             if (!friend_->IsOffline() && friend_->current_char->getNameW() != player_name) {
                 is_redirecting_whisper = true;
-                GW::Chat::SendChat(friend_->current_char->getNameW().c_str(), pending_whisper.message.c_str());
+                GW::Chat::SendWhisper(friend_->current_char->getNameW().c_str(), pending_whisper.message.c_str());
                 is_redirecting_whisper = false;
                 pending_whisper.reset();
                 status->blocked = true;
@@ -488,7 +488,7 @@ namespace {
                 const auto& friendname = friend_->current_char->getNameW();
                 if (!friend_->IsOffline() && friend_->current_char && friendname != target) {
                     is_redirecting_whisper = true;
-                    GW::Chat::SendChat(friendname.c_str(), text);
+                    GW::Chat::SendWhisper(friendname.c_str(), text);
                     is_redirecting_whisper = false;
                     pending_whisper.reset();
                     status->blocked = true;
@@ -592,7 +592,7 @@ namespace {
         const auto player_name = ParsePlayerName(argc - 1, &argv[1]);
         const auto friend_ = player_name.empty() ? nullptr : FriendListWindow::GetFriend(player_name.c_str());
         if (friend_ && friend_->current_char && friend_->current_char->getNameW() != player_name) {
-            GW::Chat::SendChat('/', std::format(L"invite {}", friend_->current_char->getNameW()).c_str());
+            GW::Chat::SendChat(GW::Chat::CHANNEL_EMOTE, std::format(L"invite {}", friend_->current_char->getNameW()).c_str());
             return;
         }
         status->blocked = false;
@@ -659,7 +659,7 @@ namespace {
     {
         const wchar_t* msg = wcschr(message, ' ');
         if (msg) {
-            GW::Chat::SendChat('"', msg + 1);
+            GW::Chat::SendChat(GW::Chat::CHANNEL_WHISPER, msg + 1);
         }
     }
 

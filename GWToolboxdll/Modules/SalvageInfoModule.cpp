@@ -171,7 +171,11 @@ namespace {
             }
             if (!items.empty()) {
                 NewLineIfNotEmpty(description);
-                description += std::format(L"{}\x10a\x108\x107" L"Rare Materials: \x1\x1\x2{}", GW::EncStrings::ItemRare, items);
+                description += std::format(
+                    L"{}\x10a\x108\x107"
+                    L"Rare Materials: \x1\x1\x2{}",
+                    GW::EncStrings::ItemCommon, items
+                );
             }
         }
 

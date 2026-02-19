@@ -779,7 +779,7 @@ void QuestModule::Update(float)
     if (fetch_missing_quest_info_queued) {
         // NB: We only do this once the loading splash screen is gone
         fetch_missing_quest_info_queued = 0;
-        GW::GameThread::Enqueue([] {
+        /* GW::GameThread::Enqueue([] {
             const auto current_map = GW::Map::GetMapInfo();
             if (!current_map) return;
             bool requested = false;
@@ -799,7 +799,7 @@ void QuestModule::Update(float)
                 BlockQuestSound();
                 fetching_all_quest_info = TIMER_INIT();
             }
-        });
+        });*/
     }
 
 

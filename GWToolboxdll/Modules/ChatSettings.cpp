@@ -296,7 +296,7 @@ namespace {
         const std::wstring sanitised_name = TextUtils::SanitizePlayerName(name);
         if (ImGui::GetIO().KeyShift && GW::PartyMgr::GetIsLeader()) {
             const auto cmd = std::format(L"invite {}", sanitised_name);
-            GW::Chat::SendChat('/', cmd.c_str());
+            GW::Chat::SendChat(GW::Chat::Channel::CHANNEL_EMOTE, cmd.c_str());
             status->blocked = true;
             return;
         }
@@ -372,7 +372,7 @@ namespace {
                     // 0x8101 0x641F 0x86C3 0xE149 0x53E8 0x101 0x107 = You have been in this map for n minutes.
                     // 0x8101 0x641E 0xE7AD 0xEF64 0x1676 0x101 0x107 0x102 0x107 = You have been in this map for n hours and n minutes.
                     if (wmemcmp(param->message, L"\x8101\x641F\x86C3\xE149\x53E8", 5) == 0 || wmemcmp(param->message, L"\x8101\x641E\xE7AD\xEF64\x1676", 5) == 0) {
-                        GW::Chat::SendChat('/', "age2");
+                        GW::Chat::SendChat(GW::Chat::Channel::CHANNEL_EMOTE, L"age2");
                     }
                 }
             } break;
@@ -396,7 +396,7 @@ namespace {
                 if (!(GW::FriendListMgr::GetMyStatus() == GW::FriendStatus::Away && !afk_message.empty() && ToolboxUtils::GetPlayerName() != param->from))
                     break;
                 const auto reply = std::format(L"Automatic message: \"{}\" ({} ago)", afk_message, PrintTime((clock() - afk_message_time) / CLOCKS_PER_SEC));
-                GW::Chat::SendChat(param->from, reply.c_str());
+                GW::Chat::SendWhisper(param->from, reply.c_str());
             } break;
 
         }

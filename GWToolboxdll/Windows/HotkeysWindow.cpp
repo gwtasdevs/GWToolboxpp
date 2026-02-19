@@ -467,16 +467,105 @@ void HotkeysWindow::Draw(IDirect3DDevice9*)
                 hotkeys_changed = true;
             }
         }
-
-        // === each hotkey ===
         const auto draw_hotkeys_vec = [&](const std::vector<TBHotkey*>& in) -> bool {
             bool these_hotkeys_changed = false;
+
+            const auto do_drag_move = [&](TBHotkey* dragged, size_t insert_before) -> bool {
+                const auto src_it = std::ranges::find(hotkeys, dragged);
+                if (src_it == hotkeys.end()) return false;
+
+                if (insert_before >= in.size()) {
+                    // Drop after last item in this view
+                    const auto dst_it = std::ranges::find(hotkeys, in.back());
+                    if (dst_it == hotkeys.end() || src_it == dst_it) return false;
+                    auto after_dst = dst_it + 1;
+                    if (src_it == after_dst) return false;
+                    if (src_it < dst_it)
+                        std::rotate(src_it, src_it + 1, after_dst);
+                    else
+                        std::rotate(after_dst, src_it, src_it + 1);
+                }
+                else {
+                    const auto dst_it = std::ranges::find(hotkeys, in[insert_before]);
+                    if (dst_it == hotkeys.end() || src_it == dst_it) return false;
+                    if (src_it < dst_it)
+                        std::rotate(src_it, src_it + 1, dst_it);
+                    else
+                        std::rotate(dst_it, src_it, src_it + 1);
+                }
+                return true;
+            };
+
+            const auto draw_drop_target = [&](size_t insert_before) -> bool {
+                const float drop_w = ImGui::GetContentRegionAvail().x;
+                const ImVec2 drop_pos = ImGui::GetCursorScreenPos();
+                ImGui::Dummy(ImVec2(drop_w, 4.0f));
+                if (ImGui::BeginDragDropTarget()) {
+                    ImGui::GetWindowDrawList()->AddLine(ImVec2(drop_pos.x, drop_pos.y + 2.f), ImVec2(drop_pos.x + drop_w, drop_pos.y + 2.f), ImGui::GetColorU32(ImGuiCol_DragDropTarget), 2.0f);
+                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("TBHOTKEY")) {
+                        TBHotkey* dragged = *static_cast<TBHotkey**>(payload->Data);
+                        if (do_drag_move(dragged, insert_before)) these_hotkeys_changed = true;
+                    }
+                    ImGui::EndDragDropTarget();
+                }
+                return these_hotkeys_changed;
+            };
+
             for (unsigned int i = 0; i < in.size(); ++i) {
+                const ImVec2 item_top = ImGui::GetCursorScreenPos(); // remember where this item starts
+
                 TBHotkey::Op op = TBHotkey::Op_None;
                 these_hotkeys_changed |= in[i]->Draw(&op, i == 0, i == in.size() - 1);
+
+                const ImVec2 item_bottom = ImGui::GetCursorScreenPos(); // where the next item will start
+                const float item_height = item_bottom.y - item_top.y;
+
+                // Only draw drop zones while a drag is in progress
+                if (ImGui::GetDragDropPayload() != nullptr) {
+                    // Overlay the top half of this item as a "insert before" drop zone
+                    const float drop_w = ImGui::GetContentRegionAvail().x;
+                    const float half_h = item_height * 0.5f;
+
+                    ImGui::SetCursorScreenPos(item_top);
+                    ImGui::Dummy(ImVec2(drop_w, half_h));
+                    if (ImGui::BeginDragDropTarget()) {
+                        ImGui::GetWindowDrawList()->AddLine(ImVec2(item_top.x, item_top.y), ImVec2(item_top.x + drop_w, item_top.y), ImGui::GetColorU32(ImGuiCol_DragDropTarget), 2.0f);
+                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("TBHOTKEY")) {
+                            TBHotkey* dragged = *static_cast<TBHotkey**>(payload->Data);
+                            if (do_drag_move(dragged, i)) these_hotkeys_changed = true;
+                        }
+                        ImGui::EndDragDropTarget();
+                    }
+
+                    // Overlay the bottom half as an "insert after" drop zone
+                    // (equivalent to "insert before next item", but handles the last item too)
+                    ImGui::SetCursorScreenPos(ImVec2(item_top.x, item_top.y + half_h));
+                    ImGui::Dummy(ImVec2(drop_w, half_h));
+                    if (ImGui::BeginDragDropTarget()) {
+                        ImGui::GetWindowDrawList()->AddLine(ImVec2(item_bottom.x, item_bottom.y), ImVec2(item_bottom.x + drop_w, item_bottom.y), ImGui::GetColorU32(ImGuiCol_DragDropTarget), 2.0f);
+                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("TBHOTKEY")) {
+                            TBHotkey* dragged = *static_cast<TBHotkey**>(payload->Data);
+                            if (do_drag_move(dragged, i + 1)) these_hotkeys_changed = true;
+                        }
+                        ImGui::EndDragDropTarget();
+                    }
+
+                    // Restore cursor to where it should be for the next item
+                    ImGui::SetCursorScreenPos(item_bottom);
+                }
                 switch (op) {
                     case TBHotkey::Op_None:
                         break;
+                    case TBHotkey::Op_Delete: {
+                        const auto it = std::ranges::find(hotkeys, in[i]);
+                        if (it != hotkeys.end()) {
+                            hotkeys.erase(it);
+                            delete in[i];
+                            return true;
+                        }
+                    } break;
+                    // Op_MoveUp / Op_MoveDown are no longer emitted by individual hotkeys,
+                    // but keep them for safety / group-level usage
                     case TBHotkey::Op_MoveUp: {
                         const auto it = std::ranges::find(hotkeys, in[i]);
                         if (it != hotkeys.end() && it != hotkeys.begin()) {
@@ -484,8 +573,7 @@ void HotkeysWindow::Draw(IDirect3DDevice9*)
                             if (group_by == GroupBy::Group) {
                                 if (strcmp((*it)->group, (*prev)->group) != 0) {
                                     while (prev != hotkeys.begin()) {
-                                        if (strcmp((*(prev - 1))->group, (*prev)->group) != 0)
-                                            break;
+                                        if (strcmp((*(prev - 1))->group, (*prev)->group) != 0) break;
                                         --prev;
                                     }
                                     std::rotate(prev, it, it + 1);
@@ -496,8 +584,7 @@ void HotkeysWindow::Draw(IDirect3DDevice9*)
                             std::swap(*it, *prev);
                             these_hotkeys_changed = true;
                         }
-                    }
-                    break;
+                    } break;
                     case TBHotkey::Op_MoveDown: {
                         const auto it = std::ranges::find(hotkeys, in[i]);
                         if (it != hotkeys.end() && it != hotkeys.end() - 1) {
@@ -505,8 +592,7 @@ void HotkeysWindow::Draw(IDirect3DDevice9*)
                             if (group_by == GroupBy::Group) {
                                 if (strcmp((*it)->group, (*next)->group) != 0) {
                                     while (next != hotkeys.end() - 1) {
-                                        if (strcmp((*(next + 1))->group, (*next)->group) != 0)
-                                            break;
+                                        if (strcmp((*(next + 1))->group, (*next)->group) != 0) break;
                                         ++next;
                                     }
                                     std::rotate(it, it + 1, next + 1);
@@ -517,21 +603,15 @@ void HotkeysWindow::Draw(IDirect3DDevice9*)
                             std::swap(*it, *next);
                             these_hotkeys_changed = true;
                         }
-                    }
-                    break;
-                    case TBHotkey::Op_Delete: {
-                        const auto it = std::ranges::find(hotkeys, in[i]);
-                        if (it != hotkeys.end()) {
-                            hotkeys.erase(it);
-                            delete in[i];
-                            return true;
-                        }
-                    }
-                    break;
+                    } break;
                     default:
                         break;
                 }
+                if (these_hotkeys_changed) return true;
             }
+
+            if (!in.empty()) draw_drop_target(in.size()); // drop zone after the last item
+
             return these_hotkeys_changed;
         };
         switch (group_by) {

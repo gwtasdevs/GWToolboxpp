@@ -96,7 +96,7 @@ void StringDecoderWindow::Initialize()
 
 void StringDecoderWindow::Send() const
 {
-    GW::Chat::SendChat('#', GetEncodedString().c_str());
+    GW::Chat::SendChat(GW::Chat::CHANNEL_GROUP, GetEncodedString().c_str());
 }
 
 std::wstring StringDecoderWindow::GetEncodedString() const

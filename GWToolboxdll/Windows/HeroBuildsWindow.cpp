@@ -668,7 +668,7 @@ void HeroBuildsWindow::Update(float)
     }
 
     if (!send_queue.empty() && TIMER_DIFF(send_timer) > 600) {
-        GW::Chat::SendChat('#', send_queue.front().c_str());
+        GW::Chat::SendChat(GW::Chat::CHANNEL_GROUP, TextUtils::StringToWString(send_queue.front()).c_str());
         send_queue.pop();
         send_timer = TIMER_INIT();
     }

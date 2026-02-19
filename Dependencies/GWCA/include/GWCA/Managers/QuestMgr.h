@@ -42,3 +42,19 @@ namespace GW {
 
     };
 }
+// ============================================================
+// C Interop API
+// ============================================================
+extern "C" {
+    GWCA_API uint32_t GetActiveQuestId();
+    GWCA_API bool     SetActiveQuestId(uint32_t quest_id);
+    GWCA_API void* GetActiveQuest();
+    GWCA_API bool     SetActiveQuest(void* quest);
+    GWCA_API bool     AbandonQuest(void* quest);
+    GWCA_API bool     AbandonQuestId(uint32_t quest_id);
+    GWCA_API void* GetQuest(uint32_t quest_id);
+    GWCA_API bool     GetQuestEntryGroupName(uint32_t quest_id, wchar_t* out, uint32_t out_len);
+    GWCA_API bool     RequestQuestInfo(const void* quest, bool update_markers);
+    GWCA_API bool     RequestQuestInfoId(uint32_t quest_id, bool update_markers);
+    GWCA_API void* GetQuestLog(size_t* count);
+}

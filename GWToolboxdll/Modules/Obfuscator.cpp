@@ -767,7 +767,7 @@ namespace {
             // NB: Block and send a copy with the new message content; current wchar_t* may not have enough allocated memory to just replace the content.
             status->blocked = true;
             processing = true;
-            GW::Chat::SendChat(recipient_unobfuscated.c_str(), &whisper_separator[1]);
+            GW::Chat::SendWhisper(recipient_unobfuscated.c_str(), &whisper_separator[1]);
             processing = false;
         }
     }

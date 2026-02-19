@@ -445,15 +445,15 @@ namespace {
 
 
         if (argOutpost == L"zv") {
-            GW::Chat::SendChat('/', L"zv travel");
+            GW::Chat::SendChat(GW::Chat::CHANNEL_EMOTE, L"zv travel");
             return;
         }
         if (argOutpost == L"zm") {
-            GW::Chat::SendChat('/', L"zm travel");
+            GW::Chat::SendChat(GW::Chat::CHANNEL_EMOTE, L"zm travel");
             return;
         }
         if (argOutpost == L"zb") {
-            GW::Chat::SendChat('/', L"zb travel");
+            GW::Chat::SendChat(GW::Chat::CHANNEL_EMOTE, L"zb travel");
             return;
         }
 
@@ -708,18 +708,18 @@ void TravelWindow::Draw(IDirect3DDevice9*)
             TravelButton(GW::Constants::MapID::The_Deep, 1);
             const float w = (ImGui::GetWindowWidth() - ImGui::GetStyle().ItemInnerSpacing.x) / 2 - 2.f * ImGui::GetStyle().WindowPadding.x;
             if (ImGui::Button("Zaishen Bounty", {w, 0})) {
-                GW::Chat::SendChat('/', "tp zb");
+                GW::Chat::SendChat(GW::Chat::CHANNEL_EMOTE, L"tp zb");
             }
             ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
             if (ImGui::Button("Zaishen Mission", {w, 0})) {
-                GW::Chat::SendChat('/', "tp zm");
+                GW::Chat::SendChat(GW::Chat::CHANNEL_EMOTE, L"tp zm");
             }
             if (ImGui::Button("Zaishen Vanquish", {w, 0})) {
-                GW::Chat::SendChat('/', "tp zv");
+                GW::Chat::SendChat(GW::Chat::CHANNEL_EMOTE, L"tp zv");
             }
             ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
             if (ImGui::Button("Zaishen Combat", {w, 0})) {
-                GW::Chat::SendChat('/', "tp zc");
+                GW::Chat::SendChat(GW::Chat::CHANNEL_EMOTE, L"tp zc");
             }
 
             static int editing = -1;

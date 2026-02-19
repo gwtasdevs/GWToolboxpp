@@ -78,3 +78,21 @@ namespace GW {
         GWCA_API bool GetSkillTemplate(SkillTemplate& skill_template);
     }
 }
+// ============================================================
+// C Interop API
+// ============================================================
+extern "C" {
+    GWCA_API int      GetSkillSlot(uint32_t skill_id);
+    GWCA_API bool     UseSkill(uint32_t slot, uint32_t target);
+    GWCA_API bool     UseSkillByID(uint32_t skill_id, uint32_t target);
+    GWCA_API void* GetSkillConstantData(uint32_t skill_id);
+    GWCA_API void* GetAttributeConstantData(uint32_t attribute_id);
+    GWCA_API void* GetPlayerSkillbar();
+    GWCA_API void* GetSkillbar(uint32_t agent_id);
+    GWCA_API void* GetHeroSkillbar(uint32_t hero_index);
+    GWCA_API void* GetHoveredSkill();
+    GWCA_API bool     GetIsSkillUnlocked(uint32_t skill_id);
+    GWCA_API bool     GetIsSkillLearnt(uint32_t skill_id);
+    GWCA_API bool     LoadSkillTemplateForAgent(uint32_t agent_id, const char* skill_template);
+    GWCA_API bool     LoadSkillTemplateString(const char* skill_template);
+}

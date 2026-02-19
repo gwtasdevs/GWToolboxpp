@@ -82,9 +82,9 @@ namespace {
 
 void LatencyWidget::SendPing()
 {
-    char buffer[48];
-    snprintf(buffer, sizeof(buffer), "Current Ping: %ums, Avg Ping: %ums", LatencyWidget::GetPing(), LatencyWidget::GetAveragePing());
-    GW::Chat::SendChat('#', buffer);
+    wchar_t buffer[48];
+    swprintf(buffer, sizeof(buffer), L"Current Ping: %ums, Avg Ping: %ums", LatencyWidget::GetPing(), LatencyWidget::GetAveragePing());
+    GW::Chat::SendChat(GW::Chat::CHANNEL_GROUP, buffer);
 }
 
 uint32_t LatencyWidget::GetPing() { 

@@ -234,7 +234,7 @@ void ResignLogModule::Update(float) {
     if (!send_queue.empty() && TIMER_DIFF(last_sent) > 600) {
         last_sent = TIMER_INIT();
         if (IsMapReady()) {
-            GW::Chat::SendChat('#', send_queue.front().c_str());
+            GW::Chat::SendChat(GW::Chat::CHANNEL_GROUP, send_queue.front().c_str());
             send_queue.pop();
         }
     }

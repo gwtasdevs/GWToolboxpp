@@ -600,7 +600,7 @@ void PartyStatisticsWindow::Update(const float)
             return;
         }
 
-        GW::Chat::SendChat('#', chat_queue.front().c_str());
+        GW::Chat::SendChat(GW::Chat::CHANNEL_GROUP, chat_queue.front().c_str());
         chat_queue.pop();
     }
 }

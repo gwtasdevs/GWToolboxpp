@@ -736,7 +736,7 @@ void TimerWidget::Draw(IDirect3DDevice9*)
                 if (!GameSettings::GetSettingBool("auto_age2_on_age")) {
                     PrintTimer();
                 }
-                GW::Chat::SendChat('/', "age");
+                GW::Chat::SendChat(GW::Chat::CHANNEL_EMOTE, L"age");
             }
         }
     }

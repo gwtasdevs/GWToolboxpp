@@ -55,14 +55,14 @@ void VanquishWidget::Draw(IDirect3DDevice9*)
         const ImVec2 min = ImGui::GetWindowPos();
         const ImVec2 max(min.x + size.x, min.y + size.y);
         if (ctrl_pressed && ImGui::IsMouseReleased(0) && ImGui::IsMouseHoveringRect(min, max)) {
-            char buffer[256];
-            snprintf(buffer, sizeof(buffer),
-                     "We have vanquished %lu %s! %lu %s remaining.",
+            wchar_t buffer[256];
+            swprintf(buffer, sizeof(buffer),
+                     L"We have vanquished %lu %s! %lu %s remaining.",
                      killed,
-                     killed == 1 ? "foe" : "foes",
+                     killed == 1 ? L"foe" : L"foes",
                      tokill,
-                     tokill == 1 ? "foe" : "foes");
-            GW::Chat::SendChat('#', buffer);
+                     tokill == 1 ? L"foe" : L"foes");
+            GW::Chat::SendChat(GW::Chat::CHANNEL_GROUP, buffer);
         }
     }
     ImGui::End();

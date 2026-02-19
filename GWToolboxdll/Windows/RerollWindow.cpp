@@ -667,7 +667,7 @@ void RerollWindow::Update(float)
             wchar_t msg_buf[32];
             ASSERT(same_party && party_leader[0]);
             ASSERT(swprintf(msg_buf, _countof(msg_buf), L"invite %s", party_leader) != -1);
-            GW::Chat::SendChat('/', msg_buf);
+            GW::Chat::SendChat(GW::Chat::CHANNEL_EMOTE, msg_buf);
             RerollSuccess();
         }
     }

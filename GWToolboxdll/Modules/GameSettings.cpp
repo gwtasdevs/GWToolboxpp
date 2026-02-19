@@ -1442,8 +1442,7 @@ namespace {
             }
             break;
             case GW::UI::UIMessage::kVanquishComplete: {
-                if (auto_age_on_vanquish)
-                    GW::Chat::SendChat('/', L"age");
+                if (auto_age_on_vanquish) GW::Chat::SendChat(GW::Chat::Channel::CHANNEL_EMOTE, L"age");
                 if (auto_screenshot_on_vanquish) pending_screenshot = TIMER_INIT();
                 if (block_vanquish_complete_popup)
                     GW::UI::SetFrameVisible(GW::UI::GetChildFrame(GW::UI::GetFrameByLabel(L"Game"), 6, 8), false) || (Log::Warning("Failed to hide vanquish popup"), true);
@@ -1586,7 +1585,7 @@ bool PendingChatMessage::Send()
         const size_t san_len = sanitised_lines[i].length();
         const wchar_t* str = sanitised_lines[i].c_str();
         if (len + san_len + 3 > 120) {
-            GW::Chat::SendChat('#', buf);
+            GW::Chat::SendChat(GW::Chat::Channel::CHANNEL_GROUP, buf);
             buf[0] = '\0';
             len = 0;
         }
@@ -1602,7 +1601,7 @@ bool PendingChatMessage::Send()
         buf[len] = '\0';
     }
     if (len) {
-        GW::Chat::SendChat('#', buf);
+        GW::Chat::SendChat(GW::Chat::Channel::CHANNEL_GROUP, buf);
         last_send = clock();
     }
     printed = true;
@@ -2831,7 +2830,7 @@ void GameSettings::OnServerMessage(const GW::HookStatus*, GW::Packet::StoC::Mess
     // 0x8101 0x641F 0x86C3 0xE149 0x53E8 0x101 0x107 = You have been in this map for n minutes.
     // 0x8101 0x641E 0xE7AD 0xEF64 0x1676 0x101 0x107 0x102 0x107 = You have been in this map for n hours and n minutes.
     if (wmemcmp(msg, L"\x8101\x641F\x86C3\xE149\x53E8", 5) == 0 || wmemcmp(msg, L"\x8101\x641E\xE7AD\xEF64\x1676", 5) == 0) {
-        GW::Chat::SendChat('/', L"age2");
+        GW::Chat::SendChat(GW::Chat::Channel::CHANNEL_EMOTE, L"age2");
     }
 }
 

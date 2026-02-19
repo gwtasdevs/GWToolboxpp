@@ -863,7 +863,7 @@ namespace {
         }
         const auto msg = TextUtils::StringToWString(std::format("{}|{}", uuid, secret));
         GW::GameThread::Enqueue([cpy = msg]() {
-            GW::Chat::SendChat(L"Gwmarket Auth", cpy.c_str());
+            GW::Chat::SendWhisper(L"Gwmarket Auth", cpy.c_str());
         });
     }
 
@@ -1764,6 +1764,10 @@ void GWMarketWindow::Initialize()
 void GWMarketWindow::Terminate()
 {
     Disconnect();
+    if (wsaData.wVersion) {
+        WSACleanup();
+        wsaData = {0};
+    }
     ToolboxWindow::Terminate();
     GW::UI::RemoveUIMessageCallback(&OnPostUIMessage_HookEntry);
 }

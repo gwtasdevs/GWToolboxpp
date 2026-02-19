@@ -257,10 +257,9 @@ void HealthWidget::Draw(IDirect3DDevice9*)
                     if (target) {
                         GW::Agents::AsyncGetAgentName(target, agent_name_ping);
                         if (!agent_name_ping.empty()) {
-                            const std::string agent_name_str = TextUtils::WStringToString(agent_name_ping);
                             const auto current_hp = static_cast<int>(target->hp * target->max_hp);
-                            const auto message = std::format("{}'s Health is {} of {}. ({:.0f} %%)", agent_name_str.c_str(), current_hp, target->max_hp, target->hp * 100.f);
-                            GW::Chat::SendChat('#', message.c_str());
+                            const auto message = std::format(L"{}'s Health is {} of {}. ({:.0f} %%)", agent_name_ping.c_str(), current_hp, target->max_hp, target->hp * 100.f);
+                            GW::Chat::SendChat(GW::Chat::CHANNEL_GROUP, message.c_str());
                         }
                     }
                 }
