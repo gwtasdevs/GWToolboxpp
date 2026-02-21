@@ -8,6 +8,7 @@
 #include <Timer.h>
 #include <Defines.h>
 #include <ImGuiAddons.h>
+#include <GWCA/Utilities/Hooker.h>
 
 namespace {
     // Gamepad cursor position in GW screen coordinates and client coordinates
@@ -16,7 +17,7 @@ namespace {
     bool was_in_cursor_mode = false;
 
     using XInputGetState_pt = DWORD(WINAPI*)(DWORD dwUserIndex, XINPUT_STATE* pState);
-    XInputGetState_pt XInputGetState_Func = nullptr;
+    XInputGetState_pt XInputGetState_Func = nullptr, XInputGetState_Ret = nullptr;
 
     clock_t XINPUT_GAMEPAD_A_HELD = 0;
 
@@ -24,10 +25,26 @@ namespace {
     {
         return true;
     }
+    
+    // Qol Fix: Disable gamepad state when gw isn't in focus
+    DWORD WINAPI OnXInputGetState(DWORD dwUserIndex, XINPUT_STATE* pState) {
+        GW::Hook::EnterHook();
+        DWORD ret = ERROR_DEVICE_NOT_CONNECTED;
+        if (GW::MemoryMgr::GetGWWindowHandle() == GetActiveWindow()) {
+            ret = XInputGetState_Ret(dwUserIndex, pState);
+        }
+        GW::Hook::LeaveHook();
+        return ret;
+    }
+    
     void HookXInput() {
         if (XInputGetState_Func) return;
         HMODULE hXInput = GetModuleHandleA("xinput1_4.dll");
         XInputGetState_Func = hXInput ? (XInputGetState_pt)GetProcAddress(hXInput, "XInputGetState") : nullptr;
+        if (XInputGetState_Func) {
+            GW::Hook::CreateHook((void**)&XInputGetState_Func, OnXInputGetState, (void**)&XInputGetState_Ret);
+            GW::Hook::EnableHooks(XInputGetState_Func);
+        }
     }
 } // namespace
 
