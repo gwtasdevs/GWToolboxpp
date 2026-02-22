@@ -6,7 +6,9 @@
 namespace GW {
     typedef uint32_t AgentID;
     typedef uint32_t PlayerID;
-    typedef uint32_t HeroID;
+    namespace Constants {
+        enum HeroID : uint32_t;
+    }
     typedef uint32_t Profession;
 
     struct PlayerPartyMember { // total: 0xC/12
@@ -22,7 +24,7 @@ namespace GW {
     struct HeroPartyMember { // total: 0x18/24
         /* +h0000 */ AgentID agent_id;
         /* +h0004 */ PlayerID owner_player_id;
-        /* +h0008 */ HeroID hero_id;
+        /* +h0008 */ GW::Constants::HeroID hero_id;
         /* +h000C */ uint32_t h000C;
         /* +h0010 */ uint32_t h0010;
         /* +h0014 */ uint32_t level;

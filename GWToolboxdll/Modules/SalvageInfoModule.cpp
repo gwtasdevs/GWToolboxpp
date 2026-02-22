@@ -22,6 +22,7 @@
 
 #include <Utils/GuiUtils.h>
 #include <Constants/EncStrings.h>
+#include <Utils/TextUtils.h>
 
 using nlohmann::json;
 namespace {
@@ -135,8 +136,8 @@ namespace {
         if (!(formula && formula->material_cost_count))
             return;
 
-        std::vector<const wchar_t*> common_materials;
-        std::vector<const wchar_t*> rare_materials;
+        std::vector<std::wstring> common_materials;
+        std::vector<std::wstring> rare_materials;
         for (size_t i = 0; i < formula->material_cost_count; i++) {
             const auto material_id = formula->material_cost_buffer[i].material;
             if (material_id > GW::Constants::MaterialSlot::Feather) {
@@ -146,34 +147,28 @@ namespace {
                 common_materials.push_back(material_name_from_slot(material_id));
             }
         }
+        if (common_materials.empty() && rare_materials.empty()) return;
 
+        
+
+        std::wstring items;
         if (!common_materials.empty()) {
-            std::wstring items;
-            for (auto i : common_materials) {
-                if(!i) continue;
-                if (!items.empty())
-                    items += L"\x2\x108\x107, \x1\x2";
-                items += i;
-            }
-            if (!items.empty()) {
-                NewLineIfNotEmpty(description);
-                description += std::format(L"{}\x10a\x108\x107" L"Common Materials: \x1\x1\x2{}", GW::EncStrings::ItemCommon, items);
-            }
+            NewLineIfNotEmpty(items);
+            items += L"\x108\x107"
+                     "Common Materials: \x1\x2";
 
+            items += TextUtils::Join(common_materials, L"\x2\x108\x107, \x1\x2");
         }
         if (!rare_materials.empty()) {
-            std::wstring items;
-            for (auto i : rare_materials) {
-                if (!i) continue;
-                if (!items.empty())
-                    items += L"\x2\x108\x107, \x1\x2";
-                items += i;
-            }
-            if (!items.empty()) {
-                NewLineIfNotEmpty(description);
-                description += std::format(L"{}\x10a\x108\x107" L"Rare Materials: \x1\x1\x2{}", GW::EncStrings::ItemRare, items);
-            }
+            NewLineIfNotEmpty(items);
+            items += L"\x108\x107"
+                     "Rare Materials: \x1\x2";
+            items += TextUtils::Join(rare_materials, L"\x2\x108\x107, \x1\x2");
         }
+        if (!description.empty()) description += L"\x2";
+        description += L"\x108\x107<c=@ItemDull><brx>\x1\x2";
+        description += items;
+        description += L"\x2\x108\x107</c>\x1";
 
     }
     void AppendNicholasInfo(const uint32_t item_id, std::wstring& description) {
@@ -185,10 +180,10 @@ namespace {
         const auto current_time = time(nullptr);
         NewLineIfNotEmpty(description);
         if (collection_time <= current_time) {
-            description += std::format(L"{}\x10a\x108\x107Nicholas The Traveler collects {} of these right now!\x1\x1", GW::EncStrings::ItemUnique, nicholas_info->quantity);
+            description += std::format(L"{}\x10a\x108\x107<brx>Nicholas The Traveler collects {} of these right now!\x1\x1", GW::EncStrings::ItemUnique, nicholas_info->quantity);
         }
         else {
-            description += std::format(L"{}\x10a\x108\x107Nicholas The Traveler collects {} of these in {}!\x1\x1", GW::EncStrings::ItemUnique, nicholas_info->quantity, PrintRelativeTime(collection_time));
+            description += std::format(L"{}\x10a\x108\x107<brx>Nicholas The Traveler collects {} of these in {}!\x1\x1", GW::EncStrings::ItemUnique, nicholas_info->quantity, PrintRelativeTime(collection_time));
         }
     }
     std::wstring tmp_item_description;

@@ -11,6 +11,7 @@
 #include <GWCA/Managers/UIMgr.h>
 #include <GWCA/Managers/FriendListMgr.h>
 #include <GWCA/Managers/StoCMgr.h>
+#include <GWCA/GameEntities/Frame.h>
 
 #include <Modules/GameSettings.h>
 #include <Utils/ToolboxUtils.h>
@@ -33,6 +34,7 @@ namespace {
     bool redirect_outgoing_whisper_to_whisper_channel = false;
     bool openlinks = true;
     bool auto_url = true;
+    bool clear_chat_message_when_hiding_chat = false;
 
     Color timestamps_color = Colors::RGB(0xc0, 0xc0, 0xbf);
 
@@ -338,6 +340,14 @@ namespace {
                 if (packet->preference_id == GW::UI::FlagPreference::ShowChatTimestamps)
                     show_timestamps = packet->new_value ? true : false;
             } break;
+            case GW::UI::UIMessage::kPreferenceValueChanged: {
+                // Remember user setting for chat timestamps
+                const auto packet = static_cast<GW::UI::UIPacket::kPreferenceValueChanged*>(wParam);
+                if (clear_chat_message_when_hiding_chat && packet->preference_id == GW::UI::NumberPreference::ChatState && packet->new_value == 0) {
+                    const auto frame = (GW::EditableTextFrame*)GW::UI::GetFrameByLabel(L"EditMessage");
+                    frame && frame->SetValue(L"");
+                }
+            } break;
             case GW::UI::UIMessage::kPlayerChatMessage: {
                 OnLocalChatMessage(status, message_id, wParam, lParam);
                 // Hide player chat message speech bubbles by redirecting from 0x10000081 to 0x1000007E
@@ -400,7 +410,8 @@ void ChatSettings::Initialize()
     constexpr GW::UI::UIMessage ui_messages[] = {
         GW::UI::UIMessage::kAgentSpeechBubble,
         GW::UI::UIMessage::kDialogueMessage,
-        GW::UI::UIMessage::kPreferenceFlagChanged,
+        GW::UI::UIMessage::kPreferenceFlagChanged, 
+        GW::UI::UIMessage::kPreferenceValueChanged,
         GW::UI::UIMessage::kPlayerChatMessage,
         GW::UI::UIMessage::kWriteToChatLog,
         GW::UI::UIMessage::kWriteToChatLogWithSender,
@@ -537,6 +548,7 @@ void ChatSettings::DrawSettingsInternal()
 
     ImGui::Checkbox("Automatically change urls into build templates.", &auto_url);
     ImGui::ShowHelp("When you write a message starting with 'http://' or 'https://', it will be converted in template format");
+    ImGui::Checkbox("Clear chat message when hiding the in-game chat window", &clear_chat_message_when_hiding_chat);
 }
 
 void ChatSettings::LoadSettings(ToolboxIni* ini)
@@ -555,6 +567,7 @@ void ChatSettings::LoadSettings(ToolboxIni* ini)
     LOAD_BOOL(redirect_outgoing_whisper_to_whisper_channel);
     LOAD_BOOL(openlinks);
     LOAD_BOOL(auto_url);
+    LOAD_BOOL(clear_chat_message_when_hiding_chat);
 
     for (auto& [token, color] : chat_token_colors_original) {
         auto key = std::format("chat_token_color_{}", TextUtils::WStringToString(token));
@@ -582,6 +595,7 @@ void ChatSettings::SaveSettings(ToolboxIni* ini)
     SAVE_BOOL(redirect_outgoing_whisper_to_whisper_channel);
     SAVE_BOOL(openlinks);
     SAVE_BOOL(auto_url);
+    SAVE_BOOL(clear_chat_message_when_hiding_chat);
 
     SAVE_COLOR(timestamps_color);
 

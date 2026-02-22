@@ -38,6 +38,7 @@
 #include <sstream>
 #include <thread>
 #include <unordered_set>
+#include <GWCA/GameEntities/Frame.h>
 
 // API for shops isn't good enough, stick to browsing for now.
 #define GWMARKET_SELLING_ENABLED 0
@@ -1218,9 +1219,23 @@ namespace {
 
             ImGui::SetCursorPos({ImGui::GetContentRegionAvail().x - 100.f, top + 5.f});
             if (ImGui::Button("Whisper##seller", {100.f, 0.f})) {
-                GW::GameThread::Enqueue([player = order.player] {
-                    std::wstring name_ws = TextUtils::StringToWString(player);
+                auto cpy = new MarketItem();
+                *cpy = order;
+                GW::GameThread::Enqueue([cpy] {
+                    std::wstring name_ws = TextUtils::StringToWString(cpy->player);
+                    std::wstring item_ws = TextUtils::StringToWString(cpy->name);
+                    
                     GW::UI::SendUIMessage(GW::UI::UIMessage::kOpenWhisper, (wchar_t*)name_ws.c_str());
+                    const auto frame = (GW::EditableTextFrame*)GW::UI::GetFrameByLabel(L"EditMessage");
+                    std::wstring message;
+                    if (cpy->orderType == OrderType::Buy) {
+                        message = std::format(L"Hi, are you still looking for {}?", item_ws.c_str());
+                    }
+                    else {
+                        message = std::format(L"Hi, do you still have {} for sale?", item_ws.c_str());
+                    }
+                    frame && frame->SetValue(message.c_str());
+                    delete cpy;
                 });
             }
             ImGui::SetCursorPos(original_cursor_pos);

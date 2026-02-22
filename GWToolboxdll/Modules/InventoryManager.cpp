@@ -1981,7 +1981,7 @@ uint16_t InventoryManager::StoreItems(uint16_t quantity, const std::vector<unsig
 
 GW::Item* InventoryManager::GetAvailableInventoryStack(GW::Item* like_item, const bool entire_stack)
 {
-    if (!like_item || static_cast<Item*>(like_item)->IsStackable()) {
+    if (!like_item || like_item->GetIsStackable()) {
         return nullptr;
     }
     GW::Item* best_item = nullptr;

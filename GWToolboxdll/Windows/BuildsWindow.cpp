@@ -979,8 +979,8 @@ void BuildsWindow::Draw(IDirect3DDevice9* pDevice)
         }
         ImGui::End();
     }
-
-    for (size_t i = 0, size = teambuilds.size(); i < size;i++) {
+    for (size_t i = 0, size = teambuilds.size(); i < size && size == teambuilds.size(); i++)
+    {
         const auto tbuild = teambuilds[i];
         if (!tbuild->edit_open) {
             continue;

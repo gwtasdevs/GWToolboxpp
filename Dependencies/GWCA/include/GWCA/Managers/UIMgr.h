@@ -839,8 +839,6 @@ namespace GW {
 
         GWCA_API bool TriggerFrameRedraw(UI::Frame* frame);
 
-        GWCA_API bool SetFramePosition(UI::Frame* frame, const UI::FramePosition* position);
-
         // When the player is actively using a game controller
         GWCA_API bool IsInControllerMode();
 
@@ -899,4 +897,42 @@ namespace GW {
             HookEntry *entry);
 
     }
+}
+extern "C" {
+    GWCA_API uint32_t GetTextLanguage(void);
+    GWCA_API bool ButtonClick(void* btn_frame);
+    GWCA_API bool SelectDropdownOption(void* frame, uint32_t value);
+    GWCA_API void* GetFrameContext(void* frame);
+    GWCA_API void* GetRootFrame(void);
+    GWCA_API void* GetChildFrame(void* parent, uint32_t child_offset);
+    GWCA_API bool SetFrameTitle(void* frame, const wchar_t* title);
+    GWCA_API void* GetParentFrame(void* frame);
+    GWCA_API void* GetFrameById(uint32_t frame_id);
+    GWCA_API void* GetFrameByLabel(const wchar_t* frame_label);
+    GWCA_API bool SendUIMessage(uint32_t msgid, void* wParam, void* lParam);
+    GWCA_API void* GetWindowPosition(uint32_t window_id);
+    GWCA_API bool SetWindowVisible(uint32_t window_id, bool is_visible);
+    GWCA_API bool SetWindowPosition(uint32_t window_id, void* info);
+    GWCA_API bool GetIsUIDrawn();
+    GWCA_API bool GetIsShiftScreenShot();
+    GWCA_API bool GetIsWorldMapShowing();
+    GWCA_API bool IsValidEncStr(const wchar_t* enc_str);
+    GWCA_API bool UInt32ToEncStr(uint32_t value, wchar_t* buffer, size_t count);
+    GWCA_API uint32_t EncStrToUInt32(const wchar_t* enc_str);
+    GWCA_API uint32_t GetPreference_Enum(uint32_t pref);
+    GWCA_API uint32_t GetPreference_Number(uint32_t pref);
+    GWCA_API bool     GetPreference_Flag(uint32_t pref);
+    GWCA_API wchar_t* GetPreference_String(uint32_t pref);
+    GWCA_API bool SetPreference_Enum(uint32_t pref, uint32_t value);
+    GWCA_API bool SetPreference_Number(uint32_t pref, uint32_t value);
+    GWCA_API bool SetPreference_Flag(uint32_t pref, bool value);
+    GWCA_API bool SetPreference_String(uint32_t pref, wchar_t* value);
+    GWCA_API bool GetCommandLinePref_String(const wchar_t* label, wchar_t** out);
+    GWCA_API bool GetCommandLinePref_UInt(const wchar_t* label, uint32_t* out);
+    GWCA_API bool SetCommandLinePref_String(const wchar_t* label, wchar_t* value);
+    GWCA_API bool SetCommandLinePref_UInt(const wchar_t* label, uint32_t value);
+    GWCA_API bool SetFrameVisible(void* frame, bool flag);
+    GWCA_API bool SetFrameDisabled(void* frame, bool flag);
+    GWCA_API bool IsInControllerMode();
+    GWCA_API bool IsInControllerCursorMode();
 }

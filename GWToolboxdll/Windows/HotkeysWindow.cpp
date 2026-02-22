@@ -786,7 +786,9 @@ bool HotkeysWindow::WndProc(const UINT Message, const WPARAM wParam, LPARAM)
         return (hk->key_combo & wndproc_keys_held) == hk->key_combo;
     };
 
-    auto check_triggers = [check_trigger](bool is_key_up, uint32_t keyData) {
+    size_t hotkeys_triggered = 0;
+
+    auto check_triggers = [check_trigger, &hotkeys_triggered](bool is_key_up, uint32_t keyData) {
         std::vector<TBHotkey*> matching_hotkeys;
         size_t max_modifier_count = 0;
 
@@ -822,6 +824,7 @@ bool HotkeysWindow::WndProc(const UINT Message, const WPARAM wParam, LPARAM)
                 if (!is_key_up && hk->block_gw) {
                     triggered = true;
                 }
+                if (hk->block_other_hotkeys_on_trigger) break;
             }
         }
 

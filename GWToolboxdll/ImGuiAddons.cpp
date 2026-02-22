@@ -52,7 +52,7 @@ namespace ImGui {
     bool InputText(const char* label, std::string& buf, ImGuiInputTextFlags flags, ImGuiInputTextCallback callback, void* user_data)
     {
         if (InputText(label, buf.data(), (int)buf.capacity(), flags, callback, user_data)) {
-            buf.resize(strlen(buf.data()) + 1);
+            buf.resize(strlen(buf.data()));
             return true;
         }
         return false;
@@ -64,6 +64,12 @@ namespace ImGui {
             return;
         tooltip_callback();
         EndTooltip();
+    }
+
+    float GetIndent()
+    {
+        ImGuiContext& g = *GImGui;
+        return g.CurrentWindow->DC.Indent.x;
     }
 
     void PushFont(ImFont* font, float font_size) {

@@ -31,3 +31,11 @@ namespace GW {
         GWCA_API bool IsInGameThread();
     };
 }
+// ============================================================
+// C Interop API
+// ============================================================
+extern "C" {
+    typedef void(__cdecl* GW_GameThreadCallback)();
+    GWCA_API void Enqueue(GW_GameThreadCallback callback, bool force_enqueue);
+    GWCA_API bool IsInGameThread();
+}

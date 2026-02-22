@@ -59,3 +59,15 @@ namespace GW {
         GWCA_API Buff *GetPlayerBuffBySkillId(Constants::SkillID skill_id);
     };
 }
+// ============================================================
+// C Interop API
+// ============================================================
+extern "C" {
+    GWCA_API uint32_t GetAlcoholLevel();
+    GWCA_API void     GetDrunkAf(float intensity, uint32_t tint);
+    GWCA_API void* GetAgentEffectsArray(uint32_t agent_id);
+    GWCA_API void* GetPlayerEffectsArray();
+    GWCA_API bool     DropBuff(uint32_t buff_id);
+    GWCA_API void* GetPlayerEffectBySkillId(uint32_t skill_id);
+    GWCA_API void* GetPlayerBuffBySkillId(uint32_t skill_id);
+}

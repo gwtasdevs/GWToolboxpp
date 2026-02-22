@@ -1053,7 +1053,10 @@ namespace {
         if (ImGui::Button("Open Text Dev Window")) {
             GW::GameThread::Enqueue([] {
                 GW::GetCharContext()->player_flags |= 0x8;
-                GW::UI::Keypress((GW::UI::ControlAction)0x25);
+                GW::UI::UIPacket::kKeyAction packet;
+                packet.gw_key = (GW::UI::ControlAction)0x25;
+                packet.state_flags = 0x6; // Ctrl and shift
+                GW::UI::SendFrameUIMessage(GW::UI::GetChildFrame(GW::UI::GetFrameByLabel(L"Game"), 6), GW::UI::UIMessage::kKeyDown, &packet);
                 GW::GetCharContext()->player_flags ^= 0x8;
                 });
         }

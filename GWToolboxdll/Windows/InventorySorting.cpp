@@ -33,13 +33,13 @@ namespace {
         Log::Warning(error_message);                                                       \
         is_sorting = false;                                                                \
         show_sort_popup = false;                                                           \
-        return;                                                                            \
+        return false;                                                                      \
     }                                                                                      \
     if (pending_cancel) {                                                                  \
         Log::Info("Sorting cancelled");                                                    \
         is_sorting = false;                                                                \
         show_sort_popup = false;                                                           \
-        return;                                                                            \
+        return false;                                                                      \
     }
 
     // Helper function to check if map is ready
@@ -161,76 +161,81 @@ namespace {
         }
     }
 
-    /**
-     * Finds the next item that needs to be moved and returns its target position.
-     * Returns true if an item needs moving, false if all remaining items are sorted.
-     */
-    struct MoveTarget {
-        uint32_t item_id = 0;
-        GW::Constants::Bag target_bag = GW::Constants::Bag::None;
-        uint32_t target_slot = 0;
-        bool needs_move = false;
+    // Helper: iterate over all slots in a bag range
+    template <typename Fn>
+    void ForEachItemInBags(GW::Constants::Bag start, GW::Constants::Bag end, Fn&& fn)
+    {
+        for (auto bag_id = start; bag_id <= end; bag_id = static_cast<GW::Constants::Bag>(std::to_underlying(bag_id) + 1)) {
+            GW::Bag* bag = GW::Items::GetBag(bag_id);
+            if (!bag || !bag->items.valid()) continue;
+            for (uint32_t slot = 0; slot < bag->items.size(); slot++) {
+                GW::Item* item = bag->items[slot];
+                if (!item) continue;
+                fn(bag, bag_id, slot, item);
+            }
+        }
+    }
+
+    struct SlotExpectation {
+        GW::Constants::Bag bag_id;
+        uint32_t slot;
+        uint32_t expected_value; // item_id or quantity depending on check mode
     };
 
-    /**
-     * Finds the next item that needs to be moved.
-     * Updates start iterator to point to the item that needs moving.
-     * Returns true if an item needs moving, false if all items are sorted.
-     * Fills target_out with the destination bag and slot if an item needs moving.
-     */
-    bool GetNextItemThatNeedsMoving(std::vector<uint32_t>::const_iterator& start, const std::vector<uint32_t>::const_iterator& end, MoveTarget* target_out)
+    enum class ExpectationMode {
+        Quantity, // expected_value is quantity, 0 means slot should be empty
+        ItemId,   // expected_value is item_id
+    };
+
+    // Helper: wait until all slot expectations are met
+    bool WaitForExpectations(const std::vector<SlotExpectation>& expectations, ExpectationMode mode, uint32_t timeout_ms)
     {
-        while (start != end) {
-            const auto check_item_id = *start;
-            GW::Item* check_item = GW::Items::GetItemById(check_item_id);
-            if (!check_item) {
-                ++start;
-                continue;
-            }
-            const auto check_item_priority = GetItemSortPriority(check_item);
+        for (size_t t = 0; t < timeout_ms && !pending_cancel; t += 50) {
+            bool task_done = false;
+            bool all_done = true;
 
-            // Scan through bags to find where this item currently is and if it needs moving
-            for (auto bag_id = GW::Constants::Bag::Storage_1; bag_id <= GW::Constants::Bag::Storage_14; bag_id = static_cast<GW::Constants::Bag>(std::to_underlying(bag_id) + 1)) {
-                GW::Bag* bag = GW::Items::GetBag(bag_id);
-                if (!bag || !bag->items.valid()) {
-                    continue;
-                }
-
-                for (size_t slot = 0; slot < bag->items.size(); slot++) {
-                    GW::Item* slot_item = bag->items[slot];
-
-                    // Empty slot found - check_item should move here
-                    if (!slot_item) {
-                        if (target_out) {
-                            target_out->target_bag = bag_id;
-                            target_out->target_slot = static_cast<uint32_t>(slot);
-                        }
-                        return true;
+            GW::GameThread::Enqueue([&expectations, &all_done, &task_done, mode]() {
+                for (const auto& exp : expectations) {
+                    GW::Bag* bag = GW::Items::GetBag(exp.bag_id);
+                    if (!bag || !bag->items.valid()) {
+                        all_done = false;
+                        break;
                     }
+                    GW::Item* item = bag->items[exp.slot];
 
-                    // Found our item - it's in the correct position relative to everything before it
-                    if (slot_item->item_id == check_item_id) {
-                        ++start;
-                        return GetNextItemThatNeedsMoving(start, end, target_out);
-                    }
-
-                    // Found an item with lower priority - check_item should go before it
-                    if (GetItemSortPriority(slot_item) > check_item_priority) {
-                        if (target_out) {
-                            target_out->target_bag = bag_id;
-                            target_out->target_slot = static_cast<uint32_t>(slot);
+                    if (mode == ExpectationMode::Quantity) {
+                        if (exp.expected_value == 0) {
+                            if (item != nullptr) {
+                                all_done = false;
+                                break;
+                            }
                         }
-                        return true;
+                        else {
+                            if (!item || item->quantity != exp.expected_value) {
+                                all_done = false;
+                                break;
+                            }
+                        }
+                    }
+                    else {
+                        if (!item || item->item_id != exp.expected_value) {
+                            all_done = false;
+                            break;
+                        }
                     }
                 }
-            }
+                task_done = true;
+            });
 
-            // Item not found (was deleted/merged), skip it
-            ++start;
+            WAIT_FOR_GAME_THREAD_TASK(task_done, 3000, "Failed to verify slot expectations");
+
+            if (all_done) return true;
+            Sleep(50);
         }
 
         return false;
     }
+
 } // namespace
 
 void InventorySorting::Initialize()
@@ -293,7 +298,9 @@ void InventorySorting::DrawSettingsInternal()
     ImGui::SameLine(0.f, 20.f);
     bool sort_inv = false;
     if (ImGui::ConfirmButton("Sort Storage Inventory!", &sort_inv)) {
-        SortInventoryByType();
+        Resources::EnqueueWorkerTask([]() {
+            SortInventory(GW::Constants::Bag::Storage_1, GW::Constants::Bag::Storage_14);
+        });
     }
     if (open) {
         ImGui::Indent();
@@ -369,152 +376,170 @@ void InventorySorting::RegisterSettingsContent()
         1.2f
     );
 }
-
-void InventorySorting::SortInventoryByType()
+bool InventorySorting::CombineStacks(GW::Constants::Bag start, GW::Constants::Bag end)
 {
-    if (is_sorting) {
-        Log::Warning("Inventory sort already in progress");
-        return;
-    }
+    ASSERT(!GW::GameThread::IsInGameThread());
 
-    if (!IsMapReady()) {
-        Log::Warning("Cannot sort inventory while map is loading");
-        return;
-    }
+    std::vector<GW::Item*> stackable_items;
+    std::vector<std::vector<GW::Item*>> groups;
+    std::vector<SlotExpectation> expectations;
+    bool task_done = false;
 
-    // Show popup and set flags
-    show_sort_popup = true;
-    is_sorting = true;
-    items_sorted_count = 0;
-    pending_cancel = false;
+    GW::GameThread::Enqueue([&stackable_items, &groups, &task_done, start, end]() {
+        ForEachItemInBags(start, end, [&](GW::Bag*, GW::Constants::Bag, uint32_t, GW::Item* item) {
+            if (item->GetIsStackable() && item->quantity > 0 && item->quantity < 250) stackable_items.push_back(item);
+        });
 
-    Log::Info("Starting inventory sort...");
+        std::vector<bool> assigned(stackable_items.size(), false);
+        for (size_t i = 0; i < stackable_items.size(); i++) {
+            if (assigned[i]) continue;
+            std::vector<GW::Item*> group = {stackable_items[i]};
+            assigned[i] = true;
 
-    // Start the sorting process on a worker thread
-    Resources::EnqueueWorkerTask([]() {
-        std::vector<uint32_t> item_ids;
+            for (size_t j = i + 1; j < stackable_items.size(); j++) {
+                if (assigned[j]) continue;
+                if (InventoryManager::IsSameItem(stackable_items[i], stackable_items[j])) {
+                    group.push_back(stackable_items[j]);
+                    assigned[j] = true;
+                }
+            }
 
-        // ====== PHASE 1: Collect all item IDs from inventory bags ======
-        bool task_done = false;
-        GW::GameThread::Enqueue([&item_ids, &task_done]() {
-            for (auto bag_id = GW::Constants::Bag::Storage_1; bag_id <= GW::Constants::Bag::Storage_14; bag_id = static_cast<GW::Constants::Bag>(std::to_underlying(bag_id) + 1)) {
-                GW::Bag* bag = GW::Items::GetBag(bag_id);
-                if (!bag || !bag->items.valid()) {
+            if (group.size() > 1) groups.push_back(std::move(group));
+        }
+        task_done = true;
+    });
+
+    WAIT_FOR_GAME_THREAD_TASK(task_done, 3000, "Stack consolidation failed to collect items");
+    if (groups.empty() || pending_cancel) return !pending_cancel;
+
+    task_done = false;
+    GW::GameThread::Enqueue([&groups, &expectations, &task_done]() {
+        for (auto& items : groups) {
+            std::sort(items.begin(), items.end(), [](GW::Item* a, GW::Item* b) {
+                return a->quantity > b->quantity;
+            });
+
+            std::vector<uint32_t> quantities;
+            for (auto* item : items)
+                quantities.push_back(item->quantity);
+
+            size_t dst = 0;
+            size_t src = items.size() - 1;
+            while (dst < src) {
+                uint32_t space = 250 - quantities[dst];
+                if (space == 0) {
+                    dst++;
                     continue;
                 }
 
-                // Collect item IDs from this bag
-                for (auto item : bag->items) {
-                    if (!item) continue;
-                    item_ids.push_back(item->item_id);
-                }
+                uint32_t to_move = std::min(space, quantities[src]);
+                GW::Items::MoveItem(items[src], items[dst], to_move);
+
+                quantities[dst] += to_move;
+                quantities[src] -= to_move;
+
+                if (quantities[src] == 0) src--;
+                if (quantities[dst] >= 250) dst++;
             }
-            // Sort item IDs by priority
-            std::sort(item_ids.begin(), item_ids.end(), [](uint32_t a_id, uint32_t b_id) {
-                GW::Item* item_a = GW::Items::GetItemById(a_id);
-                GW::Item* item_b = GW::Items::GetItemById(b_id);
-                return ShouldItemComeFirst(item_a, item_b);
-            });
+
+            for (size_t i = 0; i < items.size(); i++)
+                expectations.push_back({items[i]->bag->bag_id(), items[i]->slot, quantities[i]});
+        }
+        task_done = true;
+    });
+
+    WAIT_FOR_GAME_THREAD_TASK(task_done, 5000, "Stack consolidation failed to issue merge commands");
+    if (pending_cancel) return false;
+
+    return WaitForExpectations(expectations, ExpectationMode::Quantity, 5000);
+}
+
+bool InventorySorting::StoreMaterials(GW::Constants::Bag start, GW::Constants::Bag end)
+{
+    ASSERT(!GW::GameThread::IsInGameThread());
+
+    std::vector<SlotExpectation> expectations;
+    bool task_done = false;
+
+    GW::GameThread::Enqueue([&task_done, &expectations, start, end]() {
+        const uint32_t max_stack = GW::Items::GetMaterialStorageStackSize();
+        const auto material_storage_bag = GW::Items::GetBag(GW::Constants::Bag::Material_Storage);
+        if (!material_storage_bag) {
             task_done = true;
-        });
-
-        WAIT_FOR_GAME_THREAD_TASK(task_done, 3000, "Sorting failed to collect inventory item info");
-
-        if (pending_cancel) {
-            Log::Info("Sorting cancelled");
-            is_sorting = false;
-            show_sort_popup = false;
             return;
         }
 
-        // ====== PHASE 2: Find and move items that are out of place ======
-        auto current_iter = item_ids.begin();
-        const auto end_iter = item_ids.end();
+        ForEachItemInBags(start, end, [&](GW::Bag*, GW::Constants::Bag bag_id, uint32_t slot, GW::Item* item) {
+            if (!item->GetIsMaterial()) return;
 
-        while (!pending_cancel) {
-            // Find the next item that needs moving
-            MoveTarget move_target;
-            bool needs_move = false;
-            task_done = false;
+            const auto mod = ((InventoryManager::Item*)item)->GetModifier(0x2508);
+            const auto mat_slot = mod->arg1();
+            if (mat_slot > (uint32_t)GW::Constants::MaterialSlot::JadeiteShard) return;
 
-            GW::GameThread::Enqueue([&needs_move, &move_target, &current_iter, &end_iter, &task_done]() {
-                needs_move = GetNextItemThatNeedsMoving(current_iter, end_iter, &move_target);
-                task_done = true;
-            });
+            const auto mat_item = material_storage_bag->items[mat_slot];
+            uint32_t space = max_stack - (mat_item ? mat_item->quantity : 0);
+            if (space == 0) return;
 
-            WAIT_FOR_GAME_THREAD_TASK(task_done, 3000, "Sorting failed to find next item to move");
+            uint32_t to_move = std::min(space, (uint32_t)item->quantity);
+            GW::Items::MoveItem(item, GW::Constants::Bag::Material_Storage, mat_slot, to_move);
 
-            if (!needs_move) {
-                // All remaining items are in correct positions
-                break;
-            }
+            uint32_t remaining = item->quantity - to_move;
+            expectations.push_back({bag_id, slot, remaining});
+        });
 
-            const uint32_t item_id_to_move = *current_iter;
+        task_done = true;
+    });
 
-            // Move the item to the target position
-            task_done = false;
-            GW::GameThread::Enqueue([&task_done, item_id_to_move, move_target]() {
-                GW::Item* item = GW::Items::GetItemById(item_id_to_move);
-                if (item) {
-                    GW::Items::MoveItem(item, move_target.target_bag, move_target.target_slot);
-                }
-                task_done = true;
-            });
+    WAIT_FOR_GAME_THREAD_TASK(task_done, 3000, "Store materials failed to issue move commands");
+    if (expectations.empty() || pending_cancel) return !pending_cancel;
 
-            WAIT_FOR_GAME_THREAD_TASK(task_done, 3000, "Sorting failed to issue move command");
+    return WaitForExpectations(expectations, ExpectationMode::Quantity, 5000);
+}
 
-            // Wait for move to complete
-            bool move_complete = false;
-            const uint32_t timeout_ms = 3000;
+bool InventorySorting::SortInventory(GW::Constants::Bag start, GW::Constants::Bag end)
+{
+    ASSERT(!GW::GameThread::IsInGameThread());
+    if (!StoreMaterials(start, end)) return false;
+    if (!CombineStacks(start, end)) return false;
 
-            for (size_t j = 0; j < timeout_ms && !pending_cancel; j += 20) {
-                task_done = false;
-                GW::GameThread::Enqueue([&move_complete, &task_done, item_id_to_move, move_target]() {
-                    GW::Item* item = GW::Items::GetItemById(item_id_to_move);
+    std::vector<SlotExpectation> expectations;
+    bool task_done = false;
 
-                    // Item might have been merged into a stack and no longer exists
-                    if (!item) {
-                        move_complete = true;
-                        task_done = true;
-                        return;
-                    }
+    GW::GameThread::Enqueue([&task_done, &expectations, start, end]() {
+        if (is_sorting || !IsMapReady()) {
+            task_done = true;
+            return;
+        }
 
-                    // Check if item reached target position
-                    if (item->bag && item->bag->bag_id() == move_target.target_bag && item->slot == move_target.target_slot) {
-                        move_complete = true;
-                    }
+        std::vector<uint32_t> item_ids;
+        ForEachItemInBags(start, end, [&](GW::Bag*, GW::Constants::Bag, uint32_t, GW::Item* item) {
+            item_ids.push_back(item->item_id);
+        });
 
-                    task_done = true;
-                });
+        std::sort(item_ids.begin(), item_ids.end(), [](uint32_t a_id, uint32_t b_id) {
+            GW::Item* item_a = GW::Items::GetItemById(a_id);
+            GW::Item* item_b = GW::Items::GetItemById(b_id);
+            return ShouldItemComeFirst(item_a, item_b);
+        });
 
-                WAIT_FOR_GAME_THREAD_TASK(task_done, 3000, "Sorting failed to verify item move");
+        size_t idx = 0;
+        for (auto bag_id = start; bag_id <= end; bag_id = static_cast<GW::Constants::Bag>(std::to_underlying(bag_id) + 1)) {
+            GW::Bag* bag = GW::Items::GetBag(bag_id);
+            if (!bag || !bag->items.valid()) continue;
 
-                if (move_complete) {
-                    items_sorted_count++;
-                    break;
-                }
-
-                Sleep(20);
-            }
-
-            if (pending_cancel) {
-                Log::Info("Sorting cancelled");
-                is_sorting = false;
-                show_sort_popup = false;
-                return;
-            }
-
-            if (!move_complete) {
-                Log::Warning("Sorting failed to move item %u to bag %d slot %u", item_id_to_move, std::to_underlying(move_target.target_bag), move_target.target_slot);
-                is_sorting = false;
-                show_sort_popup = false;
-                return;
+            for (uint32_t slot = 0; slot < bag->items.size() && idx < item_ids.size(); slot++) {
+                GW::Item* item = GW::Items::GetItemById(item_ids[idx]);
+                if (item && (item->bag != bag || item->slot != slot)) GW::Items::MoveItem(item, bag_id, slot);
+                expectations.push_back({bag_id, slot, item_ids[idx]});
+                idx++;
             }
         }
 
-        // ====== PHASE 3: Completion ======
-        Log::Info("Inventory sorting complete! %zu items sorted.", items_sorted_count);
-        is_sorting = false;
-        show_sort_popup = false;
+        task_done = true;
     });
+
+    WAIT_FOR_GAME_THREAD_TASK(task_done, 3000, "Sorting failed to issue move commands");
+    if (expectations.empty() || pending_cancel) return !pending_cancel;
+
+    return WaitForExpectations(expectations, ExpectationMode::ItemId, 5000);
 }

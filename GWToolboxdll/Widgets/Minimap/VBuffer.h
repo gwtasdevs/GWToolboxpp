@@ -32,14 +32,19 @@ public:
 
     virtual void Render(IDirect3DDevice9* device)
     {
+        RenderVertices(device, 0, count);
+    }
+
+    void RenderVertices(IDirect3DDevice9* device, size_t offset, size_t _count)
+    {
         if (!initialized) {
             initialized = true;
             Initialize(device);
         }
-
+        ASSERT(offset + _count <= count);
         device->SetFVF(D3DFVF_CUSTOMVERTEX);
         device->SetStreamSource(0, buffer, 0, sizeof(D3DVertex));
-        device->DrawPrimitive(type, 0, count);
+        device->DrawPrimitive(type, 0, _count);
     }
 
     virtual void Terminate()

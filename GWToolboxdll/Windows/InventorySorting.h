@@ -7,6 +7,7 @@
 namespace GW {
     namespace Constants {
         enum class ItemType : uint8_t;
+        enum class Bag : uint8_t;
     }
 }
 
@@ -31,11 +32,15 @@ public:
     void DrawSettingsInternal() override;
     void RegisterSettingsContent() override;
 
+    static bool CombineStacks(GW::Constants::Bag start, GW::Constants::Bag end);
+
+    static bool StoreMaterials(GW::Constants::Bag start, GW::Constants::Bag end);
+
     /**
      * Sorts all items in inventory bags by item type according to 
      * the configured sort order. Runs on a worker thread with progress popup.
      */
-    static void SortInventoryByType();
+    static bool SortInventory(GW::Constants::Bag start, GW::Constants::Bag end);
     
     /**
      * Cancels the current inventory sorting operation and cleans up state.
