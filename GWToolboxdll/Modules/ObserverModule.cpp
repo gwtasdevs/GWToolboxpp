@@ -87,6 +87,28 @@ void ObserverModule::Initialize()
         HandleJumboMessage(packet->type, packet->value);
     });
 
+    // Hook for countdown start - this fires twice: once at map load, once when match actually starts
+    GW::StoC::RegisterPacketCallback(&CountdownStart_Entry, GAME_SMSG_INSTANCE_COUNTDOWN, [this](GW::HookStatus*, GW::Packet::StoC::PacketBase*) -> void {
+        if (!IsActive()) {
+            return;
+        }
+        if (!InitializeObserverSession()) {
+            return;
+        }
+        
+        const uint32_t instance_time = GW::Map::GetInstanceTime();
+        
+        if (!first_countdown_seen) {
+            // First countdown at map load - just mark it as seen
+            first_countdown_seen = true;
+            Log::InfoW(L"[Observer] First countdown (map load) at %u ms", instance_time);
+        } else {
+            // Second countdown - this is the actual match start
+            match_start_instance_time = instance_time;
+            Log::InfoW(L"[Observer] Match started at %u ms (second countdown)", match_start_instance_time);
+        }
+    });
+
     GW::StoC::RegisterPacketCallback<GW::Packet::StoC::AgentState>(&AgentState_Entry, [this](const GW::HookStatus*, const GW::Packet::StoC::AgentState* packet) -> void {
         if (!IsActive()) {
             return;
@@ -392,14 +414,16 @@ void ObserverModule::HandleAgentState(const uint32_t agent_id, const uint32_t st
     
     // Check for resurrection (was dead, now alive)
     if (observable_agent->is_dead && !is_now_dead) {
-        const uint32_t match_time = GW::Map::GetInstanceTime();
+        const uint32_t instance_time = GW::Map::GetInstanceTime();
+        // Use time relative to match start if available, otherwise use instance time
+        const uint32_t match_time = match_start_instance_time > 0 ? (instance_time - match_start_instance_time) : instance_time;
         
         // Determine resurrection type
         ResurrectionType res_type = ResurrectionType::Unknown;
         if (observable_agent->last_resurrector != NO_AGENT) {
             res_type = ResurrectionType::Skill;
-        } else {
-            // Check if this is a base resurrection (occurs every 2 minutes: 120000ms, 240000ms, etc.)
+        } else if (match_start_instance_time > 0) {
+            // Check if this is a base resurrection (occurs every 2 minutes from match start: 120000ms, 240000ms, etc.)
             // Allow 3 second window (3000ms) around the 2-minute marks
             const uint32_t time_in_cycle = match_time % 120000; // Time since last 2-minute mark
             if (time_in_cycle <= 3000 || time_in_cycle >= 117000) {
@@ -434,7 +458,9 @@ void ObserverModule::HandleAgentState(const uint32_t agent_id, const uint32_t st
     }
 
     // Record death event with timestamp and coordinates
-    const uint32_t match_time = GW::Map::GetInstanceTime();
+    const uint32_t instance_time = GW::Map::GetInstanceTime();
+    // Use time relative to match start if available, otherwise use instance time
+    const uint32_t match_time = match_start_instance_time > 0 ? (instance_time - match_start_instance_time) : instance_time;
     const GW::Agent* agent = GW::Agents::GetAgentByID(agent_id);
     float pos_x = 0.0f, pos_y = 0.0f;
     if (agent) {
@@ -858,7 +884,9 @@ void ObserverModule::HandleMoraleBoost(ObservableParty* boosting_party)
     if (!boosting_party) {
         return;
     }
-    const uint32_t match_time = GW::Map::GetInstanceTime();
+    const uint32_t instance_time = GW::Map::GetInstanceTime();
+    // Use time relative to match start if available, otherwise use instance time
+    const uint32_t match_time = match_start_instance_time > 0 ? (instance_time - match_start_instance_time) : instance_time;
     boosting_party->morale_boosts.emplace_back(match_time);
 }
 
@@ -885,8 +913,11 @@ void ObserverModule::HandleVictory(ObservableParty* winning_party)
     winning_party->is_victorious = true;
 
     // note the final game duration
-    // don't count the first minute before the gates open...
-    const uint32_t ms = GW::Map::GetInstanceTime() - 1000 * 60;
+    // Calculate from actual match start time if available, otherwise use 60s offset
+    const uint32_t instance_time = GW::Map::GetInstanceTime();
+    const uint32_t ms = match_start_instance_time > 0 
+        ? (instance_time - match_start_instance_time) 
+        : (instance_time - 1000 * 60);
     match_duration_ms_total = std::chrono::milliseconds(ms);
     match_duration_ms = std::chrono::milliseconds(ms);
     match_duration_secs = std::chrono::duration_cast<std::chrono::seconds>(match_duration_ms);
@@ -1379,6 +1410,8 @@ bool ObserverModule::InitializeObserverSession()
 
     match_finished = false;
     winning_party_id = NO_PARTY;
+    first_countdown_seen = false;
+    match_start_instance_time = 0;
     match_duration_ms_total = std::chrono::milliseconds(0);
     match_duration_ms = std::chrono::milliseconds(0);
     match_duration_secs = std::chrono::seconds(0);
@@ -1469,7 +1502,9 @@ void ObserverModule::Update(const float)
 
     // Record health snapshots every 15 seconds for all tracked agents
     if (TIMER_DIFF(health_snapshot_timer) > 15000) {
-        const uint32_t match_time = GW::Map::GetInstanceTime();
+        const uint32_t instance_time = GW::Map::GetInstanceTime();
+        // Use time relative to match start if available, otherwise use instance time
+        const uint32_t match_time = match_start_instance_time > 0 ? (instance_time - match_start_instance_time) : instance_time;
         
         // Calculate aggregate party health for each party
         for (const auto& [party_id, party] : observable_parties) {

@@ -616,6 +616,8 @@ public:
 
     bool match_finished = false;
     uint32_t winning_party_id = NO_PARTY;
+    bool first_countdown_seen = false; // Track if we've seen the initial countdown at map load
+    uint32_t match_start_instance_time = 0; // Instance time when match actually started (countdown finished)
     std::chrono::milliseconds match_duration_ms_total{};
     std::chrono::milliseconds match_duration_ms{};
     std::chrono::seconds match_duration_secs{};
@@ -694,7 +696,7 @@ private:
     std::unordered_map<uint32_t, uint32_t> agent_max_energy_cache = {};
 
     static uint32_t JumboMessageValueToPartyId(uint32_t value);
-    static void HandleMoraleBoost(ObservableParty* boosting_party);
+    void HandleMoraleBoost(ObservableParty* boosting_party);
     void HandleVictory(ObservableParty* winning_party);
 
     ObservableMap* map{};
@@ -720,6 +722,7 @@ private:
     // hooks
     GW::HookEntry JumboMessage_Entry;
     GW::HookEntry InstanceLoadInfo_Entry;
+    GW::HookEntry CountdownStart_Entry;
     GW::HookEntry AgentState_Entry;
     GW::HookEntry AgentAdd_Entry;
     GW::HookEntry AgentProjectileLaunched_Entry;
