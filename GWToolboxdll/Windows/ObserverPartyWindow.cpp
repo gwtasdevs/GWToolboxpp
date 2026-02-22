@@ -129,6 +129,36 @@ void ObserverPartyWindow::DrawHeaders(const size_t party_count) const
             ImGui::Text(ObserverLabel::SkillsUsed);
             ImGui::SameLine(offset += text_tiny);
         }
+
+        // [dmg+:short]
+        if (show_damage_dealt) {
+            ImGui::Text("Dmg+");
+            ImGui::SameLine(offset += text_short);
+        }
+
+        // [dmg-:short]
+        if (show_damage_received) {
+            ImGui::Text("Dmg-");
+            ImGui::SameLine(offset += text_short);
+        }
+
+        // [heal+:short]
+        if (show_healing_dealt) {
+            ImGui::Text("Heal+");
+            ImGui::SameLine(offset += text_short);
+        }
+
+        // [heal-:short]
+        if (show_healing_received) {
+            ImGui::Text("Heal-");
+            ImGui::SameLine(offset += text_short);
+        }
+
+        // [max hp:tiny]
+        if (show_max_hp) {
+            ImGui::Text("MaxHP");
+            ImGui::SameLine(offset += text_tiny);
+        }
     }
 }
 
@@ -184,6 +214,24 @@ void ObserverPartyWindow::DrawBlankPartyMember(float& offset) const
         tinys += 1;
     }
     if (show_dealt_party_skills) {
+        tinys += 1;
+    }
+    if (show_skills_used) {
+        tinys += 1;
+    }
+    if (show_damage_dealt) {
+        shorts += 1;
+    }
+    if (show_damage_received) {
+        shorts += 1;
+    }
+    if (show_healing_dealt) {
+        shorts += 1;
+    }
+    if (show_healing_received) {
+        shorts += 1;
+    }
+    if (show_max_hp) {
         tinys += 1;
     }
 
@@ -318,6 +366,41 @@ void ObserverPartyWindow::DrawPartyMember(float& offset, ObserverModule::Observa
         Text(std::to_string(agent.stats.total_skills_used.finished).c_str());
         ImGui::SameLine(offset += text_tiny);
     }
+
+    // [dmg+:short]
+    if (show_damage_dealt) {
+        Text(std::to_string(agent.stats.total_damage_dealt).c_str());
+        ImGui::SameLine(offset += text_short);
+    }
+
+    // [dmg-:short]
+    if (show_damage_received) {
+        Text(std::to_string(agent.stats.total_damage_received).c_str());
+        ImGui::SameLine(offset += text_short);
+    }
+
+    // [heal+:short]
+    if (show_healing_dealt) {
+        Text(std::to_string(agent.stats.total_healing_dealt).c_str());
+        ImGui::SameLine(offset += text_short);
+    }
+
+    // [heal-:short]
+    if (show_healing_received) {
+        Text(std::to_string(agent.stats.total_healing_received).c_str());
+        ImGui::SameLine(offset += text_short);
+    }
+
+    // [max hp:tiny]
+    if (show_max_hp) {
+        uint32_t max_hp = ObserverModule::Instance().GetCachedMaxHP(agent.agent_id);
+        if (max_hp > 0) {
+            Text(std::to_string(max_hp).c_str());
+        } else {
+            Text("-");
+        }
+        ImGui::SameLine(offset += text_tiny);
+    }
 }
 
 
@@ -428,6 +511,36 @@ void ObserverPartyWindow::DrawParty(float& offset, const ObserverModule::Observa
     // [+skl:tiny]
     if (show_skills_used) {
         ImGui::Text(std::to_string(party.stats.total_skills_used.finished).c_str());
+        ImGui::SameLine(offset += text_tiny);
+    }
+
+    // [dmg+:short]
+    if (show_damage_dealt) {
+        ImGui::Text(std::to_string(party.stats.total_damage_dealt).c_str());
+        ImGui::SameLine(offset += text_short);
+    }
+
+    // [dmg-:short]
+    if (show_damage_received) {
+        ImGui::Text(std::to_string(party.stats.total_damage_received).c_str());
+        ImGui::SameLine(offset += text_short);
+    }
+
+    // [heal+:short]
+    if (show_healing_dealt) {
+        ImGui::Text(std::to_string(party.stats.total_healing_dealt).c_str());
+        ImGui::SameLine(offset += text_short);
+    }
+
+    // [heal-:short]
+    if (show_healing_received) {
+        ImGui::Text(std::to_string(party.stats.total_healing_received).c_str());
+        ImGui::SameLine(offset += text_short);
+    }
+
+    // [max hp:tiny]
+    if (show_max_hp) {
+        ImGui::Text("");
         ImGui::SameLine(offset += text_tiny);
     }
 }
@@ -583,6 +696,11 @@ void ObserverPartyWindow::LoadSettings(ToolboxIni* ini)
     LOAD_BOOL(show_received_party_skills);
     LOAD_BOOL(show_dealt_party_skills);
     LOAD_BOOL(show_skills_used);
+    LOAD_BOOL(show_damage_dealt);
+    LOAD_BOOL(show_damage_received);
+    LOAD_BOOL(show_healing_dealt);
+    LOAD_BOOL(show_healing_received);
+    LOAD_BOOL(show_max_hp);
 }
 
 
@@ -609,6 +727,11 @@ void ObserverPartyWindow::SaveSettings(ToolboxIni* ini)
     SAVE_BOOL(show_received_party_skills);
     SAVE_BOOL(show_dealt_party_skills);
     SAVE_BOOL(show_skills_used);
+    SAVE_BOOL(show_damage_dealt);
+    SAVE_BOOL(show_damage_received);
+    SAVE_BOOL(show_healing_dealt);
+    SAVE_BOOL(show_healing_received);
+    SAVE_BOOL(show_max_hp);
 }
 
 // Draw settings
@@ -683,4 +806,10 @@ void ObserverPartyWindow::DrawSettingsInternal()
     ImGui::Checkbox(("Show skills used ("s
                      + ObserverLabel::SkillsUsed
                      + ")").c_str(), &show_skills_used);
+
+    ImGui::Checkbox("Show damage dealt (Dmg+)", &show_damage_dealt);
+    ImGui::Checkbox("Show damage received (Dmg-)", &show_damage_received);
+    ImGui::Checkbox("Show healing dealt (Heal+)", &show_healing_dealt);
+    ImGui::Checkbox("Show healing received (Heal-)", &show_healing_received);
+    ImGui::Checkbox("Show max HP (MaxHP)", &show_max_hp);
 }

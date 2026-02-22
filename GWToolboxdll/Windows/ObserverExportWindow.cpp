@@ -170,6 +170,14 @@ nlohmann::json ObserverExportWindow::ToJSON_V_1_0()
         stats_json["total_skills_used_on_other_teams"] = action_to_json(stats.total_skills_used_on_other_teams);
         stats_json["total_skills_received_from_own_team"] = action_to_json(stats.total_skills_received_from_own_team);
         stats_json["total_skills_received_from_other_teams"] = action_to_json(stats.total_skills_received_from_other_teams);
+        stats_json["total_damage_dealt"] = stats.total_damage_dealt;
+        stats_json["total_damage_received"] = stats.total_damage_received;
+        stats_json["total_party_damage_dealt"] = stats.total_party_damage_dealt;
+        stats_json["total_party_damage_received"] = stats.total_party_damage_received;
+        stats_json["total_healing_dealt"] = stats.total_healing_dealt;
+        stats_json["total_healing_received"] = stats.total_healing_received;
+        stats_json["total_party_healing_dealt"] = stats.total_party_healing_dealt;
+        stats_json["total_party_healing_received"] = stats.total_party_healing_received;
         return stats_json;
     };
 
@@ -388,6 +396,78 @@ nlohmann::json ObserverExportWindow::ToJSON_V_1_0()
                     continue;
                 }
                 json["agents"]["by_id"][agent_id_s]["stats"]["skills_received_from_agents"][caster_id_s][skill_id_s] = action_to_json(*it_skill->second);
+            }
+        }
+
+        // damage dealt (by agent)
+        for (auto& [target_id, damage] : agent->stats.damage_dealt_to_agents) {
+            std::string target_id_s = std::to_string(target_id);
+            json["agents"]["by_id"][agent_id_s]["stats"]["damage_dealt_to_agents"][target_id_s] = damage;
+        }
+
+        // damage received (by agent)
+        for (auto& [caster_id, damage] : agent->stats.damage_received_from_agents) {
+            std::string caster_id_s = std::to_string(caster_id);
+            json["agents"]["by_id"][agent_id_s]["stats"]["damage_received_from_agents"][caster_id_s] = damage;
+        }
+
+        // healing dealt (by agent)
+        for (auto& [target_id, healing] : agent->stats.healing_dealt_to_agents) {
+            std::string target_id_s = std::to_string(target_id);
+            json["agents"]["by_id"][agent_id_s]["stats"]["healing_dealt_to_agents"][target_id_s] = healing;
+        }
+
+        // healing received (by agent)
+        for (auto& [caster_id, healing] : agent->stats.healing_received_from_agents) {
+            std::string caster_id_s = std::to_string(caster_id);
+            json["agents"]["by_id"][agent_id_s]["stats"]["healing_received_from_agents"][caster_id_s] = healing;
+        }
+
+        // damage by skill
+        for (auto& [skill_id, damage] : agent->stats.damage_by_skill) {
+            std::string skill_id_s = std::to_string(std::to_underlying(skill_id));
+            json["agents"]["by_id"][agent_id_s]["stats"]["damage_by_skill"][skill_id_s] = damage;
+        }
+
+        // healing by skill
+        for (auto& [skill_id, healing] : agent->stats.healing_by_skill) {
+            std::string skill_id_s = std::to_string(std::to_underlying(skill_id));
+            json["agents"]["by_id"][agent_id_s]["stats"]["healing_by_skill"][skill_id_s] = healing;
+        }
+
+        // damage by skill to agents
+        for (auto& [target_id, skill_damage_map] : agent->stats.damage_by_skill_to_agents) {
+            std::string target_id_s = std::to_string(target_id);
+            for (auto& [skill_id, damage] : skill_damage_map) {
+                std::string skill_id_s = std::to_string(std::to_underlying(skill_id));
+                json["agents"]["by_id"][agent_id_s]["stats"]["damage_by_skill_to_agents"][target_id_s][skill_id_s] = damage;
+            }
+        }
+
+        // damage from skill from agents
+        for (auto& [caster_id, skill_damage_map] : agent->stats.damage_from_skill_from_agents) {
+            std::string caster_id_s = std::to_string(caster_id);
+            for (auto& [skill_id, damage] : skill_damage_map) {
+                std::string skill_id_s = std::to_string(std::to_underlying(skill_id));
+                json["agents"]["by_id"][agent_id_s]["stats"]["damage_from_skill_from_agents"][caster_id_s][skill_id_s] = damage;
+            }
+        }
+
+        // healing by skill to agents
+        for (auto& [target_id, skill_healing_map] : agent->stats.healing_by_skill_to_agents) {
+            std::string target_id_s = std::to_string(target_id);
+            for (auto& [skill_id, healing] : skill_healing_map) {
+                std::string skill_id_s = std::to_string(std::to_underlying(skill_id));
+                json["agents"]["by_id"][agent_id_s]["stats"]["healing_by_skill_to_agents"][target_id_s][skill_id_s] = healing;
+            }
+        }
+
+        // healing from skill from agents
+        for (auto& [caster_id, skill_healing_map] : agent->stats.healing_from_skill_from_agents) {
+            std::string caster_id_s = std::to_string(caster_id);
+            for (auto& [skill_id, healing] : skill_healing_map) {
+                std::string skill_id_s = std::to_string(std::to_underlying(skill_id));
+                json["agents"]["by_id"][agent_id_s]["stats"]["healing_from_skill_from_agents"][caster_id_s][skill_id_s] = healing;
             }
         }
     }

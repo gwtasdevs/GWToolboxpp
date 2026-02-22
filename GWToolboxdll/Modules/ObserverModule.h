@@ -103,6 +103,9 @@ public:
         // inaccuracies in our modelling of the game engine
         int integrity = 0;
 
+        // damage tracking
+        uint32_t total_damage = 0;
+
         void Reduce(const TargetAction* action, ActionStage stage);
     };
 
@@ -127,6 +130,18 @@ public:
 
         size_t total_party_crits_received = 0;
         size_t total_party_crits_dealt = 0;
+
+        // damage tracking
+        uint32_t total_damage_dealt = 0;
+        uint32_t total_damage_received = 0;
+        uint32_t total_party_damage_dealt = 0;
+        uint32_t total_party_damage_received = 0;
+
+        // healing tracking
+        uint32_t total_healing_dealt = 0;
+        uint32_t total_healing_received = 0;
+        uint32_t total_party_healing_dealt = 0;
+        uint32_t total_party_healing_received = 0;
 
         size_t knocked_down_count = 0;
         size_t interrupted_count = 0;
@@ -223,6 +238,54 @@ public:
         std::unordered_map<uint32_t, std::unordered_map<GW::Constants::SkillID, ObservedSkill*>> skills_used_on_agents = {};
         std::unordered_map<uint32_t, std::vector<GW::Constants::SkillID>> skill_ids_used_on_agents = {};
         ObservedSkill& LazyGetSkillUsedOn(uint32_t target_agent_id, GW::Constants::SkillID skill_id);
+
+        // damage tracking
+
+        // map of agent_id -> damage dealt to that agent
+        std::unordered_map<uint32_t, uint32_t> damage_dealt_to_agents = {};
+        uint32_t& LazyGetDamageDealedAgainst(uint32_t target_agent_id);
+
+        // map of agent_id -> damage received from that agent
+        std::unordered_map<uint32_t, uint32_t> damage_received_from_agents = {};
+        uint32_t& LazyGetDamageReceivedFrom(uint32_t caster_agent_id);
+
+        // map of skill_id -> damage dealt by that skill
+        std::unordered_map<GW::Constants::SkillID, uint32_t> damage_by_skill = {};
+        uint32_t& LazyGetDamageBySkill(GW::Constants::SkillID skill_id);
+
+        // map of agent_id -> skill_id -> damage dealt by skill to agent
+        std::unordered_map<uint32_t, std::unordered_map<GW::Constants::SkillID, uint32_t>> damage_by_skill_to_agents = {};
+        std::unordered_map<uint32_t, std::vector<GW::Constants::SkillID>> skill_ids_damage_to_agents = {};
+        uint32_t& LazyGetDamageBySkillToAgent(uint32_t target_agent_id, GW::Constants::SkillID skill_id);
+
+        // map of agent_id -> skill_id -> damage received from skill from agent
+        std::unordered_map<uint32_t, std::unordered_map<GW::Constants::SkillID, uint32_t>> damage_from_skill_from_agents = {};
+        std::unordered_map<uint32_t, std::vector<GW::Constants::SkillID>> skill_ids_damage_from_agents = {};
+        uint32_t& LazyGetDamageFromSkillFromAgent(uint32_t caster_agent_id, GW::Constants::SkillID skill_id);
+
+        // healing tracking (same structure as damage)
+
+        // map of agent_id -> healing dealt to that agent
+        std::unordered_map<uint32_t, uint32_t> healing_dealt_to_agents = {};
+        uint32_t& LazyGetHealingDealedTo(uint32_t target_agent_id);
+
+        // map of agent_id -> healing received from that agent
+        std::unordered_map<uint32_t, uint32_t> healing_received_from_agents = {};
+        uint32_t& LazyGetHealingReceivedFrom(uint32_t caster_agent_id);
+
+        // map of skill_id -> healing dealt by that skill
+        std::unordered_map<GW::Constants::SkillID, uint32_t> healing_by_skill = {};
+        uint32_t& LazyGetHealingBySkill(GW::Constants::SkillID skill_id);
+
+        // map of agent_id -> skill_id -> healing dealt by skill to agent
+        std::unordered_map<uint32_t, std::unordered_map<GW::Constants::SkillID, uint32_t>> healing_by_skill_to_agents = {};
+        std::unordered_map<uint32_t, std::vector<GW::Constants::SkillID>> skill_ids_healing_to_agents = {};
+        uint32_t& LazyGetHealingBySkillToAgent(uint32_t target_agent_id, GW::Constants::SkillID skill_id);
+
+        // map of agent_id -> skill_id -> healing received from skill from agent
+        std::unordered_map<uint32_t, std::unordered_map<GW::Constants::SkillID, uint32_t>> healing_from_skill_from_agents = {};
+        std::unordered_map<uint32_t, std::vector<GW::Constants::SkillID>> skill_ids_healing_from_agents = {};
+        uint32_t& LazyGetHealingFromSkillFromAgent(uint32_t caster_agent_id, GW::Constants::SkillID skill_id);
     };
 
     // Stats for Parties
@@ -468,6 +531,23 @@ public:
     const std::unordered_map<uint32_t, ObservableParty*>& GetObservableParties() { return observable_parties; }
     const std::unordered_map<GW::Constants::SkillID, ObservableSkill*>& GetObservableSkills() { return observable_skills; }
 
+    // Get cached max HP for an agent (actively fetches and caches if not already cached)
+    uint32_t GetCachedMaxHP(uint32_t agent_id) {
+        return GetOrCacheMaxHP(agent_id);
+    }
+
+    // Get cached energy for an agent (returns 0 if not cached)
+    uint32_t GetCachedEnergy(uint32_t agent_id) const {
+        auto it = agent_cur_energy_cache.find(agent_id);
+        return (it != agent_cur_energy_cache.end()) ? it->second : 0;
+    }
+
+    // Get cached max energy for an agent (returns 0 if not cached)
+    uint32_t GetCachedMaxEnergy(uint32_t agent_id) const {
+        auto it = agent_max_energy_cache.find(agent_id);
+        return (it != agent_max_energy_cache.end()) ? it->second : 0;
+    }
+
     bool match_finished = false;
     uint32_t winning_party_id = NO_PARTY;
     std::chrono::milliseconds match_duration_ms_total{};
@@ -507,7 +587,11 @@ private:
     void HandleKnockedDown(uint32_t agent_id, float duration);
     void HandleAgentState(uint32_t agent_id, uint32_t state);
     void HandleDamageDone(uint32_t caster_id, uint32_t target_id, float amount_pc, bool is_crit);
+    void HandleHealingDone(uint32_t caster_id, uint32_t target_id, float amount_pc);
     void HandleAgentAdd(uint32_t agent_id);
+
+    // Helper function to get or cache max HP for an agent
+    uint32_t GetOrCacheMaxHP(uint32_t agent_id);
 
     void HandleAttackFinished(uint32_t agent_id);
     void HandleAttackStopped(uint32_t agent_id);
@@ -532,6 +616,15 @@ private:
     // Update the state of the module based on an Action & Stage
     // return false means action was not assigned and may need freeing by the caller
     bool ReduceAction(ObservableAgent* caster, ActionStage stage, TargetAction* new_action = nullptr);
+
+    // Cache for agent max HP (used for damage calculation in observer mode)
+    // Populated opportunistically whenever we observe an agent
+    std::unordered_map<uint32_t, uint32_t> agent_max_hp_cache = {};
+    
+    // Cache for agent current and max energy
+    // Populated opportunistically whenever we observe an agent
+    std::unordered_map<uint32_t, uint32_t> agent_cur_energy_cache = {};
+    std::unordered_map<uint32_t, uint32_t> agent_max_energy_cache = {};
 
     static uint32_t JumboMessageValueToPartyId(uint32_t value);
     static void HandleMoraleBoost(ObservableParty* boosting_party);

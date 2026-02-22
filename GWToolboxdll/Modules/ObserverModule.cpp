@@ -8,11 +8,14 @@
 #include <GWCA/GameEntities/Player.h>
 #include <GWCA/GameEntities/Skill.h>
 
+#include <GWCA/Packets/StoC.h>
+
 #include <GWCA/Managers/MapMgr.h>
 #include <GWCA/Managers/SkillbarMgr.h>
 #include <GWCA/Managers/StoCMgr.h>
 #include <GWCA/Managers/AgentMgr.h>
 #include <GWCA/Managers/GuildMgr.h>
+#include <GWCA/Managers/ChatMgr.h>
 #include <GWCA/Managers/UIMgr.h>
 
 #include <GWToolbox.h>
@@ -63,47 +66,6 @@ namespace ObserverLabel {
 }; // namespace ObserverLabels
 
 
-// TODO: replace with values from GWCA
-namespace JumboMessageType {
-    constexpr uint8_t BASE_UNDER_ATTACK = 0;
-    constexpr uint8_t GUILD_LORD_UNDER_ATTACK = 1;
-    constexpr uint8_t CAPTURED_SHRINE = 3;
-    constexpr uint8_t CAPTURED_TOWER = 5;
-    constexpr uint8_t PARTY_DEFEATED = 6; // received in 3-way Heroes Ascent matches when one party is defeated
-    constexpr uint8_t MORALE_BOOST = 9;
-    constexpr uint8_t VICTORY = 16;
-    constexpr uint8_t FLAWLESS_VICTORY = 17;
-}
-
-
-namespace JumboMessageValue {
-    // The following values represent the first and second parties in an explorable areas
-    // (inc. observer mode) with 2 parties.
-    // if there are 3 parties in the explorable area (like some HA maps) then:
-    //  - party 1 = 6579558
-    //  - party 2 = 1635021873
-    //  - party 3 = 1635021874
-
-    // TODO:
-    // These numbers appear big and random, their origin or relation to other values
-    // is not understood.
-    // In addition, there may be a danger these variables could change with GW updates...
-    // Consider these values as experimental and use with caution
-    constexpr uint32_t PARTY_ONE = 1635021873;
-    constexpr uint32_t PARTY_TWO = 1635021874;
-}
-
-// JumboMessage represents a message strewn across the center of the screen in
-// big red/green characters.
-// Things like moral boosts, flag captures, victory, defeat...
-struct JumboMessage : GW::Packet::StoC::Packet<JumboMessage> {
-    uint8_t type{};   // JumboMessageType
-    uint32_t value{}; // JumboMessageValue
-};
-
-const uint32_t GW::Packet::StoC::Packet<JumboMessage>::STATIC_HEADER = 0x18F; // 399
-
-
 void ObserverModule::Initialize()
 {
     ToolboxModule::Initialize();
@@ -116,8 +78,9 @@ void ObserverModule::Initialize()
             HandleInstanceLoadInfo(status, packet);
         });
 
-    GW::StoC::RegisterPacketCallback<JumboMessage>(
-        &JumboMessage_Entry, [this](const GW::HookStatus*, const JumboMessage* packet) -> void {
+    GW::StoC::RegisterPacketCallback<GW::Packet::StoC::JumboMessage>(
+        &JumboMessage_Entry, [this](const GW::HookStatus*, const GW::Packet::StoC::JumboMessage* packet) -> void {
+
             if (!IsActive()) {
                 return;
             }
@@ -133,7 +96,7 @@ void ObserverModule::Initialize()
                 return;
             }
             if (!InitializeObserverSession()) {
-                return;
+                return; 
             }
             HandleAgentState(packet->agent_id, packet->state);
         });
@@ -283,13 +246,15 @@ void ObserverModule::HandleInstanceLoadInfo(const GW::HookStatus*, const GW::Pac
 void ObserverModule::HandleJumboMessage(const uint8_t type, const uint32_t value)
 {
     switch (type) {
-        case JumboMessageType::MORALE_BOOST:
+        case GW::Packet::StoC::JumboMessageType::MORALE_BOOST:
             HandleMoraleBoost(GetObservablePartyById(JumboMessageValueToPartyId(value)));
             break;
-        case JumboMessageType::VICTORY:
-        case JumboMessageType::FLAWLESS_VICTORY:
-            HandleVictory(GetObservablePartyById(JumboMessageValueToPartyId(value)));
+        case GW::Packet::StoC::JumboMessageType::VICTORY:
+        case GW::Packet::StoC::JumboMessageType::FLAWLESS_VICTORY: {
+            const uint32_t party_id = JumboMessageValueToPartyId(value);
+            HandleVictory(GetObservablePartyById(party_id));
             break;
+        }
     }
 }
 
@@ -308,7 +273,12 @@ void ObserverModule::HandleGenericPacket(const uint32_t value_id, const uint32_t
             break;
 
         case GW::Packet::StoC::GenericValueID::armorignoring:
-            HandleDamageDone(caster_id, target_id, value, false);
+            // Check if it's healing (positive) or damage (negative)
+            if (value >= 0) {
+                HandleHealingDone(caster_id, target_id, value);
+            } else {
+                HandleDamageDone(caster_id, target_id, value, false);
+            }
             break;
 
         case GW::Packet::StoC::GenericValueID::knocked_down:
@@ -473,6 +443,46 @@ void ObserverModule::HandleAgentState(const uint32_t agent_id, const uint32_t st
 }
 
 
+// Helper function to get or cache max HP for an agent
+// Returns 530 if unable to determine max HP
+// GWCA doesn't allow us to retrieve MAX Hp for every player, only currently observed player
+// as specified in the Agent.h structure. 
+// But every damage / heal done to an agent is sent as a percentage of the player max hp.
+// it's then necessary to capture this information to calculate the dmg / heal value. 
+// This means every damage and heal calculations are approximations of the real value, 
+// as the player could have switched gear (defensive set for exemple) and have more or less hp than the current max hp value
+// stored in the cache. But I can't find a better way to do it for now. 
+uint32_t ObserverModule::GetOrCacheMaxHP(const uint32_t agent_id)
+{
+    const GW::Agent* agent = GW::Agents::GetAgentByID(agent_id);
+    if (!agent) {
+        return 0;
+    }
+
+    const GW::AgentLiving* living = agent->GetAsAgentLiving();
+    if (!living) {
+        return 0;
+    }
+
+    // Try to get max_hp directly (only works for currently observed agent in observer mode)
+    if (living->max_hp > 0 && living->max_hp < 100000) {
+        agent_max_hp_cache[agent_id] = living->max_hp;
+        return living->max_hp;
+    }
+
+    const auto it = agent_max_hp_cache.find(agent_id);
+    if (it != agent_max_hp_cache.end()) {
+        return it->second;
+    }
+
+    // Super abritrary value. 
+    // TODO: maybe have default hp per profession? 
+    const uint32_t default_hp = 530;
+    agent_max_hp_cache[agent_id] = default_hp;
+    return default_hp;
+}
+
+
 // Handle DamageDone (GenericModifier float Packet)
 void ObserverModule::HandleDamageDone(const uint32_t caster_id, const uint32_t target_id, const float amount_pc, const bool is_crit)
 {
@@ -482,6 +492,67 @@ void ObserverModule::HandleDamageDone(const uint32_t caster_id, const uint32_t t
     // get last hit to credit the kill
     if (target && caster && caster->party_id != NO_PARTY && amount_pc < 0) {
         target->last_hit_by = caster->agent_id;
+    }
+
+    // Calculate actual damage amount
+    // @see GetOrCacheMaxHP to understand why we need to do that. 
+    uint32_t damage_amount = 0;
+    if (amount_pc < 0 && target) {
+        const uint32_t max_hp = GetOrCacheMaxHP(target_id);
+        damage_amount = static_cast<uint32_t>(std::lround(-amount_pc * max_hp));
+    }
+
+    if (damage_amount > 0 && caster && target) {
+        ObservableParty* caster_party = GetObservablePartyById(caster->party_id);
+        ObservableParty* target_party = GetObservablePartyById(target->party_id);
+
+        GW::Constants::SkillID skill_id = NO_SKILL;
+        if (caster->current_target_action && caster->current_target_action->is_skill) {
+            skill_id = caster->current_target_action->skill_id;
+        }
+
+        // Update caster stats
+        caster->stats.total_damage_dealt += damage_amount;
+        if (target_party) {
+            caster->stats.total_party_damage_dealt += damage_amount;
+        }
+        caster->stats.LazyGetDamageDealedAgainst(target_id) += damage_amount;
+
+        // Update caster party stats
+        if (caster_party) {
+            caster_party->stats.total_damage_dealt += damage_amount;
+            if (target_party) {
+                caster_party->stats.total_party_damage_dealt += damage_amount;
+            }
+        }
+
+        // Update target stats
+        target->stats.total_damage_received += damage_amount;
+        if (caster_party) {
+            target->stats.total_party_damage_received += damage_amount;
+        }
+        target->stats.LazyGetDamageReceivedFrom(caster_id) += damage_amount;
+
+        // Update target party stats
+        if (target_party) {
+            target_party->stats.total_damage_received += damage_amount;
+            if (caster_party) {
+                target_party->stats.total_party_damage_received += damage_amount;
+            }
+        }
+
+        // Track damage by skill
+        if (skill_id != NO_SKILL) {
+            caster->stats.LazyGetDamageBySkill(skill_id) += damage_amount;
+            caster->stats.LazyGetDamageBySkillToAgent(target_id, skill_id) += damage_amount;
+            target->stats.LazyGetDamageFromSkillFromAgent(caster_id, skill_id) += damage_amount;
+
+            // Also update the skill's ObservedAction if it exists
+            auto it_skill = caster->stats.skills_used.find(skill_id);
+            if (it_skill != caster->stats.skills_used.end()) {
+                it_skill->second->total_damage += damage_amount;
+            }
+        }
     }
 
     if (is_crit) {
@@ -524,6 +595,71 @@ void ObserverModule::HandleDamageDone(const uint32_t caster_id, const uint32_t t
             if (caster_party) {
                 target_party->stats.total_party_crits_received += 1;
             }
+        }
+    }
+}
+
+
+// Handle HealingDone (GenericModifier float Packet)
+void ObserverModule::HandleHealingDone(const uint32_t caster_id, const uint32_t target_id, const float amount_pc)
+{
+    ObservableAgent* caster = GetObservableAgentById(caster_id);
+    ObservableAgent* target = GetObservableAgentById(target_id);
+
+    // Calculate actual healing amount
+    // @see GetOrCacheMaxHP to understand why we need to do that. 
+    uint32_t healing_amount = 0;
+    if (amount_pc > 0 && target) {
+        const uint32_t max_hp = GetOrCacheMaxHP(target_id);
+        healing_amount = static_cast<uint32_t>(std::lround(amount_pc * max_hp));
+    }
+
+    // Track healing if we have a valid amount
+    if (healing_amount > 0 && caster && target) {
+        ObservableParty* caster_party = GetObservablePartyById(caster->party_id);
+        ObservableParty* target_party = GetObservablePartyById(target->party_id);
+
+        // Get the skill being used (if any)
+        GW::Constants::SkillID skill_id = NO_SKILL;
+        if (caster->current_target_action && caster->current_target_action->is_skill) {
+            skill_id = caster->current_target_action->skill_id;
+        }
+
+        // Update caster stats
+        caster->stats.total_healing_dealt += healing_amount;
+        if (target_party) {
+            caster->stats.total_party_healing_dealt += healing_amount;
+        }
+        caster->stats.LazyGetHealingDealedTo(target_id) += healing_amount;
+
+        // Update caster party stats
+        if (caster_party) {
+            caster_party->stats.total_healing_dealt += healing_amount;
+            if (target_party) {
+                caster_party->stats.total_party_healing_dealt += healing_amount;
+            }
+        }
+
+        // Update target stats
+        target->stats.total_healing_received += healing_amount;
+        if (caster_party) {
+            target->stats.total_party_healing_received += healing_amount;
+        }
+        target->stats.LazyGetHealingReceivedFrom(caster_id) += healing_amount;
+
+        // Update target party stats
+        if (target_party) {
+            target_party->stats.total_healing_received += healing_amount;
+            if (caster_party) {
+                target_party->stats.total_party_healing_received += healing_amount;
+            }
+        }
+
+        // Track healing by skill
+        if (skill_id != NO_SKILL) {
+            caster->stats.LazyGetHealingBySkill(skill_id) += healing_amount;
+            caster->stats.LazyGetHealingBySkillToAgent(target_id, skill_id) += healing_amount;
+            target->stats.LazyGetHealingFromSkillFromAgent(caster_id, skill_id) += healing_amount;
         }
     }
 }
@@ -668,9 +804,9 @@ uint32_t ObserverModule::JumboMessageValueToPartyId(const uint32_t value)
 {
     // TODO: handle maps with 3 parties where the JumboMessageValue's are different
     switch (value) {
-        case JumboMessageValue::PARTY_ONE:
+        case GW::Packet::StoC::JumboMessageValue::PARTY_ONE:
             return 1;
-        case JumboMessageValue::PARTY_TWO:
+        case GW::Packet::StoC::JumboMessageValue::PARTY_TWO:
             return 2;
         default:
             return NO_PARTY;
@@ -691,10 +827,6 @@ void ObserverModule::HandleMoraleBoost(ObservableParty* boosting_party)
 // Fired when a party is victorious
 void ObserverModule::HandleVictory(ObservableParty* winning_party)
 {
-    if (!winning_party) {
-        return;
-    }
-
     // TODO: handle draws
     // There is no JumboMessage for a draw so we don't get notified of it...
 
@@ -1143,6 +1275,9 @@ void ObserverModule::Reset()
         }
     }
     observable_parties.clear();
+
+    // clear max HP cache
+    agent_max_hp_cache.clear();
 }
 
 
@@ -1190,6 +1325,9 @@ bool ObserverModule::InitializeObserverSession()
     match_duration_ms = std::chrono::milliseconds(0);
     match_duration_secs = std::chrono::seconds(0);
     match_duration_mins = std::chrono::minutes(0);
+
+    // Clear the max HP cache for new session
+    agent_max_hp_cache.clear();
 
     observer_session_initialized = true;
     return true;
@@ -1261,9 +1399,6 @@ void ObserverModule::DrawSettingsInternal()
 
 void ObserverModule::Update(const float)
 {
-    if (party_sync_timer == 0) {
-        return;
-    }
     if (!IsActive()) {
         party_sync_timer = 0;
         return;
@@ -1271,6 +1406,29 @@ void ObserverModule::Update(const float)
     if (TIMER_DIFF(party_sync_timer) > 1000) {
         SynchroniseParties();
         party_sync_timer = 0;
+    }
+    
+    // Opportunistically cache max HP for the currently observed agent
+    // This happens passively whenever you observe a player
+    const uint32_t observing_id = GW::Agents::GetObservingId();
+    if (observing_id != 0) {
+        const GW::Agent* observed_agent = GW::Agents::GetAgentByID(observing_id);
+        if (observed_agent) {
+            const GW::AgentLiving* living = observed_agent->GetAsAgentLiving();
+            if (living && living->max_hp > 0 && living->max_hp < 100000) {
+                // Cache max HP if we don't have it yet, or if the value has changed
+                auto it = agent_max_hp_cache.find(observing_id);
+                if (it == agent_max_hp_cache.end() || it->second != living->max_hp) {
+                    agent_max_hp_cache[observing_id] = living->max_hp;
+                }
+                
+                // Cache energy values as well
+                if (living->max_energy > 0) {
+                    agent_cur_energy_cache[observing_id] = static_cast<uint32_t>(living->energy);
+                    agent_max_energy_cache[observing_id] = living->max_energy;
+                }
+            }
+        }
     }
 }
 
@@ -1632,6 +1790,52 @@ ObserverModule::ObservableAgentStats::~ObservableAgentStats()
         agent_skills.clear();
     }
     skills_used_on_agents.clear();
+
+    // damage tracking cleanup
+    damage_dealt_to_agents.clear();
+    damage_received_from_agents.clear();
+    damage_by_skill.clear();
+    
+    for (auto& [_, skill_ids] : skill_ids_damage_to_agents) {
+        skill_ids.clear();
+    }
+    skill_ids_damage_to_agents.clear();
+    for (auto& [_, skill_damage] : damage_by_skill_to_agents) {
+        skill_damage.clear();
+    }
+    damage_by_skill_to_agents.clear();
+    
+    for (auto& [_, skill_ids] : skill_ids_damage_from_agents) {
+        skill_ids.clear();
+    }
+    skill_ids_damage_from_agents.clear();
+    for (auto& [_, skill_damage] : damage_from_skill_from_agents) {
+        skill_damage.clear();
+    }
+    damage_from_skill_from_agents.clear();
+
+    // healing tracking cleanup
+    healing_dealt_to_agents.clear();
+    healing_received_from_agents.clear();
+    healing_by_skill.clear();
+    
+    for (auto& [_, skill_ids] : skill_ids_healing_to_agents) {
+        skill_ids.clear();
+    }
+    skill_ids_healing_to_agents.clear();
+    for (auto& [_, skill_healing] : healing_by_skill_to_agents) {
+        skill_healing.clear();
+    }
+    healing_by_skill_to_agents.clear();
+    
+    for (auto& [_, skill_ids] : skill_ids_healing_from_agents) {
+        skill_ids.clear();
+    }
+    skill_ids_healing_from_agents.clear();
+    for (auto& [_, skill_healing] : healing_from_skill_from_agents) {
+        skill_healing.clear();
+    }
+    healing_from_skill_from_agents.clear();
 }
 
 
@@ -1772,6 +1976,196 @@ ObserverModule::ObservedSkill& ObserverModule::ObservableAgentStats::LazyGetSkil
     }
     // receivers already registered this skill
     return *it_observed_skill->second;
+}
+
+
+// Get damage dealt to a target agent
+// Lazy initialises the target_agent_id
+uint32_t& ObserverModule::ObservableAgentStats::LazyGetDamageDealedAgainst(const uint32_t target_agent_id)
+{
+    const auto it = damage_dealt_to_agents.find(target_agent_id);
+    if (it == damage_dealt_to_agents.end()) {
+        damage_dealt_to_agents.insert({target_agent_id, 0});
+        return damage_dealt_to_agents[target_agent_id];
+    }
+    return it->second;
+}
+
+
+// Get damage received from a caster agent
+// Lazy initialises the caster_agent_id
+uint32_t& ObserverModule::ObservableAgentStats::LazyGetDamageReceivedFrom(const uint32_t caster_agent_id)
+{
+    const auto it = damage_received_from_agents.find(caster_agent_id);
+    if (it == damage_received_from_agents.end()) {
+        damage_received_from_agents.insert({caster_agent_id, 0});
+        return damage_received_from_agents[caster_agent_id];
+    }
+    return it->second;
+}
+
+
+// Get damage dealt by a skill
+// Lazy initialises the skill_id
+uint32_t& ObserverModule::ObservableAgentStats::LazyGetDamageBySkill(const GW::Constants::SkillID skill_id)
+{
+    const auto it = damage_by_skill.find(skill_id);
+    if (it == damage_by_skill.end()) {
+        damage_by_skill.insert({skill_id, 0});
+        return damage_by_skill[skill_id];
+    }
+    return it->second;
+}
+
+
+// Get damage dealt by a skill to a specific agent
+// Lazy initialises the target_agent_id and skill_id
+uint32_t& ObserverModule::ObservableAgentStats::LazyGetDamageBySkillToAgent(const uint32_t target_agent_id, const GW::Constants::SkillID skill_id)
+{
+    const auto it_target = damage_by_skill_to_agents.find(target_agent_id);
+    if (it_target == damage_by_skill_to_agents.end()) {
+        // target and skills are not registered
+        std::vector skill_ids = {skill_id};
+        skill_ids_damage_to_agents.insert({target_agent_id, skill_ids});
+        std::unordered_map<GW::Constants::SkillID, uint32_t> skill_damage = {{skill_id, 0}};
+        damage_by_skill_to_agents.insert({target_agent_id, skill_damage});
+        return damage_by_skill_to_agents[target_agent_id][skill_id];
+    }
+    // target is registered
+    std::unordered_map<GW::Constants::SkillID, uint32_t>& damage_to_target = it_target->second;
+    const auto it_skill = damage_to_target.find(skill_id);
+    if (it_skill == damage_to_target.end()) {
+        // skill not registered for this target
+        std::vector<GW::Constants::SkillID>& skill_ids_vec = skill_ids_damage_to_agents.find(target_agent_id)->second;
+        skill_ids_vec.push_back(skill_id);
+        std::ranges::sort(skill_ids_vec);
+        damage_to_target.insert({skill_id, 0});
+        return damage_to_target[skill_id];
+    }
+    return it_skill->second;
+}
+
+
+// Get damage received from a skill from a specific agent
+// Lazy initialises the caster_agent_id and skill_id
+uint32_t& ObserverModule::ObservableAgentStats::LazyGetDamageFromSkillFromAgent(const uint32_t caster_agent_id, const GW::Constants::SkillID skill_id)
+{
+    const auto it_caster = damage_from_skill_from_agents.find(caster_agent_id);
+    if (it_caster == damage_from_skill_from_agents.end()) {
+        // caster and skills are not registered
+        std::vector skill_ids = {skill_id};
+        skill_ids_damage_from_agents.insert({caster_agent_id, skill_ids});
+        std::unordered_map<GW::Constants::SkillID, uint32_t> skill_damage = {{skill_id, 0}};
+        damage_from_skill_from_agents.insert({caster_agent_id, skill_damage});
+        return damage_from_skill_from_agents[caster_agent_id][skill_id];
+    }
+    // caster is registered
+    std::unordered_map<GW::Constants::SkillID, uint32_t>& damage_from_caster = it_caster->second;
+    const auto it_skill = damage_from_caster.find(skill_id);
+    if (it_skill == damage_from_caster.end()) {
+        // skill not registered for this caster
+        std::vector<GW::Constants::SkillID>& skill_ids_vec = skill_ids_damage_from_agents.find(caster_agent_id)->second;
+        skill_ids_vec.push_back(skill_id);
+        std::ranges::sort(skill_ids_vec);
+        damage_from_caster.insert({skill_id, 0});
+        return damage_from_caster[skill_id];
+    }
+    return it_skill->second;
+}
+
+
+// Get healing dealt to a target agent
+// Lazy initialises the target_agent_id
+uint32_t& ObserverModule::ObservableAgentStats::LazyGetHealingDealedTo(const uint32_t target_agent_id)
+{
+    const auto it = healing_dealt_to_agents.find(target_agent_id);
+    if (it == healing_dealt_to_agents.end()) {
+        healing_dealt_to_agents.insert({target_agent_id, 0});
+        return healing_dealt_to_agents[target_agent_id];
+    }
+    return it->second;
+}
+
+
+// Get healing received from a caster agent
+// Lazy initialises the caster_agent_id
+uint32_t& ObserverModule::ObservableAgentStats::LazyGetHealingReceivedFrom(const uint32_t caster_agent_id)
+{
+    const auto it = healing_received_from_agents.find(caster_agent_id);
+    if (it == healing_received_from_agents.end()) {
+        healing_received_from_agents.insert({caster_agent_id, 0});
+        return healing_received_from_agents[caster_agent_id];
+    }
+    return it->second;
+}
+
+
+// Get healing dealt by a skill
+// Lazy initialises the skill_id
+uint32_t& ObserverModule::ObservableAgentStats::LazyGetHealingBySkill(const GW::Constants::SkillID skill_id)
+{
+    const auto it = healing_by_skill.find(skill_id);
+    if (it == healing_by_skill.end()) {
+        healing_by_skill.insert({skill_id, 0});
+        return healing_by_skill[skill_id];
+    }
+    return it->second;
+}
+
+
+// Get healing dealt by a skill to a specific agent
+// Lazy initialises the target_agent_id and skill_id
+uint32_t& ObserverModule::ObservableAgentStats::LazyGetHealingBySkillToAgent(const uint32_t target_agent_id, const GW::Constants::SkillID skill_id)
+{
+    const auto it_target = healing_by_skill_to_agents.find(target_agent_id);
+    if (it_target == healing_by_skill_to_agents.end()) {
+        // target and skills are not registered
+        std::vector skill_ids = {skill_id};
+        skill_ids_healing_to_agents.insert({target_agent_id, skill_ids});
+        std::unordered_map<GW::Constants::SkillID, uint32_t> skill_healing = {{skill_id, 0}};
+        healing_by_skill_to_agents.insert({target_agent_id, skill_healing});
+        return healing_by_skill_to_agents[target_agent_id][skill_id];
+    }
+    // target is registered
+    std::unordered_map<GW::Constants::SkillID, uint32_t>& healing_to_target = it_target->second;
+    const auto it_skill = healing_to_target.find(skill_id);
+    if (it_skill == healing_to_target.end()) {
+        // skill not registered for this target
+        std::vector<GW::Constants::SkillID>& skill_ids_vec = skill_ids_healing_to_agents.find(target_agent_id)->second;
+        skill_ids_vec.push_back(skill_id);
+        std::ranges::sort(skill_ids_vec);
+        healing_to_target.insert({skill_id, 0});
+        return healing_to_target[skill_id];
+    }
+    return it_skill->second;
+}
+
+
+// Get healing received from a skill from a specific agent
+// Lazy initialises the caster_agent_id and skill_id
+uint32_t& ObserverModule::ObservableAgentStats::LazyGetHealingFromSkillFromAgent(const uint32_t caster_agent_id, const GW::Constants::SkillID skill_id)
+{
+    const auto it_caster = healing_from_skill_from_agents.find(caster_agent_id);
+    if (it_caster == healing_from_skill_from_agents.end()) {
+        // caster and skills are not registered
+        std::vector skill_ids = {skill_id};
+        skill_ids_healing_from_agents.insert({caster_agent_id, skill_ids});
+        std::unordered_map<GW::Constants::SkillID, uint32_t> skill_healing = {{skill_id, 0}};
+        healing_from_skill_from_agents.insert({caster_agent_id, skill_healing});
+        return healing_from_skill_from_agents[caster_agent_id][skill_id];
+    }
+    // caster is registered
+    std::unordered_map<GW::Constants::SkillID, uint32_t>& healing_from_caster = it_caster->second;
+    const auto it_skill = healing_from_caster.find(skill_id);
+    if (it_skill == healing_from_caster.end()) {
+        // skill not registered for this caster
+        std::vector<GW::Constants::SkillID>& skill_ids_vec = skill_ids_healing_from_agents.find(caster_agent_id)->second;
+        skill_ids_vec.push_back(skill_id);
+        std::ranges::sort(skill_ids_vec);
+        healing_from_caster.insert({skill_id, 0});
+        return healing_from_caster[skill_id];
+    }
+    return it_skill->second;
 }
 
 
