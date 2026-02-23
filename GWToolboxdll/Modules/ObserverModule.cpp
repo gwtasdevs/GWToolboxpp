@@ -99,8 +99,10 @@ void ObserverModule::Initialize()
         const uint32_t instance_time = GW::Map::GetInstanceTime();
         
         if (!first_countdown_seen) {
-            // First countdown at map load - just mark it as seen
+            // First countdown at map load - reset data for new match
             first_countdown_seen = true;
+            Reset();
+            InitializeObserverSession();
         } else {
             // Second countdown - this is the actual match start
             match_start_instance_time = instance_time;
@@ -243,7 +245,8 @@ void ObserverModule::HandleInstanceLoadInfo(const GW::HookStatus*, const GW::Pac
     const bool is_active = IsActive();
 
     if (is_active) {
-        Reset();
+        // Don't call Reset() here to preserve match data for export after leaving the map
+        // Users can explicitly call /observer:reset when they want to start tracking a new match
         InitializeObserverSession();
     }
     else {
