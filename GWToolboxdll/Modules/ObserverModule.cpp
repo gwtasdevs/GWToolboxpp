@@ -1386,6 +1386,7 @@ bool ObserverModule::ReduceAction(ObservableAgent* caster, const ActionStage sta
             skill_id == GW::Constants::SkillID::Vengeance ||
             skill_id == GW::Constants::SkillID::Unyielding_Aura ||
             skill_id == GW::Constants::SkillID::Flesh_of_My_Flesh ||
+            skill_id == GW::Constants::SkillID::Flesh_of_My_Flesh_PvP || 
             skill_id == GW::Constants::SkillID::Death_Pact_Signet ||
             skill_id == GW::Constants::SkillID::Death_Pact_Signet_PvP;
         
