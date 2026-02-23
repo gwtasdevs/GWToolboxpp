@@ -36,6 +36,9 @@ namespace GW {
 // ============================================================
 extern "C" {
     typedef void(__cdecl* GW_GameThreadCallback)();
+    typedef void(__cdecl* GW_GameThreadHookCallback)(GW::HookStatus* status);
     GWCA_API void Enqueue(GW_GameThreadCallback callback, bool force_enqueue);
     GWCA_API bool IsInGameThread();
+    GWCA_API void RegisterGameThreadCallback(GW::HookEntry* entry, GW_GameThreadHookCallback callback, int altitude);
+    GWCA_API void RemoveGameThreadCallback(GW::HookEntry* entry);
 }

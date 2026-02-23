@@ -38,32 +38,33 @@ namespace {
 
     Color timestamps_color = Colors::RGB(0xc0, 0xc0, 0xbf);
 
-    struct ChatTokenColor {
-        const wchar_t* token;
-        GW::Chat::Color color;
-    };
+    const char* chat_window_font_names = "Default\0Large\0Larger\0Largest";
+    const uint32_t chat_window_font_ids[] = {0, 7, 8, 9};
+
+    int chat_window_font_id_index = 0;
 
     std::map<std::wstring, GW::Chat::Color> chat_token_colors_original = {
         {L"CinName", 0xFFFFD373},
-        {L"ItemCommon", 0xFFFFFFFF},
-        {L"ItemEnhance", 0xFFA0F5F8},
-        {L"ItemUncommon", 0xFFB38AEC},
-        {L"ItemRare", 0xFFFFD24F},
-        {L"ItemUnique", 0xFF00FF00},
-        {L"ItemUniquePvp", 0xFFED1C24},
-        {L"ItemDull", 0xFFa0a0a0},
-        {L"ItemBasic", 0xFFFFFFFF},
-        {L"ItemBonus", 0xFFA0F5F8},
-        {L"ItemAssign", 0xFF6CC16D},
-        {L"ItemCustom", 0xFFa0a0a0},
-        {L"ItemRestrict", 0xFFF67D4D},
-        {L"ItemSell", 0xFFFFFF00},
-        {L"Label", 0xFFFFEAB8},
-        {L"Quest", 0xFF00FF00},
-        {L"SkillDull", 0xFFA0A0A0},
-        {L"Warning", 0xFFE00002}
+        {L"ItemCommon", GW::Chat::TextColor::ColorItemCommon},
+        {L"ItemEnhance", GW::Chat::TextColor::ColorItemEnhance},
+        {L"ItemUncommon", GW::Chat::TextColor::ColorItemUncommon},
+        {L"ItemRare", GW::Chat::TextColor::ColorItemRare},
+        {L"ItemUnique", GW::Chat::TextColor::ColorItemUnique},
+        {L"ItemUniquePvp", GW::Chat::TextColor::ColorItemUniquePvp},
+        {L"ItemDull", GW::Chat::TextColor::ColorItemDull},
+        {L"ItemBasic", GW::Chat::TextColor::ColorItemBasic},
+        {L"ItemBonus", GW::Chat::TextColor::ColorItemBonus},
+        {L"ItemAssign", GW::Chat::TextColor::ColorItemAssign},
+        {L"ItemCustom", GW::Chat::TextColor::ColorItemCustom},
+        {L"ItemRestrict", GW::Chat::TextColor::ColorItemRestrict},
+        {L"ItemSell", GW::Chat::TextColor::ColorItemSell},
+        {L"Label", GW::Chat::TextColor::ColorLabel},
+        {L"Quest", GW::Chat::TextColor::ColorQuest},
+        {L"SkillDull", GW::Chat::TextColor::ColorSkillDull},
+        {L"Warning", GW::Chat::TextColor::ColorWarning}
     };
     std::map<std::wstring, GW::Chat::Color> chat_token_colors;
+
 
     // Runtime
     bool ctrl_enter_whisper = false;
@@ -85,6 +86,22 @@ namespace {
     // used by chat colors grid
     constexpr float chat_colors_grid_x[] = {0, 150.f, 210.f, 250.f};
     std::vector<PendingChatMessage*> pending_messages;
+
+    GW::UI::UIInteractionCallback ChatLogLine_UICallback_Func = 0, ChatLogLine_UICallback_Ret = 0;
+
+    void OnChatLogLine_UICallback(GW::UI::InteractionMessage* message, void* wParam, void* lParam) {
+        GW::Hook::EnterHook();
+        ChatLogLine_UICallback_Ret(message, wParam, lParam);
+        switch (message->message_id) {
+            case GW::UI::UIMessage::kFrameMessage_0x49: {
+                auto frame = (GW::TextLabelFrame*)GW::UI::GetChildFrame(GW::UI::GetFrameById(message->frame_id),0);
+                if (!frame) break;
+                frame->SetFont(chat_window_font_ids[chat_window_font_id_index]);
+            }
+            break;
+        }
+        GW::Hook::LeaveHook();
+    }
 
     typedef wchar_t* (__cdecl* ColorHexOrLabelToColor_pt)(wchar_t* token, GW::Chat::Color* color_out, uint32_t color_out_len);
     ColorHexOrLabelToColor_pt ColorHexOrLabelToColor_Func = 0, ColorHexOrLabelToColor_Ret = 0;
@@ -407,19 +424,9 @@ void ChatSettings::Initialize()
 {
     ToolboxModule::Initialize();
 
-    constexpr GW::UI::UIMessage ui_messages[] = {
-        GW::UI::UIMessage::kAgentSpeechBubble,
-        GW::UI::UIMessage::kDialogueMessage,
-        GW::UI::UIMessage::kPreferenceFlagChanged, 
-        GW::UI::UIMessage::kPreferenceValueChanged,
-        GW::UI::UIMessage::kPlayerChatMessage,
-        GW::UI::UIMessage::kWriteToChatLog,
-        GW::UI::UIMessage::kWriteToChatLogWithSender,
-        GW::UI::UIMessage::kRecvWhisper,
-        GW::UI::UIMessage::kStartWhisper,
-        GW::UI::UIMessage::kSendChatMessage,
-        GW::UI::UIMessage::kAgentSpeechBubble
-    };
+    constexpr GW::UI::UIMessage ui_messages[] = {GW::UI::UIMessage::kAgentSpeechBubble, GW::UI::UIMessage::kDialogueMessage, GW::UI::UIMessage::kPreferenceFlagChanged,    GW::UI::UIMessage::kPreferenceValueChanged,
+                                                 GW::UI::UIMessage::kPlayerChatMessage, GW::UI::UIMessage::kWriteToChatLog,  GW::UI::UIMessage::kWriteToChatLogWithSender, GW::UI::UIMessage::kRecvWhisper,
+                                                 GW::UI::UIMessage::kStartWhisper,      GW::UI::UIMessage::kSendChatMessage, GW::UI::UIMessage::kAgentSpeechBubble};
     for (const auto message_id : ui_messages) {
         GW::UI::RegisterUIMessageCallback(&OnUIMessage_Entry, message_id, OnUIMessage);
     }
@@ -428,9 +435,14 @@ void ChatSettings::Initialize()
         GW::Hook::CreateHook((void**)&ColorHexOrLabelToColor_Func, OnColorHexOrLabelToColor, (void**)&ColorHexOrLabelToColor_Ret);
         GW::Hook::EnableHooks(ColorHexOrLabelToColor_Func);
     }
+    // b'\x75\x16\x68\x88\xe1\x00\x00'
 
+    ChatLogLine_UICallback_Func = (GW::UI::UIInteractionCallback)GW::Scanner::ToFunctionStart(GW::Scanner::Find("\x75\x16\x68\x88\xe1\x00\x00", "xxxxxxx"),0xfff);
+    if (ChatLogLine_UICallback_Func) {
+        GW::Hook::CreateHook((void**)&ChatLogLine_UICallback_Func, OnChatLogLine_UICallback, (void**)&ChatLogLine_UICallback_Ret);
+        GW::Hook::EnableHooks(ChatLogLine_UICallback_Func);
+    }
 }
-
 void ChatSettings::Terminate()
 {
     ToolboxModule::Terminate();
@@ -461,6 +473,8 @@ void ChatSettings::Update(float)
 void ChatSettings::DrawSettingsInternal()
 {
     ToolboxModule::DrawSettingsInternal();
+
+    ImGui::Combo("Chat window font size", &chat_window_font_id_index, chat_window_font_names);
 
     constexpr ImGuiColorEditFlags flags = ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoAlpha | ImGuiColorEditFlags_NoLabel;
     if (ImGui::TreeNodeEx("Chat Colors", ImGuiTreeNodeFlags_FramePadding | ImGuiTreeNodeFlags_SpanAvailWidth)) {
@@ -568,6 +582,7 @@ void ChatSettings::LoadSettings(ToolboxIni* ini)
     LOAD_BOOL(openlinks);
     LOAD_BOOL(auto_url);
     LOAD_BOOL(clear_chat_message_when_hiding_chat);
+    LOAD_UINT(chat_window_font_id_index);
 
     for (auto& [token, color] : chat_token_colors_original) {
         auto key = std::format("chat_token_color_{}", TextUtils::WStringToString(token));
@@ -596,6 +611,7 @@ void ChatSettings::SaveSettings(ToolboxIni* ini)
     SAVE_BOOL(openlinks);
     SAVE_BOOL(auto_url);
     SAVE_BOOL(clear_chat_message_when_hiding_chat);
+    SAVE_UINT(chat_window_font_id_index);
 
     SAVE_COLOR(timestamps_color);
 
