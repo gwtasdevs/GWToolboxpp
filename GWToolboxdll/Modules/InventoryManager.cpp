@@ -85,6 +85,7 @@ namespace {
 
     bool salvage_rare_mats = false;
     bool salvage_nicholas_items = true;
+    bool identify_greens = true;
     bool show_transact_quantity_popup = false;
     bool transaction_listeners_attached = false;
 
@@ -1093,7 +1094,10 @@ namespace {
                 }
                 switch (identify_all_type) {
                     case InventoryManager::IdentifyAllType::All:
-                        return item;
+                        if (identify_greens || !item->IsGreen()) {
+                            return item;
+                        }
+                        break;
                     case InventoryManager::IdentifyAllType::Blue:
                         if (item->IsBlue()) {
                             return item;
@@ -1764,6 +1768,7 @@ void InventoryManager::SaveSettings(ToolboxIni* ini)
     SAVE_BOOL(only_use_superior_salvage_kits);
     SAVE_BOOL(salvage_rare_mats);
     SAVE_BOOL(salvage_nicholas_items);
+    SAVE_BOOL(identify_greens);
     SAVE_BOOL(trade_whole_stacks);
     SAVE_BOOL(wiki_link_on_context_menu);
     SAVE_BOOL(hide_unsellable_items);
@@ -1794,6 +1799,7 @@ void InventoryManager::LoadSettings(ToolboxIni* ini)
     LOAD_BOOL(only_use_superior_salvage_kits);
     LOAD_BOOL(salvage_rare_mats);
     LOAD_BOOL(salvage_nicholas_items);
+    LOAD_BOOL(identify_greens);
     LOAD_BOOL(trade_whole_stacks);
     LOAD_BOOL(wiki_link_on_context_menu);
     LOAD_BOOL(hide_golds_from_merchant);
@@ -2059,6 +2065,8 @@ void InventoryManager::DrawSettingsInternal()
     ImGui::Checkbox("Bag 2", &bags_to_salvage_from[GW::Constants::Bag::Bag_2]);
     ImGui::Checkbox("Salvage All with Control+Click", &salvage_all_on_ctrl_click);
     ImGui::ShowHelp("Control+Click a salvage kit to open the Salvage All window");
+    ImGui::Checkbox("Identify green items", &identify_greens);
+    ImGui::ShowHelp("Untick to skip green items when doing Identify All");
     ImGui::Checkbox("Identify All with Control+Click", &identify_all_on_ctrl_click);
     ImGui::ShowHelp("Control+Click an identification kit to identify all items with it");
     ImGui::Checkbox("Auto re-use salvage kit", &auto_reuse_salvage_kit);
