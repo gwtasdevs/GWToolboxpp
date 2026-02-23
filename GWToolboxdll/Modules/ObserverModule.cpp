@@ -101,11 +101,9 @@ void ObserverModule::Initialize()
         if (!first_countdown_seen) {
             // First countdown at map load - just mark it as seen
             first_countdown_seen = true;
-            Log::InfoW(L"[Observer] First countdown (map load) at %u ms", instance_time);
         } else {
             // Second countdown - this is the actual match start
             match_start_instance_time = instance_time;
-            Log::InfoW(L"[Observer] Match started at %u ms (second countdown)", match_start_instance_time);
         }
     });
 
@@ -418,26 +416,28 @@ void ObserverModule::HandleAgentState(const uint32_t agent_id, const uint32_t st
         // Use time relative to match start if available, otherwise use instance time
         const uint32_t match_time = match_start_instance_time > 0 ? (instance_time - match_start_instance_time) : instance_time;
         
-        // Determine resurrection type
-        ResurrectionType res_type = ResurrectionType::Unknown;
+        // Determine resurrection type based on what caused the resurrection
+        ResurrectionType res_type;
+        uint32_t resurrector_id = NO_AGENT;
+        
         if (observable_agent->last_resurrector != NO_AGENT) {
+            // A resurrection skill was just used
             res_type = ResurrectionType::Skill;
-        } else if (match_start_instance_time > 0) {
-            // Check if this is a base resurrection (occurs every 2 minutes from match start: 120000ms, 240000ms, etc.)
-            // Allow 3 second window (3000ms) around the 2-minute marks
-            const uint32_t time_in_cycle = match_time % 120000; // Time since last 2-minute mark
-            if (time_in_cycle <= 3000 || time_in_cycle >= 117000) {
-                res_type = ResurrectionType::BaseResurrection;
-            }
+            resurrector_id = observable_agent->last_resurrector;
+        } 
+        else {
+            // No skill involved - must be base resurrection
+            res_type = ResurrectionType::BaseResurrection;
+            resurrector_id = NO_AGENT;
         }
         
         observable_agent->resurrection_events.emplace_back(
             match_time,
-            observable_agent->last_resurrector,
+            resurrector_id,
             res_type
         );
         observable_agent->is_dead = false;
-        observable_agent->last_resurrector = NO_AGENT; // Reset resurrector
+        observable_agent->last_resurrector = NO_AGENT;
         return; // Don't process as death
     }
     
@@ -1299,7 +1299,8 @@ bool ObserverModule::ReduceAction(ObservableAgent* caster, const ActionStage sta
     }
     
     // Track resurrection attempts for resurrection skills
-    if (action->is_skill && stage == ActionStage::Finished && target && caster) {
+    // Set resurrector when skill STARTS on a dead target, so it's already marked when AgentState arrives
+    if (action->is_skill && target && caster) {
         // Common resurrection skill IDs
         const auto skill_id = action->skill_id;
         const bool is_resurrection_skill = 
@@ -1310,10 +1311,21 @@ bool ObserverModule::ReduceAction(ObservableAgent* caster, const ActionStage sta
             skill_id == static_cast<GW::Constants::SkillID>(25) ||     // Restore Life
             skill_id == static_cast<GW::Constants::SkillID>(893) ||    // Vengeance
             skill_id == static_cast<GW::Constants::SkillID>(926) ||    // Unyielding Aura
-            skill_id == static_cast<GW::Constants::SkillID>(1655);     // Flesh of My Flesh
+            skill_id == static_cast<GW::Constants::SkillID>(1655) ||   // Flesh of My Flesh
+            skill_id == static_cast<GW::Constants::SkillID>(2872) ||   // Death Pact Signet (PvE)
+            skill_id == static_cast<GW::Constants::SkillID>(1481);     // Death Pact Signet (PvP)
         
         if (is_resurrection_skill) {
-            target->last_resurrector = caster->agent_id;
+            if (stage == ActionStage::Started && target->is_dead) {
+                // Mark resurrector when skill starts on dead target
+                target->last_resurrector = caster->agent_id;
+            }
+            else if (stage == ActionStage::Stopped || stage == ActionStage::Interrupted) {
+                // Clear resurrector if skill was stopped/interrupted
+                if (target->last_resurrector == caster->agent_id) {
+                    target->last_resurrector = NO_AGENT;
+                }
+            }
         }
     }
 
