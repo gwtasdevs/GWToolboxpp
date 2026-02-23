@@ -954,5 +954,5 @@ void ObserverExportWindow::DrawSettingsInternal()
     if (ImGui::InputText("API Endpoint", endpoint_buf, 256)) {
         Instance().gwrank_endpoint = endpoint_buf;
     }
-    ImGui::ShowHelp("URL for the GWRank.com API endpoint (default: http://127.0.0.1:3000/api/v1/matches)");
+    ImGui::ShowHelp("URL for the GWRank.com API endpoint (default: https://gwrank.com/api/v1/matches)");
 }
