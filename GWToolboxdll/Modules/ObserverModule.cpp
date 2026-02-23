@@ -1379,16 +1379,15 @@ bool ObserverModule::ReduceAction(ObservableAgent* caster, const ActionStage sta
         // Common resurrection skill IDs
         const auto skill_id = action->skill_id;
         const bool is_resurrection_skill = 
-            skill_id == static_cast<GW::Constants::SkillID>(2) ||      // Resurrection Signet
-            skill_id == static_cast<GW::Constants::SkillID>(3436) ||   // Resurrection Signet (PvP)
-            skill_id == static_cast<GW::Constants::SkillID>(22) ||     // Resurrection Chant
-            skill_id == static_cast<GW::Constants::SkillID>(23) ||     // Rebirth
-            skill_id == static_cast<GW::Constants::SkillID>(25) ||     // Restore Life
-            skill_id == static_cast<GW::Constants::SkillID>(893) ||    // Vengeance
-            skill_id == static_cast<GW::Constants::SkillID>(926) ||    // Unyielding Aura
-            skill_id == static_cast<GW::Constants::SkillID>(1655) ||   // Flesh of My Flesh
-            skill_id == static_cast<GW::Constants::SkillID>(2872) ||   // Death Pact Signet (PvE)
-            skill_id == static_cast<GW::Constants::SkillID>(1481);     // Death Pact Signet (PvP)
+            skill_id == GW::Constants::SkillID::Resurrection_Signet ||
+            skill_id == GW::Constants::SkillID::Resurrection_Chant ||
+            skill_id == GW::Constants::SkillID::Rebirth ||
+            skill_id == GW::Constants::SkillID::Restore_Life ||
+            skill_id == GW::Constants::SkillID::Vengeance ||
+            skill_id == GW::Constants::SkillID::Unyielding_Aura ||
+            skill_id == GW::Constants::SkillID::Flesh_of_My_Flesh ||
+            skill_id == GW::Constants::SkillID::Death_Pact_Signet ||
+            skill_id == GW::Constants::SkillID::Death_Pact_Signet_PvP;
         
         if (is_resurrection_skill) {
             if (stage == ActionStage::Started && target->is_dead) {
