@@ -492,6 +492,7 @@ namespace {
     std::vector<MarketItem> last_items;
     std::vector<MarketItem> current_item_orders;
     std::string current_viewing_item;
+    std::string pending_search_item;
     std::map<std::string, AvailableItem> favorite_items;
 
     // UI
@@ -767,6 +768,12 @@ namespace {
 
         SendSocketStarted();
         Refresh();
+
+        // Process any pending search request
+        if (!pending_search_item.empty()) {
+            SendGetItemOrders(pending_search_item);
+            pending_search_item.clear();
+        }
     }
 
     void OnWebSocketMessage(const std::string& message)
@@ -1813,6 +1820,21 @@ void GWMarketWindow::AddItemToSell(GW::Item* _item)
 {
     if (!CanSellItem(_item)) return;
     pending_add_to_sell.reset(_item);
+}
+
+void GWMarketWindow::SearchItem(const std::string& item_name)
+{
+    if (item_name.empty()) return;
+    auto& instance = Instance();
+    instance.visible = true;
+    strncpy(search_buffer, item_name.c_str(), sizeof(search_buffer) - 1);
+    search_buffer[sizeof(search_buffer) - 1] = '\0';
+    current_viewing_item = item_name;
+    if (IsSocketIOReady()) {
+        SendGetItemOrders(item_name);
+    } else {
+        pending_search_item = item_name;
+    }
 }
 
 void GWMarketWindow::LoadSettings(ToolboxIni* ini)

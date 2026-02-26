@@ -90,6 +90,7 @@ namespace {
     bool transaction_listeners_attached = false;
 
     bool wiki_link_on_context_menu = false;
+    bool market_search_on_context_menu = false;
     bool right_click_context_menu_in_explorable = true;
     bool right_click_context_menu_in_outpost = true;
 
@@ -1771,6 +1772,7 @@ void InventoryManager::SaveSettings(ToolboxIni* ini)
     SAVE_BOOL(identify_greens);
     SAVE_BOOL(trade_whole_stacks);
     SAVE_BOOL(wiki_link_on_context_menu);
+    SAVE_BOOL(market_search_on_context_menu);
     SAVE_BOOL(hide_unsellable_items);
     SAVE_BOOL(hide_golds_from_merchant);
     SAVE_BOOL(hide_weapon_sets_and_customized_items);
@@ -1802,6 +1804,7 @@ void InventoryManager::LoadSettings(ToolboxIni* ini)
     LOAD_BOOL(identify_greens);
     LOAD_BOOL(trade_whole_stacks);
     LOAD_BOOL(wiki_link_on_context_menu);
+    LOAD_BOOL(market_search_on_context_menu);
     LOAD_BOOL(hide_golds_from_merchant);
     LOAD_BOOL(hide_unsellable_items);
     LOAD_BOOL(hide_weapon_sets_and_customized_items);
@@ -2039,6 +2042,7 @@ void InventoryManager::DrawSettingsInternal()
     if (ImGui::Checkbox("Alt+Click", &move_to_trade_on_alt_click) && move_to_trade_on_alt_click) move_to_trade_on_double_click = false;
     ImGui::Unindent();
     ImGui::Checkbox("Show 'Guild Wars Wiki' link on item context menu", &wiki_link_on_context_menu);
+    ImGui::Checkbox("Show 'Search on Market' link on item context menu", &market_search_on_context_menu);
     ImGui::Checkbox("Prompt to change secondary profession when using a tome", &change_secondary_for_tome);
     ImGui::Text("Right click an item to open context menu in:");
     ImGui::Indent();
@@ -2321,6 +2325,9 @@ bool InventoryManager::DrawItemContextMenu(const bool open)
         if (wiki_link_on_context_menu) {
             return true;
         }
+        if (market_search_on_context_menu) {
+            return true;
+        }
         return item->IsIdentificationKit() || item->IsSalvageKit();
     };
     auto context_item_actual = context_item.item();
@@ -2520,6 +2527,10 @@ bool InventoryManager::DrawItemContextMenu(const bool open)
     if (wiki_link_on_context_menu && ImGui::Button("Guild Wars Wiki", size)) {
         ImGui::CloseCurrentPopup();
         GuiUtils::SearchWiki(context_item.wiki_name->wstring());
+    }
+    if (market_search_on_context_menu && context_item_actual->IsTradable() && ImGui::Button("Search on Market", size)) {
+        ImGui::CloseCurrentPopup();
+        GWMarketWindow::SearchItem(context_item.wiki_name->string());
     }
     if (ArmoryWindow::CanPreviewItem(context_item.item())) {
         if (ImGui::Button("Preview Item", size)) {
