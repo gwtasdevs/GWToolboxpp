@@ -166,6 +166,10 @@ namespace GW {
         bool BelongsToFrame(GW::UI::Frame* parent, GW::UI::Frame* child);
 
         void Screenshot();
+        bool IsLoadingScreenShown();
+    } // namespace UI
+    namespace PlayerMgr {
+        bool IsMelandrusAccord();
     }
     namespace Agents {
         bool IsAgentCarryingBundle(uint32_t agent_id);

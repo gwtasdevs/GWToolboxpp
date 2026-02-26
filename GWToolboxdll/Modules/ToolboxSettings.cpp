@@ -83,6 +83,7 @@
 #include <Widgets/BondsWidget.h>
 #include <Widgets/ClockWidget.h>
 #include <Widgets/VanquishWidget.h>
+#include <Widgets/ExploitableCorpseWidget.h>
 #include <Widgets/AlcoholWidget.h>
 #include <Widgets/SkillbarWidget.h>
 #include <Widgets/SkillMonitorWidget.h>
@@ -166,10 +167,7 @@ namespace {
         {TextToSpeechModule::Instance(), false},
         FpsFix::Instance(),          
         GamepadModule::Instance(),
-        CameraUnlockModule::Instance()
-    };
-
-    std::vector<WidgetToggle> optional_widgets = {
+        CameraUnlockModule::Instance(),
         TimerWidget::Instance(),
         HealthWidget::Instance(),
         SkillbarWidget::Instance(), 
@@ -179,6 +177,7 @@ namespace {
         BondsWidget::Instance(), 
         ClockWidget::Instance(),
         VanquishWidget::Instance(),
+        ExploitableCorpseWidget::Instance(),
         AlcoholWidget::Instance(),
         WorldMapWidget::Instance(),
         EffectsMonitorWidget::Instance(),
@@ -189,10 +188,7 @@ namespace {
         InventoryOverlayWidget::Instance(),
 #endif
         ActiveQuestWidget::Instance(),
-        TitleTrackerWidget::Instance()
-    };
-
-    std::vector<WindowToggle> optional_windows = {
+        TitleTrackerWidget::Instance(),
         PconsWindow::Instance(),
         HotkeysWindow::Instance(),
         BuildsWindow::Instance(),
@@ -233,8 +229,6 @@ void ToolboxSettings::LoadModules(ToolboxIni* ini)
             return strcmp(a.toolbox_module->Name(), b.toolbox_module->Name()) < 0;
         };
         std::ranges::sort(optional_modules, sort);
-        std::ranges::sort(optional_widgets, sort);
-        std::ranges::sort(optional_windows, sort);
     }
 
     inifile = ini;
@@ -256,13 +250,6 @@ void ToolboxSettings::LoadModules(ToolboxIni* ini)
     for (const auto& m : optional_modules) {
         GWToolbox::ToggleModule(*m.toolbox_module, m.enabled);
     }
-
-    for (const auto& m : optional_windows) {
-        GWToolbox::ToggleModule(*m.toolbox_module, m.enabled);
-    }
-    for (const auto& m : optional_widgets) {
-        GWToolbox::ToggleModule(*m.toolbox_module, m.enabled);
-    }
 }
 
 void ToolboxSettings::DrawSettingsInternal()
@@ -279,10 +266,9 @@ void ToolboxSettings::DrawSettingsInternal()
 
     ImGui::Separator();
     ImGui::PushID("global_enable");
-    ImGui::Text("Enable the following features:");
+    ImGui::TextUnformatted("Enable the following features:");
     ImGui::TextDisabled("Unticking will completely disable a feature from initializing and running. Requires Toolbox restart.");
 
-    ImGui::Text("Modules");
     auto items_per_col = static_cast<size_t>(ceil(optional_modules.size() / static_cast<float>(cols)));
     size_t col_count = 0;
     ImGui::Columns(static_cast<int>(cols), "global_enable_cols", false);
@@ -308,57 +294,10 @@ void ToolboxSettings::DrawSettingsInternal()
         }
     }
     ImGui::EndColumns();
-    col_count = 0;
-    ImGui::Text("Windows");
-    ImGui::Columns(static_cast<int>(cols), "global_enable_cols", false);
-    items_per_col = static_cast<size_t>(ceil(optional_windows.size() / static_cast<float>(cols)));
-    for (auto& m : optional_windows) {
-        if (ImGui::Checkbox(m.name, &m.enabled)) {
-            GWToolbox::SaveSettings();
-            const auto p = &m;
-            GW::GameThread::Enqueue([p]() {
-                GWToolbox::ToggleModule(*p->toolbox_module, p->enabled);
-                });
-        }
-        if (ImGui::IsItemHovered() && m.toolbox_module->Description()) {
-            ImGui::BeginTooltip();
-            ImGui::TextUnformatted(m.toolbox_module->Description());
-            ImGui::EndTooltip();
-        }
-
-        col_count++;
-        if (col_count == items_per_col) {
-            ImGui::NextColumn();
-            col_count = 0;
-        }
-    }
-    ImGui::EndColumns();
-    col_count = 0;
-    ImGui::Text("Widgets");
-    ImGui::Columns(static_cast<int>(cols), "global_enable_cols", false);
-    items_per_col = static_cast<size_t>(ceil(optional_widgets.size() / static_cast<float>(cols)));
-    for (auto& m : optional_widgets) {
-        if (ImGui::Checkbox(m.name, &m.enabled)) {
-            GWToolbox::SaveSettings();
-            const auto p = &m;
-            GW::GameThread::Enqueue([p]() {
-                GWToolbox::ToggleModule(*p->toolbox_module, p->enabled);
-                });
-        }
-        if (ImGui::IsItemHovered() && m.toolbox_module->Description()) {
-            ImGui::BeginTooltip();
-            ImGui::TextUnformatted(m.toolbox_module->Description());
-            ImGui::EndTooltip();
-        }
-
-        col_count++;
-        if (col_count == items_per_col) {
-            ImGui::NextColumn();
-            col_count = 0;
-        }
-    }
-    ImGui::EndColumns();
     ImGui::PopID();
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
 }
 
 void ToolboxSettings::DrawFreezeSetting()
@@ -386,12 +325,6 @@ void ToolboxSettings::LoadSettings(ToolboxIni* ini)
     for (auto& m : optional_modules) {
         m.enabled = ini->GetBoolValue(modules_ini_section, m.name, m.enabled);
     }
-    for (auto& m : optional_windows) {
-        m.enabled = ini->GetBoolValue(modules_ini_section, m.name, m.enabled);
-    }
-    for (auto& m : optional_widgets) {
-        m.enabled = ini->GetBoolValue(modules_ini_section, m.name, m.enabled);
-    }
 }
 
 void ToolboxSettings::SaveSettings(ToolboxIni* ini)
@@ -406,12 +339,6 @@ void ToolboxSettings::SaveSettings(ToolboxIni* ini)
     SAVE_BOOL(send_anonymous_gameplay_info);
 
     for (const auto& m : optional_modules) {
-        ini->SetBoolValue(modules_ini_section, m.name, m.enabled);
-    }
-    for (const auto& m : optional_windows) {
-        ini->SetBoolValue(modules_ini_section, m.name, m.enabled);
-    }
-    for (const auto& m : optional_widgets) {
         ini->SetBoolValue(modules_ini_section, m.name, m.enabled);
     }
 }

@@ -21,6 +21,8 @@
 #include <GWToolbox.h>
 #include <Utils/GuiUtils.h>
 
+#define BTN_WIDTH 20.0f
+
 using namespace std::string_literals;
 
 constexpr auto ini_filename = L"Markers.ini";
@@ -261,6 +263,11 @@ void CustomRenderer::DrawLineSettings()
     if (Colors::DrawSettingHueWheel("Color", &color)) {
         Invalidate();
     }
+    
+    size_t n_lines = std::count_if(lines.begin(), lines.end(), [](const auto& line) {
+        return !line->created_by_toolbox;
+    });
+    
     const float spacing = ImGui::GetStyle().ItemInnerSpacing.x;
     ImGui::PushID("lines");
     for (size_t i = 0; i < lines.size(); i++) {
@@ -312,7 +319,7 @@ void CustomRenderer::DrawLineSettings()
         ImGui::SameLine(0.0f, spacing);
 
         ImGui::PopItemWidth();
-        ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x - spacing * 2 - 20.0f * 2);
+        ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x - spacing * 4 - BTN_WIDTH * 4);
         markers_changed |= ImGui::InputText("##name", line.name, 128);
         ImGui::PopItemWidth();
         if (ImGui::IsItemHovered()) {
@@ -326,7 +333,37 @@ void CustomRenderer::DrawLineSettings()
         }
         ImGui::SameLine(0.0f, spacing);
 
-        const bool remove = ImGui::Button("x##delete", ImVec2(20.0f, 0));
+        if (i > 0) {
+            const bool move_up = ImGui::Button(ICON_FA_ARROW_UP, ImVec2(BTN_WIDTH, 0));
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Move up");
+            }
+            if (move_up) {
+                std::swap(lines[i], lines[i - 1]);
+                markers_changed = true;
+            }
+            ImGui::SameLine(0.0f, spacing);
+        }
+        else {
+            ImGui::SameLine(0.0f, BTN_WIDTH + spacing * 2);
+        }
+
+        if (i < n_lines - 1) {
+            const bool move_down = ImGui::Button(ICON_FA_ARROW_DOWN, ImVec2(BTN_WIDTH, 0));
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Move down");
+            }
+            if (move_down) {
+                std::swap(lines[i], lines[i + 1]);
+                markers_changed = true;
+            }
+            ImGui::SameLine(0.0f, spacing);
+        }
+        else {
+            ImGui::SameLine(0.0f, BTN_WIDTH + spacing * 2);
+        }
+
+        const bool remove = ImGui::Button("x##delete", ImVec2(BTN_WIDTH, 0));
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Delete");
         }
@@ -402,7 +439,7 @@ void CustomRenderer::DrawMarkerSettings()
         }
         ImGui::SameLine(0.0f, spacing);
         ImGui::PopItemWidth();
-        ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x - spacing * 2 - 20.0f * 2);
+        ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x - spacing * 4 - BTN_WIDTH * 4);
         marker_changed |= ImGui::InputText("##name", marker.name, 128);
         ImGui::PopItemWidth();
         if (ImGui::IsItemHovered()) {
@@ -416,7 +453,37 @@ void CustomRenderer::DrawMarkerSettings()
         }
         ImGui::SameLine(0.0f, spacing);
 
-        const bool remove = ImGui::Button("x##delete", ImVec2(20.0f, 0));
+        if (i > 0) {
+            const bool move_up = ImGui::Button(ICON_FA_ARROW_UP, ImVec2(BTN_WIDTH, 0));
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Move up");
+            }
+            if (move_up) {
+                std::swap(markers[i], markers[i - 1]);
+                markers_changed = true;
+            }
+            ImGui::SameLine(0.0f, spacing);
+        }
+        else {
+            ImGui::SameLine(0.0f, BTN_WIDTH + spacing * 2);
+        }
+
+        if (i < markers.size() - 1) {
+            const bool move_down = ImGui::Button(ICON_FA_ARROW_DOWN, ImVec2(BTN_WIDTH, 0));
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Move down");
+            }
+            if (move_down) {
+                std::swap(markers[i], markers[i + 1]);
+                markers_changed = true;
+            }
+            ImGui::SameLine(0.0f, spacing);
+        }
+        else {
+            ImGui::SameLine(0.0f, BTN_WIDTH + spacing * 2);
+        }
+
+        const bool remove = ImGui::Button("x##delete", ImVec2(BTN_WIDTH, 0));
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Delete");
         }
@@ -514,7 +581,7 @@ void CustomRenderer::DrawPolygonSettings()
         ImGui::SameLine(0.0f, spacing);
 
         ImGui::PopItemWidth();
-        ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x - spacing * 2 - 20.0f * 2);
+        ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x - spacing * 4 - BTN_WIDTH * 4);
         markers_changed |= ImGui::InputText("##name", polygon.name, 128);
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Name");
@@ -526,9 +593,39 @@ void CustomRenderer::DrawPolygonSettings()
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Draw on in-game terrain");
         }
-
         ImGui::SameLine(0.0f, spacing);
-        const bool remove = ImGui::Button("x##delete", ImVec2(20.0f, 0));
+
+        if (i > 0) {
+            const bool move_up = ImGui::Button(ICON_FA_ARROW_UP, ImVec2(BTN_WIDTH, 0));
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Move up");
+            }
+            if (move_up) {
+                std::swap(polygons[i], polygons[i - 1]);
+                polygon_changed = true;
+            }
+            ImGui::SameLine(0.0f, spacing);
+        }
+        else {
+            ImGui::SameLine(0.0f, BTN_WIDTH + spacing * 2);
+        }
+
+        if (i < polygons.size() - 1) {
+            const bool move_down = ImGui::Button(ICON_FA_ARROW_DOWN, ImVec2(BTN_WIDTH, 0));
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Move down");
+            }
+            if (move_down) {
+                std::swap(polygons[i], polygons[i + 1]);
+                polygon_changed = true;
+            }
+            ImGui::SameLine(0.0f, spacing);
+        }
+        else {
+            ImGui::SameLine(0.0f, BTN_WIDTH + spacing * 2);
+        }
+
+        const bool remove = ImGui::Button("x##delete", ImVec2(BTN_WIDTH, 0));
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Delete");
         }

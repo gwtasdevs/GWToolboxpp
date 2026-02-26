@@ -122,3 +122,39 @@ namespace GW {
         GWCA_API wchar_t* GetAgentEncName(uint32_t agent_id);
     };
 }
+// ============================================================
+// C Interop API
+// ============================================================
+extern "C" {
+    GWCA_API bool     SendDialog(uint32_t dialog_id);
+    GWCA_API bool     GetIsAgentTargettable(const void* agent);
+
+    GWCA_API uint32_t GetObservingId();
+    GWCA_API uint32_t GetControlledCharacterId();
+    GWCA_API uint32_t GetTargetId();
+    GWCA_API uint32_t GetEvaluatedTargetId();
+
+    GWCA_API void* GetAgentByID(uint32_t agent_id);
+    GWCA_API void* GetPlayerByID(uint32_t player_id);
+    GWCA_API void* GetControlledCharacter();
+    GWCA_API void* GetTargetAsAgentLiving();
+    GWCA_API void* GetMapAgentByID(uint32_t agent_id);
+    GWCA_API void* GetNPCByID(uint32_t npc_id);
+
+    GWCA_API bool     IsObserving();
+    GWCA_API uint32_t GetAmountOfPlayersInInstance();
+    GWCA_API uint32_t CountAllegianceInRange(uint32_t allegiance, float sqr_range);
+
+    GWCA_API bool     ChangeTargetByAgent(const void* agent);
+    GWCA_API bool     ChangeTargetById(uint32_t agent_id);
+
+    GWCA_API bool     Move(float x, float y, uint32_t zplane);
+    GWCA_API bool     InteractAgent(const void* agent, bool call_target);
+
+    GWCA_API const wchar_t* GetPlayerNameByLoginNumber(uint32_t login_number);
+    GWCA_API uint32_t GetAgentIdByLoginNumber(uint32_t login_number);
+    GWCA_API uint32_t GetHeroAgentID(uint32_t hero_index);
+
+    GWCA_API const wchar_t* GetAgentEncNameByAgent(const void* agent);
+    GWCA_API const wchar_t* GetAgentEncNameById(uint32_t agent_id);
+}

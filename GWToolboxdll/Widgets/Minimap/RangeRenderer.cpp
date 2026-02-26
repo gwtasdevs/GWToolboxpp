@@ -86,9 +86,8 @@ void RangeRenderer::DrawSettings()
 
 size_t RangeRenderer::CreateCircle(D3DVertex* vertices, const float radius, const DWORD color) const
 {
-    const auto scale = Minimap::GetGwinchScale();
-    const auto xdiff = static_cast<float>(line_thickness) / scale.x;
-    const auto ydiff = static_cast<float>(line_thickness) / scale.y;
+    const auto xdiff = static_cast<float>(line_thickness) / gwinches_per_pixel;
+    const auto ydiff = static_cast<float>(line_thickness) / gwinches_per_pixel;
     for (auto i = 0; i <= circle_triangles; i += 2) {
         const auto angle = i / static_cast<float>(circle_triangles) * DirectX::XM_2PI;
         vertices[i].x = radius * cos(angle);
@@ -179,8 +178,13 @@ void RangeRenderer::Initialize(IDirect3DDevice9* device)
     buffer->Unlock();
 }
 
-void RangeRenderer::Render(IDirect3DDevice9* device)
+void RangeRenderer::Render(IDirect3DDevice9* device, float _gwinches_per_pixel)
 {
+    if (_gwinches_per_pixel != gwinches_per_pixel) {
+        Invalidate();
+        gwinches_per_pixel = _gwinches_per_pixel;
+    }
+
     Initialize(device);
 
     switch (GW::Map::GetInstanceType()) {

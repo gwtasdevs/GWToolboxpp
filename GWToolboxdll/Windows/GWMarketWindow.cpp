@@ -38,6 +38,7 @@
 #include <sstream>
 #include <thread>
 #include <unordered_set>
+#include <GWCA/GameEntities/Frame.h>
 
 // API for shops isn't good enough, stick to browsing for now.
 #define GWMARKET_SELLING_ENABLED 0
@@ -491,6 +492,7 @@ namespace {
     std::vector<MarketItem> last_items;
     std::vector<MarketItem> current_item_orders;
     std::string current_viewing_item;
+    std::string pending_search_item;
     std::map<std::string, AvailableItem> favorite_items;
 
     // UI
@@ -766,6 +768,12 @@ namespace {
 
         SendSocketStarted();
         Refresh();
+
+        // Process any pending search request
+        if (!pending_search_item.empty()) {
+            SendGetItemOrders(pending_search_item);
+            pending_search_item.clear();
+        }
     }
 
     void OnWebSocketMessage(const std::string& message)
@@ -1218,9 +1226,23 @@ namespace {
 
             ImGui::SetCursorPos({ImGui::GetContentRegionAvail().x - 100.f, top + 5.f});
             if (ImGui::Button("Whisper##seller", {100.f, 0.f})) {
-                GW::GameThread::Enqueue([player = order.player] {
-                    std::wstring name_ws = TextUtils::StringToWString(player);
+                auto cpy = new MarketItem();
+                *cpy = order;
+                GW::GameThread::Enqueue([cpy] {
+                    std::wstring name_ws = TextUtils::StringToWString(cpy->player);
+                    std::wstring item_ws = TextUtils::StringToWString(cpy->name);
+                    
                     GW::UI::SendUIMessage(GW::UI::UIMessage::kOpenWhisper, (wchar_t*)name_ws.c_str());
+                    const auto frame = (GW::EditableTextFrame*)GW::UI::GetFrameByLabel(L"EditMessage");
+                    std::wstring message;
+                    if (cpy->orderType == OrderType::Buy) {
+                        message = std::format(L"Hi, are you still looking for {}?", item_ws.c_str());
+                    }
+                    else {
+                        message = std::format(L"Hi, do you still have {} for sale?", item_ws.c_str());
+                    }
+                    frame && frame->SetValue(message.c_str());
+                    delete cpy;
                 });
             }
             ImGui::SetCursorPos(original_cursor_pos);
@@ -1798,6 +1820,21 @@ void GWMarketWindow::AddItemToSell(GW::Item* _item)
 {
     if (!CanSellItem(_item)) return;
     pending_add_to_sell.reset(_item);
+}
+
+void GWMarketWindow::SearchItem(const std::string& item_name)
+{
+    if (item_name.empty()) return;
+    auto& instance = Instance();
+    instance.visible = true;
+    strncpy(search_buffer, item_name.c_str(), sizeof(search_buffer) - 1);
+    search_buffer[sizeof(search_buffer) - 1] = '\0';
+    current_viewing_item = item_name;
+    if (IsSocketIOReady()) {
+        SendGetItemOrders(item_name);
+    } else {
+        pending_search_item = item_name;
+    }
 }
 
 void GWMarketWindow::LoadSettings(ToolboxIni* ini)

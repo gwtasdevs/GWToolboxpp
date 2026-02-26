@@ -53,4 +53,6 @@ protected:
     bool show_interrupts = true;
     bool show_finishes = true;
     bool show_integrity = false;
+    bool show_damage = true;
+    bool show_damage_details = true;
 };

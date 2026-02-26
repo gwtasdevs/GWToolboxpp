@@ -138,7 +138,7 @@ namespace GW {
             MargridTheSly, Zenmai, Olias, Razah, MOX, KeiranThackeray, Jora,
             PyreFierceshot, Anton, Livia, Hayda, Kahmu, Gwen, Xandra, Vekk,
             Ogden, Merc1, Merc2, Merc3, Merc4, Merc5, Merc6, Merc7, Merc8,
-            Miku, ZeiRi, AllHeroes
+            Miku, ZeiRi, Devona, GhostofAlthea, Count
         };
 
         enum class MaterialSlot : uint32_t {
@@ -198,6 +198,8 @@ namespace GW {
             Profession::None, // Mercenary Hero 8
             Profession::Assassin, // Miku
             Profession::Ritualist, // Zei Ri
+            Profession::Warrior, // Devona
+            Profession::Mesmer // Ghost of Althea
         };
 
         enum class TitleID : uint32_t {

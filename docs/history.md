@@ -7,6 +7,24 @@ layout: default
 Previous releases are available on Github as dll files. There is no support for older releases. If you are looking for
 the latest version, go to the [Home Page](./) instead.
 
+## Version 8.14
+
+* [Fix] Working with 38219
+* [Fix] Fixed bug causing a player's active quest to change on map load
+* [Fix] Fixed bug preventing edited builds from pinging in chat
+* [Fix] Fixed crash when deleting a teambuild
+* [Fix] Fixed bug causing automatic screenshots being done on reroll
+* [Minor] Adjusted ui for salvage info, and all rune trader and dye sale prices are shown instead of just some of them now
+* [New] Added an option to clear the chat input when hiding the chat window
+* [New] Added optional message under the name tag of a locked chest in-game to tell you how many lockpicks you have
+* [New] Stops GW from grabbing controller input if the game isn't in focus
+* [New] Added widget to track number of exploitable corpses in range
+* [New] Added option to hide in-game store advertisement on char select screen
+* [New] Added /addhenchman, /addhero and /leave chat commands
+* [New] Added hotkey option to block later hotkeys when its triggered
+* [New] Optimised storage sorting to take much less time
+* [New] Added optional context menu button to search for an item on gwmarket
+
 ## Version 8.13
 * [Fix] Fixed tolbox failing to inject for people without vcredist
 

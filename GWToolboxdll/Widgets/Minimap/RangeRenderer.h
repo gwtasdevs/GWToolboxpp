@@ -9,7 +9,8 @@ class RangeRenderer : public VBuffer {
     static constexpr size_t circle_triangles = circle_points - 2;
 
 public:
-    void Render(IDirect3DDevice9* device) override;
+    void Render(IDirect3DDevice9* device) override { Render(device, gwinches_per_pixel); };
+    void Render(IDirect3DDevice9* device, float _gwinches_per_pixel);
     void SetDrawCenter(const bool b) { draw_center_ = b; }
 
     void DrawSettings();
@@ -30,6 +31,9 @@ private:
     bool draw_center_ = false;
 
     float line_thickness = 1.f;
+
+    // This gets set at runtime when Render() is called
+    float gwinches_per_pixel = 1.f;
 
     Color color_range_chain_aggro = 0;
     Color color_range_res_aggro = 0;

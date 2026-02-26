@@ -4,11 +4,13 @@
 
 class SymbolsRenderer : public VBuffer {
     friend class QuestModule;
+
 public:
     SymbolsRenderer() = default;
 
     void Invalidate() override;
-    void Render(IDirect3DDevice9* device) override;
+    void Render(IDirect3DDevice9* device, float zoom = 1.f);
+    void Render(IDirect3DDevice9* device) override { Render(device, 1.f); };
 
     void DrawSettings();
     void LoadSettings(const ToolboxIni* ini, const char* section);

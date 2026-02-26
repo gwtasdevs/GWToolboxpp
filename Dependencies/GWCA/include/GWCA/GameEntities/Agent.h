@@ -291,6 +291,7 @@ namespace GW {
         // Health Bar Effect Bitmasks.
         inline bool GetIsBleeding()        const { return (effects & 0x0001) != 0; }
         inline bool GetIsConditioned()     const { return (effects & 0x0002) != 0; }
+        inline bool GetIsUsedCorpse()      const { return (effects & 0x0004) != 0; }
         inline bool GetIsCrippled()        const { return (effects & 0x000A) == 0xA; }
         inline bool GetIsDead()            const { return (effects & 0x0010) != 0; }
         inline bool GetIsDeepWounded()     const { return (effects & 0x0020) != 0; }

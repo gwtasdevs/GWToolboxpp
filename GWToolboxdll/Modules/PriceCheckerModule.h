@@ -24,6 +24,11 @@ public:
     void DrawSettingsInternal() override;
     void SaveSettings(ToolboxIni* ini) override;
 
+    static uint32_t GetTraderSellPrice(const GW::Item* item);
+    static uint32_t GetTraderSellPrice(const GW::Constants::MaterialSlot material);
+
+    static uint32_t GetMerchantSellPrice(const GW::Constants::MaterialSlot material);
+
     // Returns a list of prices by identifier. Materials have identifiers are "model_id", but runes and mods are "model_id-mod_struct"
     static const std::unordered_map<std::string,uint32_t>& FetchPrices();
 };

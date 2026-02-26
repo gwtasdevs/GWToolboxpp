@@ -32,9 +32,18 @@ public:
     void SaveSettings(ToolboxIni* ini) override;
     void DrawSettingsInternal() override;
 
+    static void ExportToGWRank();
+
 protected:
     float text_long = 0;
     float text_medium = 0;
     float text_short = 0;
     float text_tiny = 0;
+
+    std::string gwrank_api_key;
+    std::string gwrank_endpoint = "https://gwrank.com/api/v1/matches";
+    
+    std::string match_type = "";
+    std::string match_date = "";
+    std::string mat_round = "";
 };

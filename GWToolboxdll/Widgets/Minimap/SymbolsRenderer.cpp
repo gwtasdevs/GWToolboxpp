@@ -159,7 +159,7 @@ void SymbolsRenderer::Invalidate()
     this->initialized = false;
 }
 
-void SymbolsRenderer::Render(IDirect3DDevice9* device)
+void SymbolsRenderer::Render(IDirect3DDevice9* device, float zoom)
 {
     Initialize(device);
 
@@ -211,7 +211,7 @@ void SymbolsRenderer::Render(IDirect3DDevice9* device)
         const auto quest_color = ImGui::ColorConvertU32ToFloat4(quest_im_color);
         device->SetPixelShaderConstantF(0, &quest_color.x, 1);
 
-        const float compass_scale = Minimap::Instance().Scale();
+        const float compass_scale = zoom;
         const float marker_scale = 1.0f / compass_scale;
         auto rotate = DirectX::XMMatrixRotationZ(-tau / 5);
         DirectX::XMMATRIX scale = DirectX::XMMatrixScaling(marker_scale + std::sin(tau) * 0.3f * marker_scale,

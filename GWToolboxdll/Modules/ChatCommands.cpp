@@ -68,6 +68,8 @@ constexpr auto CMDTITLE_KEEP_CURRENT = 0xfffe;
 constexpr auto CMDTITLE_REMOVE_CURRENT = 0xffff;
 
 namespace {
+
+
     const wchar_t* next_word(const wchar_t* str)
     {
         while (*str && !isspace(*str)) {
@@ -78,6 +80,15 @@ namespace {
         }
         return *str ? str : nullptr;
     }
+
+    const wchar_t* GetRemainingArgsWstr(const wchar_t* message, const int argc_start)
+    {
+        const wchar_t* out = message;
+        for (auto i = 0; i < argc_start && out; i++) {
+            out = next_word(out);
+        }
+        return out ? out : L"";
+    };
 
     bool IsMapReady()
     {
@@ -895,6 +906,140 @@ namespace {
         found->second->ChatCommandCallback(status, message, argc, argv);
     }
 
+    bool CanAddToParty() {
+        return GW::Map::GetInstanceType() == GW::Constants::InstanceType::Outpost && GW::PartyMgr::GetIsLeader() && GW::PartyMgr::GetPartySize() < GW::Map::GetMapInfo()->max_party_size;
+    }
+
+    using AddPartyMemberFn = std::function<void(uint32_t)>;
+
+    void AddPartyMemberByName(const wchar_t* _search, std::map<uint32_t, std::wstring>* agent_names, AddPartyMemberFn add_fn)
+    {
+        if (!CanAddToParty()) return;
+
+        auto search = new std::wstring(_search);
+        Resources::EnqueueWorkerTask([agent_names, search, add_fn]() {
+            bool success = false;
+            for (clock_t i = 0; i < 1000; i += 20) {
+                success = true;
+                for (auto& it : *agent_names) {
+                    if (it.second.empty()) {
+                        success = false;
+                        break;
+                    }
+                }
+                if (success) break;
+                Sleep(20);
+            }
+            if (success) {
+                uint32_t best_id = 0;
+                size_t best_pos = std::wstring::npos;
+
+                for (auto& [id, name] : *agent_names) {
+                    std::wstring name_lower = name;
+                    std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(), towlower);
+
+                    size_t pos = name_lower.find(*search);
+                    if (pos != std::wstring::npos && (best_id == 0 || pos < best_pos || (pos == best_pos && name.length() < agent_names->at(best_id).length()))) {
+                        best_id = id;
+                        best_pos = pos;
+                    }
+                }
+
+                if (best_id) {
+                    GW::GameThread::Enqueue([add_fn,best_id]() {
+                        add_fn(best_id);
+                        });
+                    
+                }
+            }
+            else {
+                Log::Error("Timed out resolving party member names");
+            }
+
+            delete agent_names;
+            delete search;
+        });
+    }
+
+    constexpr std::array profession_names = {L"", L"warrior", L"ranger", L"monk", L"necromancer", L"mesmer", L"elementalist", L"assassin", L"ritualist", L"paragon", L"dervish"};
+
+    // Returns matching profession index (1-10), or 0 if no match
+    static size_t FindProfessionMatch(const std::wstring& search)
+    {
+        for (size_t i = 1; i < profession_names.size(); i++) {
+            if (wcsstr(profession_names.at(i), search.c_str())) {
+                return i;
+            }
+        }
+        return 0;
+    }
+
+    void CHAT_CMD_FUNC(CmdAddHenchman)
+    {
+        const auto w = GW::GetWorldContext();
+        if (!w || argc < 2) return;
+        const std::wstring search = TextUtils::ToLower(GetRemainingArgsWstr(message, 1));
+
+        const auto profession = FindProfessionMatch(search);
+        if (profession) {
+            for (auto& agent_id : w->henchmen_agent_ids) {
+                const auto agent = (GW::AgentLiving*)GW::Agents::GetAgentByID(agent_id);
+                if (agent && agent->GetIsLivingType() && agent->primary == profession) {
+                    GW::GameThread::Enqueue([agent_id]() {
+                        GW::PartyMgr::AddHenchman(agent_id);
+                    });
+                }
+            }
+        }
+
+        auto agent_names = new std::map<uint32_t, std::wstring>();
+        for (auto& agent_id : w->henchmen_agent_ids) {
+            (*agent_names)[agent_id] = L"";
+            GW::Agents::AsyncGetAgentName(GW::Agents::GetAgentByID(agent_id), (*agent_names)[agent_id]);
+        }
+        AddPartyMemberByName(search.c_str(), agent_names, [](uint32_t found) {
+            GW::PartyMgr::AddHenchman(found);
+        });
+    }
+
+    void CHAT_CMD_FUNC(CmdAddHero)
+    {
+        const auto w = GW::GetWorldContext();
+        if (!w || argc < 2) return;
+        const std::wstring search = TextUtils::ToLower(GetRemainingArgsWstr(message, 1));
+
+        const auto profession = FindProfessionMatch(search);
+        if (profession) {
+            for (auto& hero : w->hero_info) {
+                if (hero.primary == profession) {
+                    GW::GameThread::Enqueue([hero_id = hero.hero_id]() {
+                        GW::PartyMgr::AddHero(hero_id);
+                    });
+                }
+            }
+        }
+
+        auto agent_names = new std::map<uint32_t, std::wstring>();
+        for (auto& hero : w->hero_info) {
+            const auto hero_data = GW::PartyMgr::GetHeroConstData(hero.hero_id);
+            if (hero_data && hero_data->name_id) {
+                (*agent_names)[hero.hero_id] = L"";
+                wchar_t enc_str[8];
+                GW::UI::UInt32ToEncStr(hero_data->name_id, enc_str, _countof(enc_str));
+                GW::UI::AsyncDecodeStr((const wchar_t*)enc_str, &(*agent_names)[hero.hero_id]);
+            }
+        }
+        AddPartyMemberByName(search.c_str(), agent_names, [](uint32_t found) {
+            GW::PartyMgr::AddHero((GW::Constants::HeroID)found);
+        });
+    }
+    void CHAT_CMD_FUNC(CmdLeave) {
+        if (GW::PartyMgr::GetPartySize() > 1) {
+            GW::GameThread::Enqueue(GW::PartyMgr::LeaveParty);
+        }
+        
+    }
+
     void HookOnChatInteraction() {
         if (OnChatInteraction_Callback_Func) return;
         const auto frame = GW::UI::GetFrameByLabel(L"Chat");
@@ -1421,6 +1566,7 @@ void ChatCommands::Initialize()
 
     //TODO: Move all of these callbacks into pvt namespace
     chat_commands = {
+        {L"addhenchman", CmdAddHenchman},
         {L"button", CmdButtonPress},
         {L"chat", CmdChatTab},
         {L"enter", CmdEnterMission},
@@ -1466,7 +1612,10 @@ void ChatCommands::Initialize()
         {L"call", CmdCallTarget},
         {L"config", CmdConfig},
         {settings_via_chat_commands_cmd, CmdSettingViaChatCommand},
-        {L"dropbuff",CmdDropBuff}
+        {L"dropbuff",CmdDropBuff},
+        {L"addhenchman", CmdAddHenchman},
+        {L"addhero", CmdAddHero},
+        {L"leave", CmdLeave},
     };
 
 
@@ -2146,22 +2295,6 @@ void CHAT_CMD_FUNC(ChatCommands::CmdAfk)
         ChatSettings::SetAfkMessage(L"");
     }
 }
-
-const wchar_t* ChatCommands::GetRemainingArgsWstr(const wchar_t* message, const int argc_start)
-{
-    const wchar_t* out = message;
-    for (auto i = 0; i < argc_start && out; i++) {
-        out = wcschr(out, ' ');
-        if (out) {
-            out++;
-        }
-    }
-
-    if (!out) {
-        return L"";
-    }
-    return out;
-};
 
 void CHAT_CMD_FUNC(ChatCommands::CmdTarget)
 {

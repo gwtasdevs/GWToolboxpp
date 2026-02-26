@@ -104,9 +104,9 @@ namespace GW {
             kFrameMessage_0x41,
             kFrameMessage_0x42,
             kRenderFrame_0x43,              // 0x43
-            kFrameMessage_0x44 = 0x51,
+            kFrameMessage_0x44 = 0x52,
             kFrameMessage_0x45,
-            kFrameMessage_0x46 = 0x55,
+            kFrameMessage_0x46 = 0x56,
             kFrameMessage_0x47,             // 0x47, Multiple uses depending on frame
             kFrameMessage_0x48,             // 0x48, Multiple uses depending on frame
             kFrameMessage_0x49,             // 0x49, Multiple uses depending on frame
@@ -503,6 +503,9 @@ namespace GW {
             kMessage_0x10000176,
             kMessage_0x10000177,
             kMessage_0x10000178,
+            kMessage_0x10000178_1, // added to GW 2026-02-26
+            kMessage_0x10000178_2, // added to GW 2026-02-26
+            kMessage_0x10000178_3, // added to GW 2026-02-26
             kDestroyUIPositionOverlay, // 0x10000179
             kEnableUIPositionOverlay, // 0x1000017a, wparam = uint32_t enable
             kMessage_0x1000017b,
@@ -605,7 +608,7 @@ namespace GW {
             kSalvageItem = 0x30000000 | 0x23  // wparam = UIPacket::kUseKitOnItem
         };
 
-        static_assert(GW::UI::UIMessage::kOpenTemplate == (GW::UI::UIMessage)0x100001c1);
+        static_assert(GW::UI::UIMessage::kOpenTemplate == (GW::UI::UIMessage)0x100001c4);
 
         namespace UIPacket {
             struct kDialogueMessage {

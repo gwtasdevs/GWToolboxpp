@@ -4,6 +4,7 @@
 
 #include <GWCA/GameEntities/Quest.h>
 #include <GWCA/GameEntities/Agent.h>
+#include <GWCA/GameEntities/Map.h>
 
 #include <GWCA/Managers/UIMgr.h>
 #include <GWCA/Managers/QuestMgr.h>
@@ -34,6 +35,12 @@ namespace {
     bool draw_quest_path_on_minimap = true;
     bool draw_quest_path_on_mission_map = true;
     bool show_paths_to_all_quests = false;
+    bool keep_current_quest_when_new_quest_added = false;
+
+    clock_t fetching_all_quest_info = 0;
+
+    bool fetch_missing_quest_info_queued = false;
+
     GW::HookEntry pre_ui_message_entry;
     GW::HookEntry post_ui_message_entry;
     bool initialised = false;
@@ -266,6 +273,12 @@ namespace {
             }
         }
     };
+    void BlockQuestSound()
+    {
+        AudioSettings::BlockSoundForMs(L"\xe14d\x0101", 1000);
+        AudioSettings::BlockSoundForMs(L"\xe14c\x0101", 1000);
+    }
+
 
     // Custom quests have ids greater than the count in-game - there are some assertions that don't like this!
     GW::MemoryPatcher bypass_custom_quest_assertion_patch;
@@ -388,12 +401,25 @@ namespace {
     {
         switch (message_id) {
             case GW::UI::UIMessage::kQuestAdded: {
-                const auto quest_id = *(GW::Constants::QuestID*)wparam;
-                if (quest_id == custom_quest_id) {
-                    GW::QuestMgr::GetQuest(quest_id)->log_state |= 1; // Avoid asking for description about this quest
+                const auto quest = GW::QuestMgr::GetQuest(*(GW::Constants::QuestID*)wparam);
+                if (!quest) break;
+                if (quest->quest_id == custom_quest_id) {
+                    quest->log_state |= 1; // Avoid asking for description about this quest
                 }
-            }
-            break;
+                if (quest->quest_id != player_chosen_quest_id) {
+                    // Quest assigned without user interaction
+                    if (keep_current_quest_when_new_quest_added) {
+                        status->blocked = true;
+                        QuestModule::EmulateQuestSelected(player_chosen_quest_id);
+                        break;
+                    }
+                    if ((quest->log_state & 0x1) && TIMER_DIFF(fetching_all_quest_info) < 1000) {
+                        status->blocked = true;
+                        QuestModule::EmulateQuestSelected(player_chosen_quest_id);
+                        break;
+                    }
+                }
+            } break;
             case GW::UI::UIMessage::kStartMapLoad:
                 quest_id_before_map_load = GW::QuestMgr::GetActiveQuestId();
                 break;
@@ -443,16 +469,29 @@ namespace {
                 RefreshQuestPath(*static_cast<GW::Constants::QuestID*>(packet));
                 break;
             case GW::UI::UIMessage::kMapLoaded:
-                ClearCalculatedQuestPaths();
-                if (custom_quest_marker.quest_id != (GW::Constants::QuestID)0) {
-                    QuestModule::SetCustomQuestMarker(custom_quest_marker_world_pos, player_chosen_quest_id == custom_quest_marker.quest_id);
-                    if (quest_id_before_map_load == custom_quest_marker.quest_id)
-                        GW::QuestMgr::SetActiveQuestId(quest_id_before_map_load);
-                }
-                RefreshAllQuestPaths();
+                BlockQuestSound();
                 break;
         }
     }
+    bool was_loading = true;
+
+
+
+    void OnMapLoaded() {
+        if (GW::UI::IsLoadingScreenShown()) return;
+        BlockQuestSound();
+        QuestModule::FetchMissingQuestInfo();
+        ClearCalculatedQuestPaths();
+        if (custom_quest_marker.quest_id != (GW::Constants::QuestID)0) {
+            QuestModule::SetCustomQuestMarker(custom_quest_marker_world_pos, player_chosen_quest_id == custom_quest_marker.quest_id);
+            if (quest_id_before_map_load == custom_quest_marker.quest_id) GW::QuestMgr::SetActiveQuestId(quest_id_before_map_load);
+        }
+        RefreshAllQuestPaths();
+    }
+
+    bool refresh_all_quest_paths_queued = 0;
+
+
 } // namespace
 
 const GW::Quest* QuestModule::GetCustomQuestMarker()
@@ -462,6 +501,7 @@ const GW::Quest* QuestModule::GetCustomQuestMarker()
 
 void QuestModule::SetCustomQuestMarker(const GW::Vec2f& world_pos, bool set_active)
 {
+    BlockQuestSound();
     Instance().Initialize();
     if (!GW::Agents::GetControlledCharacter())
         return; // Map not ready
@@ -542,8 +582,11 @@ std::vector<QuestObjective> QuestModule::ParseQuestObjectives(GW::Constants::Que
     if (!quest) return out;
     const wchar_t* next_objective_enc = nullptr;
     const wchar_t* current_objective_enc = quest->objectives;
-    if (!quest->objectives)
+    if (!quest->objectives) {
+        BlockQuestSound();
         GW::QuestMgr::RequestQuestInfo(quest);
+    }
+        
     while (current_objective_enc) {
         next_objective_enc = wcschr(current_objective_enc, 0x2);
         size_t current_objective_len = next_objective_enc ? next_objective_enc - current_objective_enc : wcslen(current_objective_enc);
@@ -583,6 +626,10 @@ ImU32& QuestModule::GetQuestLineColor(GW::Constants::QuestID quest_id)
 
 void QuestModule::DrawSettingsInternal()
 {
+    ImGui::Checkbox("Keep current quest when accepting a new one", &keep_current_quest_when_new_quest_added);
+    ImGui::ShowHelp(
+        "By default, Guild Wars changes your currently selected quest to the one you've just taken from an NPC.\nThis can be annoying if you don't realise your quest marker is now taking you somewhere different!\nTick this to make sure your current quest isn't changed when a new quest is added to your log."
+    );
     ImGui::Checkbox("Double click a quest in the quest log window to travel to nearest outpost", &double_click_to_travel_to_quest);
     ImGui::Text("Draw path to quest marker on:");
     bool recalc_quest_paths = false;
@@ -594,7 +641,6 @@ void QuestModule::DrawSettingsInternal()
 #endif
     if(recalc_quest_paths)
         RefreshAllQuestPaths();
-    ImGui::ShowHelp("The higher this value, the more accurate the path will be, but the more CPU it will use.");
 }
 
 void QuestModule::LoadSettings(ToolboxIni* ini)
@@ -614,6 +660,7 @@ void QuestModule::LoadSettings(ToolboxIni* ini)
     GW::GameThread::Enqueue([] {
         SetCustomQuestMarker(custom_quest_marker_world_pos);
     });
+    LOAD_BOOL(keep_current_quest_when_new_quest_added);
 }
 
 void QuestModule::SaveSettings(ToolboxIni* ini)
@@ -629,6 +676,7 @@ void QuestModule::SaveSettings(ToolboxIni* ini)
     SAVE_FLOAT(custom_quest_marker_world_pos_x);
     SAVE_FLOAT(custom_quest_marker_world_pos_y);
     SAVE_BOOL(double_click_to_travel_to_quest);
+    SAVE_BOOL(keep_current_quest_when_new_quest_added);
 }
 
 void QuestModule::Initialize()
@@ -674,7 +722,7 @@ void QuestModule::Initialize()
     ASSERT(QuestLogRow_UICallback_Func);
     ASSERT(bypass_custom_quest_assertion_patch.GetAddress());
 #endif
-    RefreshAllQuestPaths();
+    
 }
 
 void QuestModule::EmulateQuestSelected(GW::Constants::QuestID quest_id)
@@ -690,6 +738,7 @@ void QuestModule::EmulateQuestSelected(GW::Constants::QuestID quest_id)
         .map_id = quest->map_to,
         .log_state = quest->log_state
     };
+    BlockQuestSound();
     GW::UI::SendUIMessage(GW::UI::UIMessage::kClientActiveQuestChanged, &packet);
     GW::GetWorldContext()->active_quest_id = quest->quest_id;
     GW::UI::SendUIMessage(GW::UI::UIMessage::kServerActiveQuestChanged, &packet);
@@ -714,8 +763,43 @@ void QuestModule::SignalTerminate()
 void QuestModule::Update(float)
 {
     const auto pos = GetPlayerPos();
-    if (!pos)
+    if (!pos) {
+        was_loading = true;
         return;
+    }
+    if (was_loading) {
+        if (GW::UI::IsLoadingScreenShown()) 
+            return;
+        OnMapLoaded();
+        was_loading = false;
+    }
+    if (fetch_missing_quest_info_queued) {
+        // NB: We only do this once the loading splash screen is gone
+        fetch_missing_quest_info_queued = 0;
+        GW::GameThread::Enqueue([] {
+            const auto current_map = GW::Map::GetMapInfo();
+            if (!current_map) return;
+            bool requested = false;
+            const auto quest_log = GW::QuestMgr::GetQuestLog();
+            player_chosen_quest_id = GW::QuestMgr::GetActiveQuestId();
+            if (!quest_log) return;
+            for (auto& quest : *quest_log) {
+                if (quest.map_to == GW::Constants::MapID::Count) continue;
+                if ((quest.log_state & 1)) continue;
+                const auto map = GW::Map::GetMapInfo(quest.map_to);
+                if (!(map && map->continent == current_map->continent)) continue;
+                GW::QuestMgr::RequestQuestInfo(&quest, true);
+                requested = true;
+            }
+            if (requested) {
+                // Block quest change sound that this will trigger.
+                BlockQuestSound();
+                fetching_all_quest_info = TIMER_INIT();
+            }
+        });
+    }
+
+
     const size_t size = calculated_quest_paths.size();
 check_paths:
     for (const auto& [quest_id, calculated_quest_path] : calculated_quest_paths) {
@@ -738,24 +822,8 @@ bool QuestModule::CanTerminate()
 
 void QuestModule::FetchMissingQuestInfo()
 {
-    if (TIMER_DIFF(last_fetched_missing_quest_info) < 250) return;
-    last_fetched_missing_quest_info = TIMER_INIT();
-    
-    GW::GameThread::Enqueue([] {
-        bool requested = false;
-        const auto quest_log = GW::QuestMgr::GetQuestLog();
-        if (!quest_log) return;
-        for (auto& quest : *quest_log) {
-            if ((quest.log_state & 1) == 0) {
-                GW::QuestMgr::RequestQuestInfo(&quest, true);
-                requested = true;
-            }
-        }
-        if (requested) {
-            // Block quest change sound that this will trigger.
-            AudioSettings::BlockSoundForMs(L"\xe14c\x0101", 500);
-        }
-    });
+    if (fetch_missing_quest_info_queued) return;
+    fetch_missing_quest_info_queued = TIMER_INIT();   
 }
 
 void QuestModule::Terminate()

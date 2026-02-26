@@ -62,6 +62,62 @@ public:
         Interrupted // "Interrupted" is received after "Stopped"
     };
 
+    // Death event tracking
+    struct DeathEvent {
+        uint32_t timestamp_ms;      // Match time when death occurred
+        float position_x;           // X coordinate of death
+        float position_y;           // Y coordinate of death
+        uint32_t killer_agent_id;   // Agent ID of killer (if known)
+        uint32_t killing_skill_id;  // Skill ID that caused death (NO_SKILL if unknown)
+        bool is_npc;                // Whether the deceased was an NPC
+        
+        DeathEvent(uint32_t ts, float x, float y, uint32_t killer, uint32_t skill, bool npc)
+            : timestamp_ms(ts), position_x(x), position_y(y), killer_agent_id(killer), killing_skill_id(skill), is_npc(npc) {}
+    };
+
+    // Morale boost event tracking
+    struct MoraleBoostEvent {
+        uint32_t timestamp_ms;      // Match time when morale boost occurred
+        
+        MoraleBoostEvent(uint32_t ts)
+            : timestamp_ms(ts) {}
+    };
+
+    // Capture event tracking (for shrines and towers)
+    struct CaptureEvent {
+        uint32_t timestamp_ms;      // Match time when captured
+        
+        CaptureEvent(uint32_t ts)
+            : timestamp_ms(ts) {}
+    };
+
+    // Resurrection event tracking
+    enum class ResurrectionType {
+        Unknown,        // Unknown source
+        Skill,          // Player cast resurrection skill
+        BaseResurrection // Automatic base resurrection (every 2 minutes)
+    };
+    
+    struct ResurrectionEvent {
+        uint32_t timestamp_ms;      // Match time when resurrected
+        uint32_t resurrector_agent_id; // Agent ID of who resurrected (NO_AGENT if unknown)
+        ResurrectionType resurrection_type; // Type of resurrection
+        
+        ResurrectionEvent(uint32_t ts, uint32_t resurrector, ResurrectionType type)
+            : timestamp_ms(ts), resurrector_agent_id(resurrector), resurrection_type(type) {}
+    };
+
+    // Health snapshot for graphing
+    struct HealthSnapshot {
+        uint32_t timestamp_ms;      // Match time of snapshot
+        float hp_percentage;        // HP as percentage (0.0 - 1.0)
+        uint32_t hp_value;          // Actual HP value
+        uint32_t max_hp;            // Max HP at time of snapshot
+        
+        HealthSnapshot(uint32_t ts, float hp_pct, uint32_t hp, uint32_t max)
+            : timestamp_ms(ts), hp_percentage(hp_pct), hp_value(hp), max_hp(max) {}
+    };
+
     // An action between a caster and target
     // Where an action can be a skill and/or attack
     struct TargetAction {
@@ -103,6 +159,9 @@ public:
         // inaccuracies in our modelling of the game engine
         int integrity = 0;
 
+        // damage tracking
+        uint32_t total_damage = 0;
+
         void Reduce(const TargetAction* action, ActionStage stage);
     };
 
@@ -127,6 +186,18 @@ public:
 
         size_t total_party_crits_received = 0;
         size_t total_party_crits_dealt = 0;
+
+        // damage tracking
+        uint32_t total_damage_dealt = 0;
+        uint32_t total_damage_received = 0;
+        uint32_t total_party_damage_dealt = 0;
+        uint32_t total_party_damage_received = 0;
+
+        // healing tracking
+        uint32_t total_healing_dealt = 0;
+        uint32_t total_healing_received = 0;
+        uint32_t total_party_healing_dealt = 0;
+        uint32_t total_party_healing_received = 0;
 
         size_t knocked_down_count = 0;
         size_t interrupted_count = 0;
@@ -223,6 +294,54 @@ public:
         std::unordered_map<uint32_t, std::unordered_map<GW::Constants::SkillID, ObservedSkill*>> skills_used_on_agents = {};
         std::unordered_map<uint32_t, std::vector<GW::Constants::SkillID>> skill_ids_used_on_agents = {};
         ObservedSkill& LazyGetSkillUsedOn(uint32_t target_agent_id, GW::Constants::SkillID skill_id);
+
+        // damage tracking
+
+        // map of agent_id -> damage dealt to that agent
+        std::unordered_map<uint32_t, uint32_t> damage_dealt_to_agents = {};
+        uint32_t& LazyGetDamageDealedAgainst(uint32_t target_agent_id);
+
+        // map of agent_id -> damage received from that agent
+        std::unordered_map<uint32_t, uint32_t> damage_received_from_agents = {};
+        uint32_t& LazyGetDamageReceivedFrom(uint32_t caster_agent_id);
+
+        // map of skill_id -> damage dealt by that skill
+        std::unordered_map<GW::Constants::SkillID, uint32_t> damage_by_skill = {};
+        uint32_t& LazyGetDamageBySkill(GW::Constants::SkillID skill_id);
+
+        // map of agent_id -> skill_id -> damage dealt by skill to agent
+        std::unordered_map<uint32_t, std::unordered_map<GW::Constants::SkillID, uint32_t>> damage_by_skill_to_agents = {};
+        std::unordered_map<uint32_t, std::vector<GW::Constants::SkillID>> skill_ids_damage_to_agents = {};
+        uint32_t& LazyGetDamageBySkillToAgent(uint32_t target_agent_id, GW::Constants::SkillID skill_id);
+
+        // map of agent_id -> skill_id -> damage received from skill from agent
+        std::unordered_map<uint32_t, std::unordered_map<GW::Constants::SkillID, uint32_t>> damage_from_skill_from_agents = {};
+        std::unordered_map<uint32_t, std::vector<GW::Constants::SkillID>> skill_ids_damage_from_agents = {};
+        uint32_t& LazyGetDamageFromSkillFromAgent(uint32_t caster_agent_id, GW::Constants::SkillID skill_id);
+
+        // healing tracking (same structure as damage)
+
+        // map of agent_id -> healing dealt to that agent
+        std::unordered_map<uint32_t, uint32_t> healing_dealt_to_agents = {};
+        uint32_t& LazyGetHealingDealedTo(uint32_t target_agent_id);
+
+        // map of agent_id -> healing received from that agent
+        std::unordered_map<uint32_t, uint32_t> healing_received_from_agents = {};
+        uint32_t& LazyGetHealingReceivedFrom(uint32_t caster_agent_id);
+
+        // map of skill_id -> healing dealt by that skill
+        std::unordered_map<GW::Constants::SkillID, uint32_t> healing_by_skill = {};
+        uint32_t& LazyGetHealingBySkill(GW::Constants::SkillID skill_id);
+
+        // map of agent_id -> skill_id -> healing dealt by skill to agent
+        std::unordered_map<uint32_t, std::unordered_map<GW::Constants::SkillID, uint32_t>> healing_by_skill_to_agents = {};
+        std::unordered_map<uint32_t, std::vector<GW::Constants::SkillID>> skill_ids_healing_to_agents = {};
+        uint32_t& LazyGetHealingBySkillToAgent(uint32_t target_agent_id, GW::Constants::SkillID skill_id);
+
+        // map of agent_id -> skill_id -> healing received from skill from agent
+        std::unordered_map<uint32_t, std::unordered_map<GW::Constants::SkillID, uint32_t>> healing_from_skill_from_agents = {};
+        std::unordered_map<uint32_t, std::vector<GW::Constants::SkillID>> skill_ids_healing_from_agents = {};
+        uint32_t& LazyGetHealingFromSkillFromAgent(uint32_t caster_agent_id, GW::Constants::SkillID skill_id);
     };
 
     // Stats for Parties
@@ -279,6 +398,15 @@ public:
         // account for degen / npc steals / such.
         // It's a for fun stat so don't take it too serious
         uint32_t last_hit_by = NO_AGENT;
+        
+        // Track the skill that last damaged this agent (for death tracking)
+        GW::Constants::SkillID last_damage_skill_id = NO_SKILL;
+
+        // Track if agent is currently dead
+        bool is_dead = false;
+        
+        // Track who last used a resurrection skill on this agent
+        uint32_t last_resurrector = NO_AGENT;
 
         // TODO: last_hit_at to limit the kill window
 
@@ -287,6 +415,12 @@ public:
 
         // stats:
         ObservableAgentStats stats;;
+
+        // Death event (if agent died)
+        std::vector<DeathEvent> death_events;
+        
+        // Resurrection events (if agent was resurrected)
+        std::vector<ResurrectionEvent> resurrection_events;
 
         // name fns with excessive caching & lazy loading
         std::string DisplayName();
@@ -373,7 +507,9 @@ public:
         std::string name = "";
         std::string display_name = "";
 
-        uint32_t morale_boosts = 0;
+        std::vector<MoraleBoostEvent> morale_boosts;
+        std::vector<CaptureEvent> shrine_captures;
+        std::vector<CaptureEvent> tower_captures;
         bool is_victorious = false;
         bool is_defeated = false;
 
@@ -386,6 +522,9 @@ public:
         // agent_ids representing the players
         std::vector<uint32_t> agent_ids = {};
 
+        // Aggregate party health snapshots (every 15 seconds)
+        std::vector<HealthSnapshot> health_snapshots = {};
+
         std::string DebugName() const
         {
             std::string _debug_name = "(" + std::to_string(party_id) + ") " + display_name;
@@ -396,8 +535,9 @@ public:
     // closely rlated to GW::AreaInfo
     class ObservableMap {
     public:
-        ObservableMap(const GW::AreaInfo& area_info);
+        ObservableMap(GW::Constants::MapID map_id, const GW::AreaInfo& area_info);
 
+        GW::Constants::MapID map_id;
         GW::Constants::Campaign campaign;
         GW::Continent continent;
         GW::Region region;
@@ -450,7 +590,7 @@ public:
     void SaveSettings(ToolboxIni* ini) override;
     void DrawSettingsInternal() override;
 
-    bool InitializeObserverSession();
+    bool InitializeObserverSession(GW::Constants::MapID map_id = static_cast<GW::Constants::MapID>(0));
     void Reset();
 
     ObservableGuild* GetObservableGuildById(uint32_t guild_id);
@@ -468,8 +608,28 @@ public:
     const std::unordered_map<uint32_t, ObservableParty*>& GetObservableParties() { return observable_parties; }
     const std::unordered_map<GW::Constants::SkillID, ObservableSkill*>& GetObservableSkills() { return observable_skills; }
 
+    // Get cached max HP for an agent (actively fetches and caches if not already cached)
+    uint32_t GetCachedMaxHP(uint32_t agent_id) {
+        return GetOrCacheMaxHP(agent_id);
+    }
+
+    // Get cached energy for an agent (returns 0 if not cached)
+    uint32_t GetCachedEnergy(uint32_t agent_id) const {
+        auto it = agent_cur_energy_cache.find(agent_id);
+        return (it != agent_cur_energy_cache.end()) ? it->second : 0;
+    }
+
+    // Get cached max energy for an agent (returns 0 if not cached)
+    uint32_t GetCachedMaxEnergy(uint32_t agent_id) const {
+        auto it = agent_max_energy_cache.find(agent_id);
+        return (it != agent_max_energy_cache.end()) ? it->second : 0;
+    }
+
     bool match_finished = false;
     uint32_t winning_party_id = NO_PARTY;
+    bool first_countdown_seen = false; // Track if we've seen the initial countdown at map load
+    uint32_t match_start_instance_time = 0; // Instance time when match actually started (countdown finished)
+    ObservableMap* match_start_map = nullptr; // Map when the match started (captured at second countdown)
     std::chrono::milliseconds match_duration_ms_total{};
     std::chrono::milliseconds match_duration_ms{};
     std::chrono::seconds match_duration_secs{};
@@ -483,6 +643,7 @@ private:
     ObservableParty* GetObservablePartyByPartyInfo(const GW::PartyInfo& party_info);
 
     clock_t party_sync_timer = 0;
+    clock_t health_snapshot_timer = 0;
 
     // agent name settings
     bool trim_hench_names = false;
@@ -494,6 +655,7 @@ private:
     bool observer_session_initialized = false;
     bool is_observer = false;
     bool is_explorable = false;
+    GW::Constants::MapID observed_map_id = static_cast<GW::Constants::MapID>(0); // Map ID from InstanceLoadInfo packet (actual match map in observer mode)
 
     // packet handlers
 
@@ -507,7 +669,11 @@ private:
     void HandleKnockedDown(uint32_t agent_id, float duration);
     void HandleAgentState(uint32_t agent_id, uint32_t state);
     void HandleDamageDone(uint32_t caster_id, uint32_t target_id, float amount_pc, bool is_crit);
+    void HandleHealingDone(uint32_t caster_id, uint32_t target_id, float amount_pc);
     void HandleAgentAdd(uint32_t agent_id);
+
+    // Helper function to get or cache max HP for an agent
+    uint32_t GetOrCacheMaxHP(uint32_t agent_id);
 
     void HandleAttackFinished(uint32_t agent_id);
     void HandleAttackStopped(uint32_t agent_id);
@@ -533,8 +699,23 @@ private:
     // return false means action was not assigned and may need freeing by the caller
     bool ReduceAction(ObservableAgent* caster, ActionStage stage, TargetAction* new_action = nullptr);
 
+    // Get hardcoded max HP for known NPCs (e.g., GvG NPCs) based on sanitized name
+    // Returns 0 if not a known NPC type
+    uint32_t GetNPCMaxHP(uint32_t agent_id);
+
+    // Cache for agent max HP (used for damage calculation in observer mode)
+    // Populated opportunistically whenever we observe an agent
+    std::unordered_map<uint32_t, uint32_t> agent_max_hp_cache = {};
+    
+    // Cache for agent current and max energy
+    // Populated opportunistically whenever we observe an agent
+    std::unordered_map<uint32_t, uint32_t> agent_cur_energy_cache = {};
+    std::unordered_map<uint32_t, uint32_t> agent_max_energy_cache = {};
+
     static uint32_t JumboMessageValueToPartyId(uint32_t value);
-    static void HandleMoraleBoost(ObservableParty* boosting_party);
+    void HandleMoraleBoost(ObservableParty* boosting_party);
+    void HandleShrineCapture(ObservableParty* capturing_party);
+    void HandleTowerCapture(ObservableParty* capturing_party);
     void HandleVictory(ObservableParty* winning_party);
 
     ObservableMap* map{};
@@ -560,6 +741,7 @@ private:
     // hooks
     GW::HookEntry JumboMessage_Entry;
     GW::HookEntry InstanceLoadInfo_Entry;
+    GW::HookEntry CountdownStart_Entry;
     GW::HookEntry AgentState_Entry;
     GW::HookEntry AgentAdd_Entry;
     GW::HookEntry AgentProjectileLaunched_Entry;

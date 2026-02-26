@@ -37,6 +37,8 @@ namespace ImGui {
 
     IMGUI_API void SetTooltip(std::function<void()> tooltip_callback);
 
+    IMGUI_API float GetIndent();
+
     // Shorthand for ImGui::GetIO().GlobalFontScale
     IMGUI_API const float& FontScale();
     // Initialise available width etc for adding spaced elements. Must be called before calling NextSpacedElement()

@@ -14,13 +14,16 @@
 
 #include <Modules/GameSettings.h>
 #include <Modules/ItemDescriptionHandler.h>
-#include <Modules/Resources.h>
 #include <Modules/PriceCheckerModule.h>
+#include <Modules/Resources.h>
+#include <Modules/InventoryManager.h>
 
+#include <Constants/EncStrings.h>
 #include <Timer.h>
 #include <Utils/GuiUtils.h>
-#include <Constants/EncStrings.h>
 #include <Utils/TextUtils.h>
+#include <Utils/ToolboxUtils.h>
+#include <GWCA/Managers/GameThreadMgr.h>
 
 using nlohmann::json;
 
@@ -30,11 +33,26 @@ namespace {
     const char* trader_quotes_url = "https://kamadan.gwtoolbox.com/trader_quotes";
 
     constexpr clock_t request_interval = CLOCKS_PER_SEC * 60 * 5;
-    clock_t last_request_time = request_interval * -1;
+    clock_t last_request_time = 0;
     std::unordered_map<std::string, uint32_t> prices_by_identifier;
 
-    bool ParsePriceJson(const std::string& prices_json_str) {
+    constexpr Color text_color_default = GW::Chat::TextColor::ColorItemDull;
+    Color text_color = text_color_default;
+    bool show_prices_in_item_description = true;
+    bool show_merchant_price_for_melandrus_accord_instead = true;
 
+    void SignalItemDescriptionUpdated()
+    {
+        // Now we've got the wiki info parsed, trigger an item update ui message; this will refresh the item tooltip
+        GW::GameThread::Enqueue([] {
+            const auto item = GW::Items::GetHoveredItem();
+            if (!item) return;
+            GW::UI::SendFrameUIMessage(GW::UI::GetChildFrame(GW::UI::GetRootFrame(), 0xffffffff), GW::UI::UIMessage::kItemUpdated, item);
+        });
+    }
+
+    bool ParsePriceJson(const std::string& prices_json_str)
+    {
         const json& prices_json = json::parse(prices_json_str, nullptr, false);
         if (prices_json == json::value_t::discarded) {
             return false;
@@ -50,451 +68,349 @@ namespace {
 
         for (auto it = buy.begin(); it != buy.end(); it++) {
             const auto& identifier = it.key();
-            if (!it->is_object())
-                continue;
+            if (!it->is_object()) continue;
             const auto& price_value = it->find("p");
-            if (!(price_value != it->end() && price_value->is_number_unsigned()))
-                continue;
+            if (!(price_value != it->end() && price_value->is_number_unsigned())) continue;
             prices_by_identifier[identifier] = price_value->get<uint32_t>();
         }
         return !prices_by_identifier.empty();
     }
-
-    std::unordered_map<uint32_t, const char*> mod_to_name =
-    {
-        {0x240801F9, "Knight's Insignia"},
-        {0x24080208, "Lieutenant's Insignia"},
-        {0x24080209, "Stonefist Insignia"},
-        {0x240801FA, "Dreadnought Insignia"},
-        {0x240801FB, "Sentinel's Insignia"},
-        {0x240800FC, "Rune of Minor Absorption"},
-        {0x21E81501, "Rune of Minor Tactics"},
-        {0x21E81101, "Rune of Minor Strength"},
-        {0x21E81201, "Rune of Minor Axe Mastery"},
-        {0x21E81301, "Rune of Minor Hammer Mastery"},
-        {0x21E81401, "Rune of Minor Swordsmanship"},
-        {0x240800FD, "Rune of Major Absorption"},
-        {0x21E81502, "Rune of Major Tactics"},
-        {0x21E81102, "Rune of Major Strength"},
-        {0x21E81202, "Rune of Major Axe Mastery"},
-        {0x21E81302, "Rune of Major Hammer Mastery"},
-        {0x21E81402, "Rune of Major Swordsmanship"},
-        {0x240800FE, "Rune of Superior Absorption"},
-        {0x21E81503, "Rune of Superior Tactics"},
-        {0x21E81103, "Rune of Superior Strength"},
-        {0x21E81203, "Rune of Superior Axe Mastery"},
-        {0x21E81303, "Rune of Superior Hammer Mastery"},
-        {0x21E81403, "Rune of Superior Swordsmanship"},
-        {0x240801FC, "Frostbound Insignia"},
-        {0x240801FE, "Pyrebound Insignia"},
-        {0x240801FF, "Stormbound Insignia"},
-        {0x24080201, "Scout's Insignia"},
-        {0x240801FD, "Earthbound Insignia"},
-        {0x24080200, "Beastmaster's Insignia"},
-        {0x21E81801, "Rune of Minor Wilderness Survival"},
-        {0x21E81701, "Rune of Minor Expertise"},
-        {0x21E81601, "Rune of Minor Beast Mastery"},
-        {0x21E81901, "Rune of Minor Marksmanship"},
-        {0x21E81802, "Rune of Major Wilderness Survival"},
-        {0x21E81702, "Rune of Major Expertise"},
-        {0x21E81602, "Rune of Major Beast Mastery"},
-        {0x21E81902, "Rune of Major Marksmanship"},
-        {0x21E81803, "Rune of Superior Wilderness Survival"},
-        {0x21E81703, "Rune of Superior Expertise"},
-        {0x21E81603, "Rune of Superior Beast Mastery"},
-        {0x21E81903, "Rune of Superior Marksmanship"},
-        {0x240801F6, "Wanderer's Insignia"},
-        {0x240801F7, "Disciple's Insignia"},
-        {0x240801F8, "Anchorite's Insignia"},
-        {0x21E80D01, "Rune of Minor Healing Prayers"},
-        {0x21E80E01, "Rune of Minor Smiting Prayers"},
-        {0x21E80F01, "Rune of Minor Protection Prayers"},
-        {0x21E81001, "Rune of Minor Divine Favor"},
-        {0x21E80D02, "Rune of Major Healing Prayers"},
-        {0x21E80E02, "Rune of Major Smiting Prayers"},
-        {0x21E80F02, "Rune of Major Protection Prayers"},
-        {0x21E81002, "Rune of Major Divine Favor"},
-        {0x21E80D03, "Rune of Superior Healing Prayers"},
-        {0x21E80E03, "Rune of Superior Smiting Prayers"},
-        {0x21E80F03, "Rune of Superior Protection Prayers"},
-        {0x21E81003, "Rune of Superior Divine Favor"},
-        {0x2408020A, "Bloodstained Insignia"},
-        {0x240801EC, "Tormentor's Insignia"},
-        {0x240801EE, "Bonelace Insignia"},
-        {0x240801EF, "Minion Master's Insignia"},
-        {0x240801F0, "Blighter's Insignia"},
-        {0x240801ED, "Undertaker's Insignia"},
-        {0x21E80401, "Rune of Minor Blood Magic"},
-        {0x21E80501, "Rune of Minor Death Magic"},
-        {0x21E80701, "Rune of Minor Curses"},
-        {0x21E80601, "Rune of Minor Soul Reaping"},
-        {0x21E80402, "Rune of Major Blood Magic"},
-        {0x21E80502, "Rune of Major Death Magic"},
-        {0x21E80702, "Rune of Major Curses"},
-        {0x21E80602, "Rune of Major Soul Reaping"},
-        {0x21E80403, "Rune of Superior Blood Magic"},
-        {0x21E80503, "Rune of Superior Death Magic"},
-        {0x21E80703, "Rune of Superior Curses"},
-        {0x21E80603, "Rune of Superior Soul Reaping"},
-        {0x240801E4, "Virtuoso's Insignia"},
-        {0x240801E2, "Artificer's Insignia"},
-        {0x240801E3, "Prodigy's Insignia"},
-        {0x21E80001, "Rune of Minor Fast Casting"},
-        {0x21E80201, "Rune of Minor Domination Magic"},
-        {0x21E80101, "Rune of Minor Illusion Magic"},
-        {0x21E80301, "Rune of Minor Inspiration Magic"},
-        {0x21E80002, "Rune of Major Fast Casting"},
-        {0x21E80202, "Rune of Major Domination Magic"},
-        {0x21E80102, "Rune of Major Illusion Magic"},
-        {0x21E80302, "Rune of Major Inspiration Magic"},
-        {0x21E80003, "Rune of Superior Fast Casting"},
-        {0x21E80203, "Rune of Superior Domination Magic"},
-        {0x21E80103, "Rune of Superior Illusion Magic"},
-        {0x21E80303, "Rune of Superior Inspiration Magic"},
-        {0x240801F2, "Hydromancer Insignia"},
-        {0x240801F3, "Geomancer Insignia"},
-        {0x240801F4, "Pyromancer Insignia"},
-        {0x240801F5, "Aeromancer Insignia"},
-        {0x240801F1, "Prismatic Insignia"},
-        {0x21E80C01, "Rune of Minor Energy Storage"},
-        {0x21E80A01, "Rune of Minor Fire Magic"},
-        {0x21E80801, "Rune of Minor Air Magic"},
-        {0x21E80901, "Rune of Minor Earth Magic"},
-        {0x21E80B01, "Rune of Minor Water Magic"},
-        {0x21E80C02, "Rune of Major Energy Storage"},
-        {0x21E80A02, "Rune of Major Fire Magic"},
-        {0x21E80802, "Rune of Major Air Magic"},
-        {0x21E80902, "Rune of Major Earth Magic"},
-        {0x21E80B02, "Rune of Major Water Magic"},
-        {0x21E80C03, "Rune of Superior Energy Storage"},
-        {0x21E80A03, "Rune of Superior Fire Magic"},
-        {0x21E80803, "Rune of Superior Air Magic"},
-        {0x21E80903, "Rune of Superior Earth Magic"},
-        {0x21E80B03, "Rune of Superior Water Magic"},
-        {0x240801DE, "Vanguard's Insignia"},
-        {0x240801DF, "Infiltrator's Insignia"},
-        {0x240801E0, "Saboteur's Insignia"},
-        {0x240801E1, "Nightstalker's Insignia"},
-        {0x21E82301, "Rune of Minor Critical Strikes"},
-        {0x21E81D01, "Rune of Minor Dagger Mastery"},
-        {0x21E81E01, "Rune of Minor Deadly Arts"},
-        {0x21E81F01, "Rune of Minor Shadow Arts"},
-        {0x21E82302, "Rune of Major Critical Strikes"},
-        {0x21E81D02, "Rune of Major Dagger Mastery"},
-        {0x21E81E02, "Rune of Major Deadly Arts"},
-        {0x21E81F02, "Rune of Major Shadow Arts"},
-        {0x21E82303, "Rune of Superior Critical Strikes"},
-        {0x21E81D03, "Rune of Superior Dagger Mastery"},
-        {0x21E81E03, "Rune of Superior Deadly Arts"},
-        {0x21E81F03, "Rune of Superior Shadow Arts"},
-        {0x24080204, "Shaman's Insignia"},
-        {0x24080205, "Ghost Forge Insignia"},
-        {0x24080206, "Mystic's Insignia"},
-        {0x21E82201, "Rune of Minor Channeling Magic"},
-        {0x21E82101, "Rune of Minor Restoration Magic"},
-        {0x21E82001, "Rune of Minor Communing"},
-        {0x21E82401, "Rune of Minor Spawning Power"},
-        {0x21E82202, "Rune of Major Channeling Magic"},
-        {0x21E82102, "Rune of Major Restoration Magic"},
-        {0x21E82002, "Rune of Major Communing"},
-        {0x21E82402, "Rune of Major Spawning Power"},
-        {0x21E82203, "Rune of Superior Channeling Magic"},
-        {0x21E82103, "Rune of Superior Restoration Magic"},
-        {0x21E82003, "Rune of Superior Communing"},
-        {0x21E82403, "Rune of Superior Spawning Power"},
-        {0x24080202, "Windwalker Insignia"},
-        {0x24080203, "Forsaken Insignia"},
-        {0x21E82C01, "Rune of Minor Mysticism"},
-        {0x21E82B01, "Rune of Minor Earth Prayers"},
-        {0x21E82901, "Rune of Minor Scythe Mastery"},
-        {0x21E82A01, "Rune of Minor Wind Prayers"},
-        {0x21E82C02, "Rune of Major Mysticism"},
-        {0x21E82B02, "Rune of Major Earth Prayers"},
-        {0x21E82902, "Rune of Major Scythe Mastery"},
-        {0x21E82A02, "Rune of Major Wind Prayers"},
-        {0x21E82C03, "Rune of Superior Mysticism"},
-        {0x21E82B03, "Rune of Superior Earth Prayers"},
-        {0x21E82903, "Rune of Superior Scythe Mastery"},
-        {0x21E82A03, "Rune of Superior Wind Prayers"},
-        {0x24080207, "Centurion's Insignia"},
-        {0x21E82801, "Rune of Minor Leadership"},
-        {0x21E82701, "Rune of Minor Motivation"},
-        {0x21E82601, "Rune of Minor Command"},
-        {0x21E82501, "Rune of Minor Spear Mastery"},
-        {0x21E82802, "Rune of Major Leadership"},
-        {0x21E82702, "Rune of Major Motivation"},
-        {0x21E82602, "Rune of Major Command"},
-        {0x21E82502, "Rune of Major Spear Mastery"},
-        {0x21E82803, "Rune of Superior Leadership"},
-        {0x21E82703, "Rune of Superior Motivation"},
-        {0x21E82603, "Rune of Superior Command"},
-        {0x21E82503, "Rune of Superior Spear Mastery"},
-        {0x240801E6, "Survivor Insignia"},
-        {0x240801E5, "Radiant Insignia"},
-        {0x240801E7, "Stalwart Insignia"},
-        {0x240801E8, "Brawler's Insignia"},
-        {0x240801E9, "Blessed Insignia"},
-        {0x240801EA, "Herald's Insignia"},
-        {0x240801EB, "Sentry's Insignia"},
-        {0x24080211, "Rune of Attunement"},
-        {0x24080213, "Rune of Recovery"},
-        {0x24080214, "Rune of Restoration"},
-        {0x24080215, "Rune of Clarity"},
-        {0x24080216, "Rune of Purity"},
-        {0x240800FF, "Rune of Minor Vigor"},
-        {0x240800C2, "Rune of Minor Vigor"}, //Idk why but it appears like this sometimes
-        {0x24080101, "Rune of Superior Vigor"},
-        {0x24080100, "Rune of Major Vigor"},
-        {0x24080212, "Rune of Vitae"}
-    };
-    std::unordered_map<uint32_t, const char*> mod_to_id =
-    {
-        {0x240801F9, "19152-25B80000240801F9A53003F2A7F80300"},                 // Knight's Insignia
-        {0x24080208, "19153-25B80000240802082530041027E802B6A5300410A0FBEC00"}, // Lieutenant's Insignia
-        {0x24080209, "19154-25B80000240802092530041227E802B7"},                 // Stonefist Insignia
-        {0x240801FA, "19155-25B80000240801FAA53003F4A128000A"},                 // Dreadnought Insignia
-        {0x240801FB, "19156-25B80000240801FB807003F68010110DA53003F6A1280014"}, // Sentinel's Insignia
-        {0x240800FC, "903-25B80000240800FC253001F927E802EA"},                   // Rune of Minor Absorption
-        {0x21E81501, "903-25B80000240800B32530016721E81501"},                   // Rune of Minor Tactics
-        {0x21E81101, "903-25B80000240800B32530016721E81101"},                   // Rune of Minor Strength
-        {0x21E81201, "903-25B80000240800B32530016721E81201"},                   // Rune of Minor Axe Mastery
-        {0x21E81301, "903-25B80000240800B32530016721E81301"},                   // Rune of Minor Hammer Mastery
-        {0x21E81401, "903-25B80000240800B32530016721E81401"},                   // Rune of Minor Swordsmanship
-        {0x240800FD, "5558-25B80000240800FD253001FB27E902EA"},                  // Rune of Major Absorption
-        {0x21E81502, "5558-25B80000240800B92530017321E815022530017320D80023"},  // Rune of Major Tactics
-        {0x21E81102, "5558-25B80000240800B92530017321E811022530017320D80023"},  // Rune of Major Strength
-        {0x21E81202, "5558-25B80000240800B92530017321E812022530017320D80023"},  // Rune of Major Axe Mastery
-        {0x21E81302, "5558-25B80000240800B92530017321E813022530017320D80023"},  // Rune of Major Hammer Mastery
-        {0x21E81402, "5558-25B80000240800B92530017321E814022530017320D80023"},  // Rune of Major Swordsmanship
-        {0x240800FE, "5559-25B80000240800FE253001FD27EA02EA"},                  // Rune of Superior Absorption
-        {0x21E81503, "5559-25B80000240800BF2530017F21E815032530017F20D8004B"},  // Rune of Superior Tactics
-        {0x21E81103, "5559-25B80000240800BF2530017F21E811032530017F20D8004B"},  // Rune of Superior Strength
-        {0x21E81203, "5559-25B80000240800BF2530017F21E812032530017F20D8004B"},  // Rune of Superior Axe Mastery
-        {0x21E81303, "5559-25B80000240800BF2530017F21E813032530017F20D8004B"},  // Rune of Superior Hammer Mastery
-        {0x21E81403, "5559-25B80000240800BF2530017F21E814032530017F20D8004B"},  // Rune of Superior Swordsmanship
-        {0x240801FC, "19157-25B80000240801FCA53003F8A118030F"},                 // Frostbound Insignia
-        {0x240801FE, "19159-25B80000240801FEA53003FCA118050F"},                 // Pyrebound Insignia
-        {0x240801FF, "19160-25B80000240801FFA53003FEA118040F"},                 // Stormbound Insignia
-        {0x24080201, "19162-25B80000240802018070040280D00000A5300402A0F80A00"}, // Scout's Insignia
-        {0x240801FD, "19158-25B80000240801FDA53003FAA1180B0F"},                 // Earthbound Insignia
-        {0x24080200, "19161-25B80000240802008070040081200000A5300400A0F80A00"}, // Beastmaster's Insignia
-        {0x21E81801, "904-25B80000240800B42530016921E81801"},                   // Rune of Minor Wilderness Survival
-        {0x21E81701, "904-25B80000240800B42530016921E81701"},                   // Rune of Minor Expertise
-        {0x21E81601, "904-25B80000240800B42530016921E81601"},                   // Rune of Minor Beast Mastery
-        {0x21E81901, "904-25B80000240800B42530016921E81901"},                   // Rune of Minor Marksmanship
-        {0x21E81802, "5560-25B80000240800BA2530017521E818022530017520D80023"},  // Rune of Major Wilderness Survival
-        {0x21E81702, "5560-25B80000240800BA2530017521E817022530017520D80023"},  // Rune of Major Expertise
-        {0x21E81602, "5560-25B80000240800BA2530017521E816022530017520D80023"},  // Rune of Major Beast Mastery
-        {0x21E81902, "5560-25B80000240800BA2530017521E819022530017520D80023"},  // Rune of Major Marksmanship
-        {0x21E81803, "5561-25B80000240800C02530018121E818032530018120D8004B"},  // Rune of Superior Wilderness Survival
-        {0x21E81703, "5561-25B80000240800C02530018121E817032530018120D8004B"},  // Rune of Superior Expertise
-        {0x21E81603, "5561-25B80000240800C02530018121E816032530018120D8004B"},  // Rune of Superior Beast Mastery
-        {0x21E81903, "5561-25B80000240800C02530018121E819032530018120D8004B"},  // Rune of Superior Marksmanship
-        {0x240801F6, "19149-25B80000240801F6A53003ECA128000A"},                 // Wanderer's Insignia
-        {0x240801F7, "19150-25B80000240801F7807003EE80B00800A53003EEA0F80F00"}, // Disciple's Insignia
-        {0x240801F8, "19151-25B80000240801F8A53003F0A7280500"},                 // Anchorite's Insignia
-        {0x21E80D01, "902-25B80000240800B22530016521E80D01"},                   // Rune of Minor Healing Prayers
-        {0x21E80E01, "902-25B80000240800B22530016521E80E01"},                   // Rune of Minor Smiting Prayers
-        {0x21E80F01, "902-25B80000240800B22530016521E80F01"},                   // Rune of Minor Protection Prayers
-        {0x21E81001, "902-25B80000240800B22530016521E81001"},                   // Rune of Minor Divine Favor
-        {0x21E80D02, "5556-25B80000240800B82530017121E80D022530017120D80023"},  // Rune of Major Healing Prayers
-        {0x21E80E02, "5556-25B80000240800B82530017121E80E022530017120D80023"},  // Rune of Major Smiting Prayers
-        {0x21E80F02, "5556-25B80000240800B82530017121E80F022530017120D80023"},  // Rune of Major Protection Prayers
-        {0x21E81002, "5556-25B80000240800B82530017121E810022530017120D80023"},  // Rune of Major Divine Favor
-        {0x21E80D03, "5557-25B80000240800BE2530017D21E80D032530017D20D8004B"},  // Rune of Superior Healing Prayers
-        {0x21E80E03, "5557-25B80000240800BE2530017D21E80E032530017D20D8004B"},  // Rune of Superior Smiting Prayers
-        {0x21E80F03, "5557-25B80000240800BE2530017D21E80F032530017D20D8004B"},  // Rune of Superior Protection Prayers
-        {0x21E81003, "5557-25B80000240800BE2530017D21E810032530017D20D8004B"},  // Rune of Superior Divine Favor
-        {0x2408020A, "19138-25B800002408020A2530041427E802A9"},                 // Bloodstained Insignia
-        {0x240801EC, "19139-25B80000240801EC253003D828680208A53003D8A0F80A00"}, // Tormentor's Insignia
-        {0x240801EE, "19141-25B80000240801EEA53003DCA118010F"},                 // Bonelace Insignia
-        {0x240801EF, "19142-25B80000240801EFA53003DEA6E80500"},                 // Minion Master's Insignia
-        {0x240801F0, "19143-25B80000240801F0807003E080B00400A53003E0A0F81400"}, // Blighter's Insignia
-        {0x240801ED, "19140-25B80000240801EDA53003DAA7380500"},                 // Undertaker's Insignia
-        {0x21E80401, "900-25B80000240800B02530016121E80401"},                   // Rune of Minor Blood Magic
-        {0x21E80501, "900-25B80000240800B02530016121E80501"},                   // Rune of Minor Death Magic
-        {0x21E80701, "900-25B80000240800B02530016121E80701"},                   // Rune of Minor Curses
-        {0x21E80601, "900-25B80000240800B02530016121E80601"},                   // Rune of Minor Soul Reaping
-        {0x21E80402, "5552-25B80000240800B62530016D21E804022530016D20D80023"},  // Rune of Major Blood Magic
-        {0x21E80502, "5552-25B80000240800B62530016D21E805022530016D20D80023"},  // Rune of Major Death Magic
-        {0x21E80702, "5552-25B80000240800B62530016D21E807022530016D20D80023"},  // Rune of Major Curses
-        {0x21E80602, "5552-25B80000240800B62530016D21E806022530016D20D80023"},  // Rune of Major Soul Reaping
-        {0x21E80403, "5553-25B80000240800BC2530017921E804032530017920D8004B"},  // Rune of Superior Blood Magic
-        {0x21E80503, "5553-25B80000240800BC2530017921E805032530017920D8004B"},  // Rune of Superior Death Magic
-        {0x21E80703, "5553-25B80000240800BC2530017921E807032530017920D8004B"},  // Rune of Superior Curses
-        {0x21E80603, "5553-25B80000240800BC2530017921E806032530017920D8004B"},  // Rune of Superior Soul Reaping
-        {0x240801E4, "19130-25B80000240801E4807003C880A00000A53003C8A0F80F00"}, // Virtuoso's Insignia
-        {0x240801E2, "19128-25B80000240801E2A53003C4A7480300"},                 // Artificer's Insignia
-        {0x240801E3, "19129-25B80000240801E3A53003C6A7280500"},                 // Prodigy's Insignia
-        {0x21E80001, "899-25B80000240800AF2530015F21E80001"},                   // Rune of Minor Fast Casting
-        {0x21E80201, "899-25B80000240800AF2530015F21E80201"},                   // Rune of Minor Domination Magic
-        {0x21E80101, "899-25B80000240800AF2530015F21E80101"},                   // Rune of Minor Illusion Magic
-        {0x21E80301, "899-25B80000240800AF2530015F21E80301"},                   // Rune of Minor Inspiration Magic
-        {0x21E80002, "3612-25B80000240800B52530016B21E800022530016B20D80023"},  // Rune of Major Fast Casting
-        {0x21E80202, "3612-25B80000240800B52530016B21E802022530016B20D80023"},  // Rune of Major Domination Magic
-        {0x21E80102, "3612-25B80000240800B52530016B21E801022530016B20D80023"},  // Rune of Major Illusion Magic
-        {0x21E80302, "3612-25B80000240800B52530016B21E803022530016B20D80023"},  // Rune of Major Inspiration Magic
-        {0x21E80003, "5549-25B80000240800BB2530017721E800032530017720D8004B"},  // Rune of Superior Fast Casting
-        {0x21E80203, "5549-25B80000240800BB2530017721E802032530017720D8004B"},  // Rune of Superior Domination Magic
-        {0x21E80103, "5549-25B80000240800BB2530017721E801032530017720D8004B"},  // Rune of Superior Illusion Magic
-        {0x21E80303, "5549-25B80000240800BB2530017721E803032530017720D8004B"},  // Rune of Superior Inspiration Magic
-        {0x240801F2, "19145-25B80000240801F2A53003E4A128000AA53003E4A118030A"}, // Hydromancer Insignia
-        {0x240801F3, "19146-25B80000240801F3A53003E6A128000AA53003E6A1180B0A"}, // Geomancer Insignia
-        {0x240801F4, "19147-25B80000240801F4A53003E8A128000AA53003E8A118050A"}, // Pyromancer Insignia
-        {0x240801F5, "19148-25B80000240801F5A53003EAA128000AA53003EAA118040A"}, // Aeromancer Insignia
-        {0x240801F1, "19144-25B80000240801F1A53003E2A7080509"},                 // Prismatic Insignia
-        {0x21E80C01, "901-25B80000240800B12530016321E80C01"},                   // Rune of Minor Energy Storage
-        {0x21E80A01, "901-25B80000240800B12530016321E80A01"},                   // Rune of Minor Fire Magic
-        {0x21E80801, "901-25B80000240800B12530016321E80801"},                   // Rune of Minor Air Magic
-        {0x21E80901, "901-25B80000240800B12530016321E80901"},                   // Rune of Minor Earth Magic
-        {0x21E80B01, "901-25B80000240800B12530016321E80B01"},                   // Rune of Minor Water Magic
-        {0x21E80C02, "5554-25B80000240800B72530016F21E80C022530016F20D80023"},  // Rune of Major Energy Storage
-        {0x21E80A02, "5554-25B80000240800B72530016F21E80A022530016F20D80023"},  // Rune of Major Fire Magic
-        {0x21E80802, "5554-25B80000240800B72530016F21E808022530016F20D80023"},  // Rune of Major Air Magic
-        {0x21E80902, "5554-25B80000240800B72530016F21E809022530016F20D80023"},  // Rune of Major Earth Magic
-        {0x21E80B02, "5554-25B80000240800B72530016F21E80B022530016F20D80023"},  // Rune of Major Water Magic
-        {0x21E80C03, "5555-25B80000240800BD2530017B21E80C032530017B20D8004B"},  // Rune of Superior Energy Storage
-        {0x21E80A03, "5555-25B80000240800BD2530017B21E80A032530017B20D8004B"},  // Rune of Superior Fire Magic
-        {0x21E80803, "5555-25B80000240800BD2530017B21E808032530017B20D8004B"},  // Rune of Superior Air Magic
-        {0x21E80903, "5555-25B80000240800BD2530017B21E809032530017B20D8004B"},  // Rune of Superior Earth Magic
-        {0x21E80B03, "5555-25B80000240800BD2530017B21E80B032530017B20D8004B"},  // Rune of Superior Water Magic
-        {0x240801DE, "19124-25B80000240801DEA53003BCA158000AA53003BCA118000A"}, // Vanguard's Insignia
-        {0x240801DF, "19125-25B80000240801DFA53003BEA158000AA53003BEA118010A"}, // Infiltrator's Insignia
-        {0x240801E0, "19126-25B80000240801E0A53003C0A158000AA53003C0A118020A"}, // Saboteur's Insignia
-        {0x240801E1, "19127-25B80000240801E1807003C280900000A53003C2A0F80F00"}, // Nightstalker's Insignia
-        {0x21E82301, "6324-25B800002408013B2530027721E82301"},                  // Rune of Minor Critical Strikes
-        {0x21E81D01, "6324-25B800002408013B2530027721E81D01"},                  // Rune of Minor Dagger Mastery
-        {0x21E81E01, "6324-25B800002408013B2530027721E81E01"},                  // Rune of Minor Deadly Arts
-        {0x21E81F01, "6324-25B800002408013B2530027721E81F01"},                  // Rune of Minor Shadow Arts
-        {0x21E82302, "6325-25B800002408013C2530027921E823022530027920D80023"},  // Rune of Major Critical Strikes
-        {0x21E81D02, "6325-25B800002408013C2530027921E81D022530027920D80023"},  // Rune of Major Dagger Mastery
-        {0x21E81E02, "6325-25B800002408013C2530027921E81E022530027920D80023"},  // Rune of Major Deadly Arts
-        {0x21E81F02, "6325-25B800002408013C2530027921E81F022530027920D80023"},  // Rune of Major Shadow Arts
-        {0x21E82303, "6326-25B800002408013D2530027B21E823032530027B20D8004B"},  // Rune of Superior Critical Strikes
-        {0x21E81D03, "6326-25B800002408013D2530027B21E81D032530027B20D8004B"},  // Rune of Superior Dagger Mastery
-        {0x21E81E03, "6326-25B800002408013D2530027B21E81E032530027B20D8004B"},  // Rune of Superior Deadly Arts
-        {0x21E81F03, "6326-25B800002408013D2530027B21E81F032530027B20D8004B"},  // Rune of Superior Shadow Arts
-        {0x24080204, "19165-25B8000024080204A5300408A6F80500"},                 // Shaman's Insignia
-        {0x24080205, "19166-25B80000240802058070040A80B01900A530040AA0F80F00"}, // Ghost Forge Insignia
-        {0x24080206, "19167-25B80000240802068070040C80A00000A530040CA0F80F00"}, // Mystic's Insignia
-        {0x21E82201, "6327-25B800002408013E2530027D21E82201"},                  // Rune of Minor Channeling Magic
-        {0x21E82101, "6327-25B800002408013E2530027D21E82101"},                  // Rune of Minor Restoration Magic
-        {0x21E82001, "6327-25B800002408013E2530027D21E82001"},                  // Rune of Minor Communing
-        {0x21E82401, "6327-25B800002408013E2530027D21E82401"},                  // Rune of Minor Spawning Power
-        {0x21E82202, "6328-25B800002408013F2530027F21E822022530027F20D80023"},  // Rune of Major Channeling Magic
-        {0x21E82102, "6328-25B800002408013F2530027F21E821022530027F20D80023"},  // Rune of Major Restoration Magic
-        {0x21E82002, "6328-25B800002408013F2530027F21E820022530027F20D80023"},  // Rune of Major Communing
-        {0x21E82402, "6328-25B800002408013F2530027F21E824022530027F20D80023"},  // Rune of Major Spawning Power
-        {0x21E82203, "6329-25B80000240801402530028121E822032530028120D8004B"},  // Rune of Superior Channeling Magic
-        {0x21E82103, "6329-25B80000240801402530028121E821032530028120D8004B"},  // Rune of Superior Restoration Magic
-        {0x21E82003, "6329-25B80000240801402530028121E820032530028120D8004B"},  // Rune of Superior Communing
-        {0x21E82403, "6329-25B80000240801402530028121E824032530028120D8004B"},  // Rune of Superior Spawning Power
-        {0x24080202, "19163-25B8000024080202A5300404A7180506"},                 // Windwalker Insignia
-        {0x24080203, "19164-25B80000240802038070040681400600A5300406A0F80A00"}, // Forsaken Insignia
-        {0x21E82C01, "15545-25B80000240801822530030521E82C01"},                 // Rune of Minor Mysticism
-        {0x21E82B01, "15545-25B80000240801822530030521E82B01"},                 // Rune of Minor Earth Prayers
-        {0x21E82901, "15545-25B80000240801822530030521E82901"},                 // Rune of Minor Scythe Mastery
-        {0x21E82A01, "15545-25B80000240801822530030521E82A01"},                 // Rune of Minor Wind Prayers
-        {0x21E82C02, "15546-25B80000240801832530030721E82C022530030720D80023"}, // Rune of Major Mysticism
-        {0x21E82B02, "15546-25B80000240801832530030721E82B022530030720D80023"}, // Rune of Major Earth Prayers
-        {0x21E82902, "15546-25B80000240801832530030721E829022530030720D80023"}, // Rune of Major Scythe Mastery
-        {0x21E82A02, "15546-25B80000240801832530030721E82A022530030720D80023"}, // Rune of Major Wind Prayers
-        {0x21E82C03, "15547-25B80000240801842530030921E82C032530030920D8004B"}, // Rune of Superior Mysticism
-        {0x21E82B03, "15547-25B80000240801842530030921E82B032530030920D8004B"}, // Rune of Superior Earth Prayers
-        {0x21E82903, "15547-25B80000240801842530030921E829032530030920D8004B"}, // Rune of Superior Scythe Mastery
-        {0x21E82A03, "15547-25B80000240801842530030921E82A032530030920D8004B"}, // Rune of Superior Wind Prayers
-        {0x24080207, "19168-25B80000240802078070040E81300000A530040EA0F80A00"}, // Centurion's Insignia
-        {0x21E82801, "15548-25B80000240801852530030B21E82801"},                 // Rune of Minor Leadership
-        {0x21E82701, "15548-25B80000240801852530030B21E82701"},                 // Rune of Minor Motivation
-        {0x21E82601, "15548-25B80000240801852530030B21E82601"},                 // Rune of Minor Command
-        {0x21E82501, "15548-25B80000240801852530030B21E82501"},                 // Rune of Minor Spear Mastery
-        {0x21E82802, "15549-25B80000240801862530030D21E828022530030D20D80023"}, // Rune of Major Leadership
-        {0x21E82702, "15549-25B80000240801862530030D21E827022530030D20D80023"}, // Rune of Major Motivation
-        {0x21E82602, "15549-25B80000240801862530030D21E826022530030D20D80023"}, // Rune of Major Command
-        {0x21E82502, "15549-25B80000240801862530030D21E825022530030D20D80023"}, // Rune of Major Spear Mastery
-        {0x21E82803, "15550-25B80000240801872530030F21E828032530030F20D8004B"}, // Rune of Superior Leadership
-        {0x21E82703, "15550-25B80000240801872530030F21E827032530030F20D8004B"}, // Rune of Superior Motivation
-        {0x21E82603, "15550-25B80000240801872530030F21E826032530030F20D8004B"}, // Rune of Superior Command
-        {0x21E82503, "15550-25B80000240801872530030F21E825032530030F20D8004B"}, // Rune of Superior Spear Mastery
-        {0x240801E6, "19132-25B80000240801E6253003CC26D80500"},                 // Survivor Insignia
-        {0x240801E5, "19131-25B80000240801E5253003CA26C80001"},                 // Radiant Insignia
-        {0x240801E7, "19133-25B80000240801E7A53003CEA158000A"},                 // Stalwart Insignia
-        {0x240801E8, "19134-25B80000240801E8807003D080900000A53003D0A0F80A00"}, // Brawler's Insignia
-        {0x240801E9, "19135-25B80000240801E9807003D280B00600A53003D2A0F80A00"}, // Blessed Insignia
-        {0x240801EA, "19136-25B80000240801EA807003D480C00000A53003D4A0F80A00"}, // Herald's Insignia
-        {0x240801EB, "19137-25B80000240801EB807003D681100000A53003D6A0F80A00"}, // Sentry's Insignia
-        {0x24080211, "898-25B80000240802112530042322D80002"},                   // Rune of Attunement
-        {0x24080213, "5550-25B80000240802132530042727780407"},                  // Rune of Recovery
-        {0x24080214, "5550-25B80000240802142530042927780300"},                  // Rune of Restoration
-        {0x24080215, "5550-25B80000240802152530042B27780801"},                  // Rune of Clarity
-        {0x24080216, "5550-25B80000240802162530042D27780605"},                  // Rune of Purity
-        {0x240800FF, "898-25B80000240800FF253001FF27E802C2"},                   // Rune of Minor Vigor
-        {0x240800C2, "898-25B80000240800FF253001FF27E802C2"},                   // Rune of Minor Vigor
-        {0x24080101, "5551-25B80000240801012530020327EA02C2"},                  // Rune of Superior Vigor
-        {0x24080100, "5550-25B80000240801002530020127E902C2"},                  // Rune of Major Vigor
-        {0x24080212, "898-25B80000240802122530042523480A00"}                    // Rune of Vitae
+    struct PriceInfo {
+        const char* name;
+        const char* id;
     };
 
-    bool IsCommonMaterial(const GW::Item* item) {
-        if (item && item->GetModifier(0x2508))
-            return item->GetModifier(0x2508)->arg1() <= std::to_underlying(GW::Constants::MaterialSlot::Feather);
-        return false;
+    static const std::unordered_map<uint32_t, PriceInfo> price_info_by_unique_mod_struct = {
+        {0x25300423, {"Rune of Attunement", "08038225300423"}},
+        {0x25300425, {"Rune of Vitae", "08038225300425"}},
+        {0x27e802c2, {"Rune of Minor Vigor", "08038227e802c2"}},
+        {0x21e80001, {"Mesmer Rune of Minor Fast Casting", "08038321e80001"}},
+        {0x21e80101, {"Mesmer Rune of Minor Illusion Magic", "08038321e80101"}},
+        {0x21e80201, {"Mesmer Rune of Minor Domination Magic", "08038321e80201"}},
+        {0x21e80301, {"Mesmer Rune of Minor Inspiration Magic", "08038321e80301"}},
+        {0x21e80401, {"Necromancer Rune of Minor Blood Magic", "08038421e80401"}},
+        {0x21e80501, {"Necromancer Rune of Minor Death Magic", "08038421e80501"}},
+        {0x21e80601, {"Necromancer Rune of Minor Soul Reaping", "08038421e80601"}},
+        {0x21e80701, {"Necromancer Rune of Minor Curses", "08038421e80701"}},
+        {0x21e80801, {"Elementalist Rune of Minor Air Magic", "08038521e80801"}},
+        {0x21e80901, {"Elementalist Rune of Minor Earth Magic", "08038521e80901"}},
+        {0x21e80a01, {"Elementalist Rune of Minor Fire Magic", "08038521e80a01"}},
+        {0x21e80b01, {"Elementalist Rune of Minor Water Magic", "08038521e80b01"}},
+        {0x21e80c01, {"Elementalist Rune of Minor Energy Storage", "08038521e80c01"}},
+        {0x21e80d01, {"Monk Rune of Minor Healing Prayers", "08038621e80d01"}},
+        {0x21e80e01, {"Monk Rune of Minor Smiting Prayers", "08038621e80e01"}},
+        {0x21e80f01, {"Monk Rune of Minor Protection Prayers", "08038621e80f01"}},
+        {0x21e81001, {"Monk Rune of Minor Divine Favor", "08038621e81001"}},
+        {0x21e81101, {"Warrior Rune of Minor Strength", "08038721e81101"}},
+        {0x21e81201, {"Warrior Rune of Minor Axe Mastery", "08038721e81201"}},
+        {0x21e81301, {"Warrior Rune of Minor Hammer Mastery", "08038721e81301"}},
+        {0x21e81401, {"Warrior Rune of Minor Swordsmanship", "08038721e81401"}},
+        {0x21e81501, {"Warrior Rune of Minor Tactics", "08038721e81501"}},
+        {0x27e802ea, {"Warrior Rune of Minor Absorption", "08038727e802ea"}},
+        {0x21e81601, {"Ranger Rune of Minor Beast Mastery", "08038821e81601"}},
+        {0x21e81701, {"Ranger Rune of Minor Expertise", "08038821e81701"}},
+        {0x21e81801, {"Ranger Rune of Minor Wilderness Survival", "08038821e81801"}},
+        {0x21e81901, {"Ranger Rune of Minor Marksmanship", "08038821e81901"}},
+        {0x21e80002, {"Mesmer Rune of Major Fast Casting", "080e1c21e80002"}},
+        {0x21e80102, {"Mesmer Rune of Major Illusion Magic", "080e1c21e80102"}},
+        {0x21e80202, {"Mesmer Rune of Major Domination Magic", "080e1c21e80202"}},
+        {0x21e80302, {"Mesmer Rune of Major Inspiration Magic", "080e1c21e80302"}},
+        {0x21e80003, {"Mesmer Rune of Superior Fast Casting", "0815ad21e80003"}},
+        {0x21e80103, {"Mesmer Rune of Superior Illusion Magic", "0815ad21e80103"}},
+        {0x21e80203, {"Mesmer Rune of Superior Domination Magic", "0815ad21e80203"}},
+        {0x21e80303, {"Mesmer Rune of Superior Inspiration Magic", "0815ad21e80303"}},
+        {0x25300427, {"Rune of Recovery", "0815ae25300427"}},
+        {0x25300429, {"Rune of Restoration", "0815ae25300429"}},
+        {0x2530042b, {"Rune of Clarity", "0815ae2530042b"}},
+        {0x2530042d, {"Rune of Purity", "0815ae2530042d"}},
+        {0x27e902c2, {"Rune of Major Vigor", "0815ae27e902c2"}},
+        {0x27ea02c2, {"Rune of Superior Vigor", "0815af27ea02c2"}},
+        {0x21e80402, {"Necromancer Rune of Major Blood Magic", "0815b021e80402"}},
+        {0x21e80502, {"Necromancer Rune of Major Death Magic", "0815b021e80502"}},
+        {0x21e80602, {"Necromancer Rune of Major Soul Reaping", "0815b021e80602"}},
+        {0x21e80702, {"Necromancer Rune of Major Curses", "0815b021e80702"}},
+        {0x21e80403, {"Necromancer Rune of Superior Blood Magic", "0815b121e80403"}},
+        {0x21e80503, {"Necromancer Rune of Superior Death Magic", "0815b121e80503"}},
+        {0x21e80603, {"Necromancer Rune of Superior Soul Reaping", "0815b121e80603"}},
+        {0x21e80703, {"Necromancer Rune of Superior Curses", "0815b121e80703"}},
+        {0x21e80802, {"Elementalist Rune of Major Air Magic", "0815b221e80802"}},
+        {0x21e80902, {"Elementalist Rune of Major Earth Magic", "0815b221e80902"}},
+        {0x21e80a02, {"Elementalist Rune of Major Fire Magic", "0815b221e80a02"}},
+        {0x21e80b02, {"Elementalist Rune of Major Water Magic", "0815b221e80b02"}},
+        {0x21e80c02, {"Elementalist Rune of Major Energy Storage", "0815b221e80c02"}},
+        {0x21e80803, {"Elementalist Rune of Superior Air Magic", "0815b321e80803"}},
+        {0x21e80903, {"Elementalist Rune of Superior Earth Magic", "0815b321e80903"}},
+        {0x21e80a03, {"Elementalist Rune of Superior Fire Magic", "0815b321e80a03"}},
+        {0x21e80b03, {"Elementalist Rune of Superior Water Magic", "0815b321e80b03"}},
+        {0x21e80c03, {"Elementalist Rune of Superior Energy Storage", "0815b321e80c03"}},
+        {0x21e80d02, {"Monk Rune of Major Healing Prayers", "0815b421e80d02"}},
+        {0x21e80e02, {"Monk Rune of Major Smiting Prayers", "0815b421e80e02"}},
+        {0x21e80f02, {"Monk Rune of Major Protection Prayers", "0815b421e80f02"}},
+        {0x21e81002, {"Monk Rune of Major Divine Favor", "0815b421e81002"}},
+        {0x21e80d03, {"Monk Rune of Superior Healing Prayers", "0815b521e80d03"}},
+        {0x21e80e03, {"Monk Rune of Superior Smiting Prayers", "0815b521e80e03"}},
+        {0x21e80f03, {"Monk Rune of Superior Protection Prayers", "0815b521e80f03"}},
+        {0x21e81003, {"Monk Rune of Superior Divine Favor", "0815b521e81003"}},
+        {0x21e81102, {"Warrior Rune of Major Strength", "0815b621e81102"}},
+        {0x21e81202, {"Warrior Rune of Major Axe Mastery", "0815b621e81202"}},
+        {0x21e81302, {"Warrior Rune of Major Hammer Mastery", "0815b621e81302"}},
+        {0x21e81402, {"Warrior Rune of Major Swordsmanship", "0815b621e81402"}},
+        {0x21e81502, {"Warrior Rune of Major Tactics", "0815b621e81502"}},
+        {0x27e902ea, {"Warrior Rune of Major Absorption", "0815b627e902ea"}},
+        {0x21e81103, {"Warrior Rune of Superior Strength", "0815b721e81103"}},
+        {0x21e81203, {"Warrior Rune of Superior Axe Mastery", "0815b721e81203"}},
+        {0x21e81303, {"Warrior Rune of Superior Hammer Mastery", "0815b721e81303"}},
+        {0x21e81403, {"Warrior Rune of Superior Swordsmanship", "0815b721e81403"}},
+        {0x21e81503, {"Warrior Rune of Superior Tactics", "0815b721e81503"}},
+        {0x27ea02ea, {"Warrior Rune of Superior Absorption", "0815b727ea02ea"}},
+        {0x21e81602, {"Ranger Rune of Major Beast Mastery", "0815b821e81602"}},
+        {0x21e81702, {"Ranger Rune of Major Expertise", "0815b821e81702"}},
+        {0x21e81802, {"Ranger Rune of Major Wilderness Survival", "0815b821e81802"}},
+        {0x21e81902, {"Ranger Rune of Major Marksmanship", "0815b821e81902"}},
+        {0x21e81603, {"Ranger Rune of Superior Beast Mastery", "0815b921e81603"}},
+        {0x21e81703, {"Ranger Rune of Superior Expertise", "0815b921e81703"}},
+        {0x21e81803, {"Ranger Rune of Superior Wilderness Survival", "0815b921e81803"}},
+        {0x21e81903, {"Ranger Rune of Superior Marksmanship", "0815b921e81903"}},
+        {0x21e81d01, {"Assassin Rune of Minor Dagger Mastery", "0818b421e81d01"}},
+        {0x21e81e01, {"Assassin Rune of Minor Deadly Arts", "0818b421e81e01"}},
+        {0x21e81f01, {"Assassin Rune of Minor Shadow Arts", "0818b421e81f01"}},
+        {0x21e82301, {"Assassin Rune of Minor Critical Strikes", "0818b421e82301"}},
+        {0x21e81d02, {"Assassin Rune of Major Dagger Mastery", "0818b521e81d02"}},
+        {0x21e81e02, {"Assassin Rune of Major Deadly Arts", "0818b521e81e02"}},
+        {0x21e81f02, {"Assassin Rune of Major Shadow Arts", "0818b521e81f02"}},
+        {0x21e82302, {"Assassin Rune of Major Critical Strikes", "0818b521e82302"}},
+        {0x21e81d03, {"Assassin Rune of Superior Dagger Mastery", "0818b621e81d03"}},
+        {0x21e81e03, {"Assassin Rune of Superior Deadly Arts", "0818b621e81e03"}},
+        {0x21e81f03, {"Assassin Rune of Superior Shadow Arts", "0818b621e81f03"}},
+        {0x21e82303, {"Assassin Rune of Superior Critical Strikes", "0818b621e82303"}},
+        {0x21e82001, {"Ritualist Rune of Minor Communing", "0818b721e82001"}},
+        {0x21e82101, {"Ritualist Rune of Minor Restoration Magic", "0818b721e82101"}},
+        {0x21e82201, {"Ritualist Rune of Minor Channeling Magic", "0818b721e82201"}},
+        {0x21e82401, {"Ritualist Rune of Minor Spawning Power", "0818b721e82401"}},
+        {0x21e82002, {"Ritualist Rune of Major Communing", "0818b821e82002"}},
+        {0x21e82102, {"Ritualist Rune of Major Restoration Magic", "0818b821e82102"}},
+        {0x21e82202, {"Ritualist Rune of Major Channeling Magic", "0818b821e82202"}},
+        {0x21e82402, {"Ritualist Rune of Major Spawning Power", "0818b821e82402"}},
+        {0x21e82003, {"Ritualist Rune of Superior Communing", "0818b921e82003"}},
+        {0x21e82103, {"Ritualist Rune of Superior Restoration Magic", "0818b921e82103"}},
+        {0x21e82203, {"Ritualist Rune of Superior Channeling Magic", "0818b921e82203"}},
+        {0x21e82403, {"Ritualist Rune of Superior Spawning Power", "0818b921e82403"}},
+        {0x21e82901, {"Dervish Rune of Minor Scythe Mastery", "083cb921e82901"}},
+        {0x21e82a01, {"Dervish Rune of Minor Wind Prayers", "083cb921e82a01"}},
+        {0x21e82b01, {"Dervish Rune of Minor Earth Prayers", "083cb921e82b01"}},
+        {0x21e82c01, {"Dervish Rune of Minor Mysticism", "083cb921e82c01"}},
+        {0x21e82902, {"Dervish Rune of Major Scythe Mastery", "083cba21e82902"}},
+        {0x21e82a02, {"Dervish Rune of Major Wind Prayers", "083cba21e82a02"}},
+        {0x21e82b02, {"Dervish Rune of Major Earth Prayers", "083cba21e82b02"}},
+        {0x21e82c02, {"Dervish Rune of Major Mysticism", "083cba21e82c02"}},
+        {0x21e82903, {"Dervish Rune of Superior Scythe Mastery", "083cbb21e82903"}},
+        {0x21e82a03, {"Dervish Rune of Superior Wind Prayers", "083cbb21e82a03"}},
+        {0x21e82b03, {"Dervish Rune of Superior Earth Prayers", "083cbb21e82b03"}},
+        {0x21e82c03, {"Dervish Rune of Superior Mysticism", "083cbb21e82c03"}},
+        {0x21e82501, {"Paragon Rune of Minor Spear Mastery", "083cbc21e82501"}},
+        {0x21e82601, {"Paragon Rune of Minor Command", "083cbc21e82601"}},
+        {0x21e82701, {"Paragon Rune of Minor Motivation", "083cbc21e82701"}},
+        {0x21e82801, {"Paragon Rune of Minor Leadership", "083cbc21e82801"}},
+        {0x21e82502, {"Paragon Rune of Major Spear Mastery", "083cbd21e82502"}},
+        {0x21e82602, {"Paragon Rune of Major Command", "083cbd21e82602"}},
+        {0x21e82702, {"Paragon Rune of Major Motivation", "083cbd21e82702"}},
+        {0x21e82802, {"Paragon Rune of Major Leadership", "083cbd21e82802"}},
+        {0x21e82503, {"Paragon Rune of Superior Spear Mastery", "083cbe21e82503"}},
+        {0x21e82603, {"Paragon Rune of Superior Command", "083cbe21e82603"}},
+        {0x21e82703, {"Paragon Rune of Superior Motivation", "083cbe21e82703"}},
+        {0x21e82803, {"Paragon Rune of Superior Leadership", "083cbe21e82803"}},
+        {0xa53003bc, {"Vanguard's Insignia [Assassin]", "084ab4a53003bc"}},
+        {0xa53003be, {"Infiltrator's Insignia [Assassin]", "084ab5a53003be"}},
+        {0xa53003c0, {"Saboteur's Insignia [Assassin]", "084ab6a53003c0"}},
+        {0xa53003c2, {"Nightstalker's Insignia [Assassin]", "084ab7a53003c2"}},
+        {0xa53003c4, {"Artificer's Insignia [Mesmer]", "084ab8a53003c4"}},
+        {0xa53003c6, {"Prodigy's Insignia [Mesmer]", "084ab9a53003c6"}},
+        {0xa53003c8, {"Virtuoso's Insignia [Mesmer]", "084abaa53003c8"}},
+        {0x253003ca, {"Radiant Insignia", "084abb253003ca"}},
+        {0x253003cc, {"Survivor Insignia", "084abc253003cc"}},
+        {0xa53003ce, {"Stalwart Insignia", "084abda53003ce"}},
+        {0xa53003d0, {"Brawler's Insignia", "084abea53003d0"}},
+        {0xa53003d2, {"Blessed Insignia", "084abfa53003d2"}},
+        {0xa53003d4, {"Herald's Insignia", "084ac0a53003d4"}},
+        {0xa53003d6, {"Sentry's Insignia", "084ac1a53003d6"}},
+        {0x27e802a9, {"Bloodstained Insignia [Necromancer]", "084ac227e802a9"}},
+        {0x253003d8, {"Tormentor's Insignia [Necromancer]", "084ac3253003d8"}},
+        {0xa53003da, {"Undertaker's Insignia [Necromancer]", "084ac4a53003da"}},
+        {0xa53003dc, {"Bonelace Insignia [Necromancer]", "084ac5a53003dc"}},
+        {0xa53003de, {"Minion Master's Insignia [Necromancer]", "084ac6a53003de"}},
+        {0xa53003e0, {"Blighter's Insignia [Necromancer]", "084ac7a53003e0"}},
+        {0xa53003e2, {"Prismatic Insignia [Elementalist]", "084ac8a53003e2"}},
+        {0xa53003e4, {"Hydromancer Insignia [Elementalist]", "084ac9a53003e4"}},
+        {0xa53003e6, {"Geomancer Insignia [Elementalist]", "084acaa53003e6"}},
+        {0xa53003e8, {"Pyromancer Insignia [Elementalist]", "084acba53003e8"}},
+        {0xa53003ea, {"Aeromancer Insignia [Elementalist]", "084acca53003ea"}},
+        {0xa53003ec, {"Wanderer's Insignia [Monk]", "084acda53003ec"}},
+        {0xa53003ee, {"Disciple's Insignia [Monk]", "084acea53003ee"}},
+        {0xa53003f0, {"Anchorite's Insignia [Monk]", "084acfa53003f0"}},
+        {0xa53003f2, {"Knight's Insignia [Warrior]", "084ad0a53003f2"}},
+        {0x27e802b6, {"Lieutenant's Insignia [Warrior]", "084ad127e802b6"}},
+        {0x27e802b7, {"Stonefist Insignia [Warrior]", "084ad227e802b7"}},
+        {0xa53003f4, {"Dreadnought Insignia [Warrior]", "084ad3a53003f4"}},
+        {0xa53003f6, {"Sentinel's Insignia [Warrior]", "084ad4a53003f6"}},
+        {0xa53003f8, {"Frostbound Insignia [Ranger]", "084ad5a53003f8"}},
+        {0xa53003fa, {"Earthbound Insignia [Ranger]", "084ad6a53003fa"}},
+        {0xa53003fc, {"Pyrebound Insignia [Ranger]", "084ad7a53003fc"}},
+        {0xa53003fe, {"Stormbound Insignia [Ranger]", "084ad8a53003fe"}},
+        {0xa5300400, {"Beastmaster's Insignia [Ranger]", "084ad9a5300400"}},
+        {0xa5300402, {"Scout's Insignia [Ranger]", "084adaa5300402"}},
+        {0xa5300404, {"Windwalker Insignia [Dervish]", "084adba5300404"}},
+        {0xa5300406, {"Forsaken Insignia [Dervish]", "084adca5300406"}},
+        {0xa5300408, {"Shaman's Insignia [Ritualist]", "084adda5300408"}},
+        {0xa530040a, {"Ghost Forge Insignia [Ritualist]", "084adea530040a"}},
+        {0xa530040c, {"Mystic's Insignia [Ritualist]", "084adfa530040c"}},
+        {0xa530040e, {"Centurion's Insignia [Paragon]", "084ae0a530040e"}},
+        {0x24d00201, {"Vial of Dye [Blue]", "0a009224d00201"}},
+        {0x24d00301, {"Vial of Dye [Green]", "0a009224d00301"}},
+        {0x24d00401, {"Vial of Dye [Purple]", "0a009224d00401"}},
+        {0x24d00501, {"Vial of Dye [Red]", "0a009224d00501"}},
+        {0x24d00601, {"Vial of Dye [Yellow]", "0a009224d00601"}},
+        {0x24d00701, {"Vial of Dye [Brown]", "0a009224d00701"}},
+        {0x24d00801, {"Vial of Dye [Orange]", "0a009224d00801"}},
+        {0x24d00901, {"Vial of Dye [Silver]", "0a009224d00901"}},
+        {0x24d00a01, {"Vial of Dye [Black]", "0a009224d00a01"}},
+        {0x24d00c01, {"Vial of Dye [White]", "0a009224d00c01"}},
+        {0x24d00d01, {"Vial of Dye [Pink]", "0a009224d00d01"}},
+        {0x000b0399, {"Bone", "0b0399"}},
+        {0x000b039a, {"Lump of Charcoal", "0b039a"}},
+        {0x000b039b, {"Monstrous Claw", "0b039b"}},
+        {0x000b039d, {"Bolt of Cloth", "0b039d"}},
+        {0x000b039e, {"Bolt of Linen", "0b039e"}},
+        {0x000b039f, {"Bolt of Damask", "0b039f"}},
+        {0x000b03a0, {"Bolt of Silk", "0b03a0"}},
+        {0x000b03a1, {"Pile of Glittering Dust", "0b03a1"}},
+        {0x000b03a2, {"Glob of Ectoplasm", "0b03a2"}},
+        {0x000b03a3, {"Monstrous Eye", "0b03a3"}},
+        {0x000b03a4, {"Monstrous Fang", "0b03a4"}},
+        {0x000b03a5, {"Feather", "0b03a5"}},
+        {0x000b03a6, {"Plant Fiber", "0b03a6"}},
+        {0x000b03a7, {"Diamond", "0b03a7"}},
+        {0x000b03a8, {"Onyx Gemstone", "0b03a8"}},
+        {0x000b03a9, {"Ruby", "0b03a9"}},
+        {0x000b03aa, {"Sapphire", "0b03aa"}},
+        {0x000b03ab, {"Tempered Glass Vial", "0b03ab"}},
+        {0x000b03ac, {"Tanned Hide Square", "0b03ac"}},
+        {0x000b03ad, {"Fur Square", "0b03ad"}},
+        {0x000b03ae, {"Leather Square", "0b03ae"}},
+        {0x000b03af, {"Elonian Leather Square", "0b03af"}},
+        {0x000b03b0, {"Vial of Ink", "0b03b0"}},
+        {0x000b03b1, {"Obsidian Shard", "0b03b1"}},
+        {0x000b03b2, {"Wood Plank", "0b03b2"}},
+        {0x000b03b4, {"Iron Ingot", "0b03b4"}},
+        {0x000b03b5, {"Steel Ingot", "0b03b5"}},
+        {0x000b03b6, {"Deldrimor Steel Ingot", "0b03b6"}},
+        {0x000b03b7, {"Roll of Parchment", "0b03b7"}},
+        {0x000b03b8, {"Roll of Vellum", "0b03b8"}},
+        {0x000b03b9, {"Scale", "0b03b9"}},
+        {0x000b03ba, {"Chitin Fragment", "0b03ba"}},
+        {0x000b03bb, {"Granite Slab", "0b03bb"}},
+        {0x000b03bc, {"Spiritwood Plank", "0b03bc"}},
+        {0x000b1984, {"Amber Chunk", "0b1984"}},
+        {0x000b1985, {"Jadeite Shard", "0b1985"}},
+    };
+
+    int MaterialSlotToModelID(GW::Constants::MaterialSlot mat)
+    {
+        using namespace GW::Constants;
+        static const int material_slot_model_ids[] = {
+            ItemID::Bone,                 // 0
+            ItemID::IronIngot,            // 1
+            ItemID::TannedHideSquare,     // 2
+            ItemID::Scale,                // 3
+            ItemID::ChitinFragment,       // 4
+            ItemID::BoltofCloth,          // 5
+            ItemID::WoodPlank,            // 6
+            0,                            // 7 (gap)
+            ItemID::GraniteSlab,          // 8
+            ItemID::PileofGlitteringDust, // 9
+            ItemID::PlantFiber,           // 10
+            ItemID::Feather,              // 11
+            ItemID::FurSquare,            // 12
+            ItemID::BoltofLinen,          // 13
+            ItemID::BoltofDamask,         // 14
+            ItemID::BoltofSilk,           // 15
+            ItemID::GlobofEctoplasm,      // 16
+            ItemID::SteelIngot,           // 17
+            ItemID::DeldrimorSteelIngot,  // 18
+            ItemID::MonstrousClaw,        // 19
+            ItemID::MonstrousEye,         // 20
+            ItemID::MonstrousFang,        // 21
+            ItemID::Ruby,                 // 22
+            ItemID::Sapphire,             // 23
+            ItemID::Diamond,              // 24
+            ItemID::OnyxGemstone,         // 25
+            ItemID::LumpofCharcoal,       // 26
+            ItemID::ObsidianShard,        // 27
+            0,                            // 28 (gap)
+            ItemID::TemperedGlassVial,    // 29
+            ItemID::LeatherSquare,        // 30
+            ItemID::ElonianLeatherSquare, // 31
+            ItemID::VialofInk,            // 32
+            ItemID::RollofParchment,      // 33
+            ItemID::RollofVellum,         // 34
+            ItemID::SpiritwoodPlank,      // 35
+            ItemID::AmberChunk,           // 36
+            ItemID::JadeiteShard,         // 37
+        };
+        const auto idx = static_cast<size_t>(mat);
+        return idx < _countof(material_slot_model_ids) ? material_slot_model_ids[idx] : 0;
     }
 
-    float GetPriceByItem(const GW::Item* item, std::string* item_name_out = nullptr, unsigned int mod_start_index = 0) {
-        const auto prices = PriceCheckerModule::FetchPrices();
-        auto price = .0f;
-        const auto model_id_str = std::to_string(item->model_id);
-        if (item->type == GW::Constants::ItemType::Materials_Zcoins) {
-            // Find my model id
-            const auto found = prices.find(model_id_str);
-            if (found != prices.end()) 
-                price = static_cast<float>(found->second);
-        }
-        else {
-            std::string mod_to_find;
-            std::string model_id_to_find;
-            // Find by mod struct id and model id
-            for (size_t i = mod_start_index; i < item->mod_struct_size; i++) {
-                const auto found = mod_to_id.find(item->mod_struct[i].mod);
-                if (found != mod_to_id.end() && found->second) {
-                    mod_to_find = std::format("{:08X}", found->first);
-                    model_id_to_find = std::string(found->second, strchr(found->second, '-'));
-                    if (item_name_out) {
-                        const auto name_found = mod_to_name.find(found->first);
-                        if (name_found != mod_to_name.end())
-                            *item_name_out = name_found->second;
-                    }
-                    break;
-                }
-            }
-            if (mod_to_find.empty())
-                return price;
-             
-            for (auto& it : prices) {
-                if (!it.first.starts_with(model_id_to_find))
-                    continue;
-                if (!it.first.contains(mod_to_find))
-                    continue;
-                price = static_cast<float>(it.second);
-                break;
-            }
-        }
-        return price;
+    GW::Constants::MaterialSlot GetItemMaterialSlot(const GW::Item* item) {
+        if (!item) return (GW::Constants::MaterialSlot)0xff;
+        const auto mod = ((InventoryManager::Item*)item)->GetModifier(0x2508);
+        if (!mod) return (GW::Constants::MaterialSlot)0xff;
+        return (GW::Constants::MaterialSlot)mod->arg1();
     }
 
-    float GetPriceById(const char* id)
+
+    bool IsCommonMaterial(const GW::Item* item)
+    {
+        return GetItemMaterialSlot(item) <= GW::Constants::MaterialSlot::Feather;
+    }
+    uint32_t GetPriceById(const char* id)
     {
         const auto prices = PriceCheckerModule::FetchPrices();
         const auto found = prices.find(id);
         if (found != prices.end()) {
-            return static_cast<float>(found->second);
+            return found->second;
         }
-        return .0f;
+        return 0;
+    }
+    uint32_t GetPriceByItem(const GW::Item* item, std::string* item_name_out = nullptr, unsigned int mod_start_index = 0)
+    {
+        if (item->type == GW::Constants::ItemType::Materials_Zcoins) {
+            uint32_t mod = (std::to_underlying(item->type) << 16) | (item->model_id & 0xffff);
+            const auto found = price_info_by_unique_mod_struct.find(mod);
+            if (found == price_info_by_unique_mod_struct.end()) return 0;
+            if (GW::PlayerMgr::IsMelandrusAccord() && show_merchant_price_for_melandrus_accord_instead) return PriceCheckerModule::GetMerchantSellPrice(GetItemMaterialSlot(item));
+            return GetPriceById(found->second.id);
+        }
+
+        size_t found_count = 0;
+        for (size_t i = 0; i < item->mod_struct_size; i++) {
+            const auto mod = item->mod_struct[i].mod;
+            const auto found = price_info_by_unique_mod_struct.find(mod);
+            if (found == price_info_by_unique_mod_struct.end()) continue;
+            if (found_count == mod_start_index) {
+                if (item_name_out)
+                    *item_name_out = found->second.name;
+                return GetPriceById(found->second.id);
+            }
+            found_count++;
+        }
+        return 0;
     }
 
-    std::wstring PrintPrice(const uint32_t price, const char* name = nullptr) {
-        auto color = GW::EncStrings::ItemCommon;
+
+
+    std::wstring PrintPrice(const uint32_t price, const char* name = nullptr)
+    {
+        auto color = GW::EncStrings::ItemDull;
         if (price > high_price_threshold) {
             color = GW::EncStrings::ItemRare;
         }
@@ -503,7 +419,7 @@ namespace {
         const uint32_t gold = price % 1000;
 
         std::wstring currency_string;
-        if (price == 0.f) {
+        if (price == 0) {
             // 0 gold
             currency_string = L"\xAC2\x100";
         }
@@ -511,7 +427,7 @@ namespace {
             // N platinum, N gold
             currency_string = std::format(L"\xAC4\x101{}\x102{}", (wchar_t)(0x100 + plat), (wchar_t)(0x100 + gold));
         }
-        else if(gold > 0) {
+        else if (gold > 0) {
             // N gold
             currency_string = std::format(L"\xAC2\x101{}", (wchar_t)(0x100 + gold));
         }
@@ -521,54 +437,48 @@ namespace {
         }
 
         std::wstring subject;
-        if (name && *name) {
-            subject = std::format(L"\x108\x107{}\x1", TextUtils::StringToWString(name));
-        }
-        else {
-            subject = L"\x108\x107Item price\x1";
-        }
+        subject = std::format(L"\x108\x107{}\x1", name && *name ? TextUtils::StringToWString(name) : L"Trader Value");
 
-        return std::format(L"\x2\x102\x2{}\x10A\xA8A\x10A{}\x1\x10B{}\x1\x1", color, subject, currency_string);
-    }
-    std::wstring PrintPrice(float price, const char* name = nullptr) {
-        if (price < .0f)
-            price = .0f;
-#pragma warning( push )
-#pragma warning( disable : 4244)
-        return PrintPrice(static_cast<uint32_t>(price), name);
-#pragma warning( pop ) 
+        return std::format(L"\x108\x107<c={}>\x1\x2\xA8A\x10A{}\x1\x10B{}\x10A{}\x1\x1\x2\x108\x107</c>\x1", text_color, subject, color, currency_string);
     }
     void UpdateDescription(const uint32_t item_id, std::wstring& description)
     {
         const auto item = GW::Items::GetItemById(item_id);
-        if (!item)
-            return;
-
-        if (description.empty())
-            description += L"\x101";
+        if (!item) return;
 
         std::string first_item_name;
         std::string second_item_name;
         const auto price_first = GetPriceByItem(item, &first_item_name, 0);
         const auto price_second = GetPriceByItem(item, &second_item_name, 1);
-        if (price_first >= .1f) {
-            description.append(PrintPrice(price_first, first_item_name.empty() ? nullptr : first_item_name.c_str()));
+        if (!price_first && !price_second) return;
+
+        std::wstring prices_out = L"";
+
+        if (price_first > 0) {
+            if (!prices_out.empty()) prices_out += L"\x2\x102\x2";
+            prices_out.append(PrintPrice(price_first, first_item_name.empty() ? nullptr : first_item_name.c_str()));
         }
-        if (price_second >= .1f && first_item_name != second_item_name) {
-            description.append(PrintPrice(price_second, second_item_name.empty() ? nullptr : second_item_name.c_str()));
+        if (price_second > 0 && first_item_name != second_item_name) {
+            if (!prices_out.empty()) prices_out += L"\x2\x102\x2";
+            prices_out.append(PrintPrice(price_second, second_item_name.empty() ? nullptr : second_item_name.c_str()));
         }
+        if (!prices_out.empty()) {
+            if (!description.empty()) description += L"\x2";
+            description += L"\x108\x107<brx>\x1\x2";
+            description += prices_out;
+        } 
     }
     std::wstring tmp_item_description;
     void OnGetItemDescription(const uint32_t item_id, uint32_t, uint32_t, uint32_t, wchar_t**, wchar_t** out_desc)
     {
-        if (!(out_desc && *out_desc)) return;
+        if (!(show_prices_in_item_description && out_desc && *out_desc)) return;
         if (*out_desc != tmp_item_description.data()) {
             tmp_item_description.assign(*out_desc);
         }
         UpdateDescription(item_id, tmp_item_description);
         *out_desc = tmp_item_description.data();
     }
-}
+} // namespace
 
 
 void PriceCheckerModule::Initialize()
@@ -592,27 +502,95 @@ void PriceCheckerModule::SaveSettings(ToolboxIni* ini)
 {
     ToolboxModule::SaveSettings(ini);
     SAVE_FLOAT(high_price_threshold);
+    SAVE_COLOR(text_color);
+    SAVE_BOOL(show_prices_in_item_description);
+}
+
+uint32_t PriceCheckerModule::GetTraderSellPrice(const GW::Item* item)
+{
+    return GetPriceByItem(item);
+}
+uint32_t PriceCheckerModule::GetTraderSellPrice(const GW::Constants::MaterialSlot material)
+{
+    if (GW::PlayerMgr::IsMelandrusAccord() && show_merchant_price_for_melandrus_accord_instead) return PriceCheckerModule::GetMerchantSellPrice(material);
+    GW::Item item;
+    memset(&item, 0, sizeof(item));
+    item.type = GW::Constants::ItemType::Materials_Zcoins;
+    item.model_id = MaterialSlotToModelID(material);
+    return GetTraderSellPrice(&item);
+}
+uint32_t PriceCheckerModule::GetMerchantSellPrice(const GW::Constants::MaterialSlot material) {
+    using namespace GW::Constants;
+    if (material == MaterialSlot::IronIngot) return 5;
+    if (material == MaterialSlot::WoodPlank) return 4;
+    if (material <= MaterialSlot::Feather) return 3;
+    switch (material) {
+        case MaterialSlot::Sapphire:
+        case MaterialSlot::Ruby:
+        case MaterialSlot::Diamond:
+        case MaterialSlot::OnyxGemstone:
+            return 250;
+        case MaterialSlot::AmberChunk:
+        case MaterialSlot::JadeiteShard:
+        case MaterialSlot::GlobofEctoplasm:
+        case MaterialSlot::MonstrousEye:
+        case MaterialSlot::MonstrousClaw:
+        case MaterialSlot::MonstrousFang:
+        case MaterialSlot::ObsidianShard:
+            return 100;
+        case MaterialSlot::RollofParchment:
+        case MaterialSlot::RollofVellum:
+        case MaterialSlot::TemperedGlassVial:
+        case MaterialSlot::VialofInk:
+        case MaterialSlot::SpiritwoodPlank:
+            return 20;
+        case MaterialSlot::BoltofDamask:
+        case MaterialSlot::BoltofLinen:
+        case MaterialSlot::BoltofSilk:
+            return 15;
+        case MaterialSlot::FurSquare:
+            return 10;
+    }
+    return 30;
 }
 
 void PriceCheckerModule::LoadSettings(ToolboxIni* ini)
 {
     ToolboxModule::SaveSettings(ini);
     LOAD_FLOAT(high_price_threshold);
+    LOAD_COLOR(text_color);
+    LOAD_BOOL(show_prices_in_item_description);
 }
 
 void PriceCheckerModule::DrawSettingsInternal()
 {
-    ImGui::SliderFloat("Price Checker high price threshold", &high_price_threshold, 100, 50000);
-    ImGui::ShowHelp("Rune and mod prices are fetched from https://kamadan.gwtoolbox.com.\nWhen an item price is found to be above this price threshold, the mod price will be gold when an item is hovered.");
+    ImGui::Checkbox("Show trader prices in item description tooltips", &show_prices_in_item_description);
+    ImGui::ShowHelp("Current rune, dye and mod prices are fetched from https://kamadan.gwtoolbox.com.");
+    if (show_prices_in_item_description) {
+        ImGui::Indent();
+        ImGui::TextUnformatted("Text color:");
+        ImGui::SameLine();
+        ImGui::ColorButtonPicker("Choose text color", &text_color);
+        ImGui::SameLine();
+        bool reset_color = false;
+        if (ImGui::ConfirmButton("Reset", &reset_color)) {
+            text_color = text_color_default;
+        }
+        ImGui::SliderFloat("High price threshold", &high_price_threshold, 100, 50000);
+        ImGui::ShowHelp("When an item price is found to be above this price threshold, the mod price will be gold when an item is hovered.");
+        ImGui::Unindent();
+    }
 }
 
-const std::unordered_map<std::string,uint32_t>& PriceCheckerModule::FetchPrices() {
+const std::unordered_map<std::string, uint32_t>& PriceCheckerModule::FetchPrices()
+{
     if (TIMER_DIFF(last_request_time) > request_interval) {
         last_request_time = TIMER_INIT();
         Resources::Download(trader_quotes_url, [](bool success, const std::string& response, void*) {
-            if (success)
-                ParsePriceJson(response);
-            });
+            if (!success) return;
+            ParsePriceJson(response);
+            SignalItemDescriptionUpdated();
+        });
     }
     return prices_by_identifier;
 }

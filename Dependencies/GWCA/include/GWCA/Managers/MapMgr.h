@@ -164,3 +164,33 @@ namespace GW {
         GWCA_API bool CancelEnterChallenge();
     };
 }
+// ============================================================
+// C Interop API
+// ============================================================
+extern "C" {
+    GWCA_API void* GetMissionMapContext();
+    GWCA_API void* GetWorldMapContext();
+    GWCA_API void* CreateMapContext(uint32_t map_file_id);
+    GWCA_API bool     DestroyMapContext(void* context);
+    GWCA_API float    QueryAltitude(const float* x, const float* y, float radius, void* context);
+    GWCA_API bool     GetIsMapLoaded();
+    GWCA_API uint32_t GetMapID();
+    GWCA_API bool     GetIsMapUnlocked(uint32_t map_id);
+    GWCA_API uint32_t GetRegion();
+    GWCA_API uint32_t GetLanguage();
+    GWCA_API bool     GetIsObserving();
+    GWCA_API int      GetDistrict();
+    GWCA_API uint32_t GetInstanceTime();
+    GWCA_API uint32_t GetInstanceType();
+    GWCA_API bool     TravelByRegion(uint32_t map_id, uint32_t region, int district_number, uint32_t language);
+    GWCA_API bool     TravelByDistrict(uint32_t map_id, uint32_t district, int district_number);
+    GWCA_API uint32_t RegionFromDistrict(uint32_t district);
+    GWCA_API uint32_t LanguageFromDistrict(uint32_t district);
+    GWCA_API uint32_t GetFoesKilled();
+    GWCA_API uint32_t GetFoesToKill();
+    GWCA_API void* GetMapInfo(uint32_t map_id);
+    GWCA_API bool     GetIsInCinematic();
+    GWCA_API bool     SkipCinematic();
+    GWCA_API bool     EnterChallenge();
+    GWCA_API bool     CancelEnterChallenge();
+}

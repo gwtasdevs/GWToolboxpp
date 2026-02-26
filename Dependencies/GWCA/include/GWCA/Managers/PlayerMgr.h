@@ -55,3 +55,18 @@ namespace GW {
         GWCA_API TitleClientData* GetTitleData(Constants::TitleID title_id);
     };
 }
+// ============================================================
+// C Interop API
+// ============================================================
+extern "C" {
+    GWCA_API bool            SetActiveTitle(uint32_t title_id);
+    GWCA_API bool            RemoveActiveTitle();
+    GWCA_API uint32_t        GetPlayerAgentId(uint32_t player_id);
+    GWCA_API uint32_t        GetPlayerNumber();
+    GWCA_API const wchar_t* SetPlayerName(uint32_t player_id, const wchar_t* replace_name);
+    GWCA_API bool            ChangeSecondProfession(uint32_t profession, uint32_t hero_index);
+    GWCA_API void* GetTitleTrack(uint32_t title_id);
+    GWCA_API uint32_t        GetActiveTitleId();
+    GWCA_API void* GetActiveTitle();
+    GWCA_API void* GetTitleData(uint32_t title_id);
+}

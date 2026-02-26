@@ -51,6 +51,7 @@ public:
     bool trigger_on_lose_focus = false;        // Trigger when GW window is no longer focussed
     bool trigger_on_gain_focus = false;        // Trigger when GW window is focussed
     bool can_trigger_on_map_change = true;     // Some hotkeys cant trigger on map change e.g. Guild Wars Key
+    bool block_other_hotkeys_on_trigger = false; // If this hotkey is triggered, block any further hotkeys from being processed
 
     bool trigger_in_desktop_mode = true;       // Trigger this hotkey in desktop mode
     bool trigger_in_controller_mode = true; // Trigger this hotkey in controller mode

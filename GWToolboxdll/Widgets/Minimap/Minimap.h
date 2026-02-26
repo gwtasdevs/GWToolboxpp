@@ -6,6 +6,8 @@
 
 #include "Defines.h"
 
+#include <Utils/GuiUtils.h>
+
 #include <Widgets/Minimap/AgentRenderer.h>
 #include <Widgets/Minimap/CustomRenderer.h>
 #include <Widgets/Minimap/EffectRenderer.h>
@@ -15,9 +17,35 @@
 #include <Widgets/Minimap/RangeRenderer.h>
 #include <Widgets/Minimap/SymbolsRenderer.h>
 
+// Context structure that encapsulates all rendering parameters
+struct MinimapRenderContext : RectF {
+    // Position and size
+    ImVec2 anchor_point; // Center of minimap - this may not necessarily be the center point of the clipping rect
+
+    // Camera/view parameters
+    GW::Vec2f translation; // World-space translation (for panning)
+    float zoom_scale = 1.f; // Zoom level (scale factor)
+    float rotation = 1.5708f; // Map rotation in radians
+
+    float base_scale = 1.f; // The size (in px) of the base scale to use before zooming. Minimap sets this to size.x
+
+    // Visual options
+    bool circular_map = false; // Whether to render as circle or square
+    bool draw_center_marker = false; // Whether to draw center marker when panned
+    D3DCOLOR background_color = D3DCOLOR_ARGB(50, 0, 0, 0); // Background color (or 0 to use renderer's default)
+    D3DCOLOR foreground_color = D3DCOLOR_ARGB(0xff, 0xe0, 0xe0, 0xe0); // Foreground color (or 0 to use renderer's default)
+    D3DCOLOR shadow_color = 0; // Drop shadow for foreground color
+    D3DCOLOR cardinal_color = 0;
+
+    bool draw_ranges = false;
+
+    RECT rect() const
+    {
+        return {static_cast<LONG>(top_left.x), static_cast<LONG>(top_left.y), static_cast<LONG>(bottom_right.x), static_cast<LONG>(bottom_right.y)};
+    }
+};
+
 class Minimap final : public ToolboxWidget {
-
-
     Minimap()
     {
         is_resizable = false;
@@ -49,8 +77,14 @@ public:
     bool CanTerminate() override;
     void Terminate() override;
 
+    // Widget-based rendering (uses internal state)
     void Draw(IDirect3DDevice9* device) override;
-    static void RenderSetupProjection(IDirect3DDevice9* device);
+
+    // Static rendering with explicit context (for multiple minimaps)
+    static void Render(IDirect3DDevice9* device, const MinimapRenderContext& context);
+
+    // Setup projection matrix for a given context
+    static void RenderSetupProjection(IDirect3DDevice9* device, const MinimapRenderContext& context);
 
     bool FlagHeros(LPARAM lParam);
     bool OnMouseDown(UINT Message, WPARAM wParam, LPARAM lParam);
@@ -66,7 +100,6 @@ public:
     void DrawSettingsInternal() override;
 
     [[nodiscard]] float GetMapRotation() const;
-    [[nodiscard]] static DirectX::XMFLOAT2 GetGwinchScale();
     [[nodiscard]] GW::Vec2f ShadowstepLocation() const;
 
     // 0 is 'all' flag, 1 to 7 is each hero
@@ -82,12 +115,10 @@ public:
 
     static bool ShouldMarkersDrawOnMap();
     static bool ShouldDrawAllQuests();
-    static void Render(IDirect3DDevice9* device);
 
     [[nodiscard]] static bool IsActive();
 
 private:
-
     [[nodiscard]] bool IsInside(int x, int y) const;
     // returns true if the map is visible, valid, not loading, etc
 

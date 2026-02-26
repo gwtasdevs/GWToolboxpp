@@ -133,11 +133,6 @@ public:
             return ((interaction >> 15) & 1) == 0;
         }
 
-        [[nodiscard]] bool IsStackable() const
-        {
-            return (interaction & 0x80000) != 0;
-        }
-
         [[nodiscard]] bool IsUsable() const
         {
             return (interaction & 0x1000000) != 0;

@@ -36,6 +36,7 @@ namespace GW {
         inline bool IsSpirit() { return (npc_flags & 0x4000) != 0; }
         inline bool IsMinion() { return (npc_flags & 0x100) != 0; }
         inline bool IsPet() { return (npc_flags & 0xD) != 0; }
+        inline bool IsFleshy() const { return (npc_flags & 0x8) != 0; }
     };
     static_assert(sizeof(NPC) == 0x30, "struct NPC has incorrect size");
 

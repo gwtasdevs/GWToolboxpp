@@ -178,6 +178,7 @@ GameWorldRenderer::GenericPolyRenderable::~GenericPolyRenderable() noexcept
 {
     if (vb != nullptr) {
         vb->Release();
+        vb = nullptr;
     }
 }
 

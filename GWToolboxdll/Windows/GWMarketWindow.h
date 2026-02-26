@@ -30,6 +30,7 @@ public:
     
     static bool CanSellItem(GW::Item* item);
     static void AddItemToSell(GW::Item* item);
+    static void SearchItem(const std::string& item_name);
 
     void LoadSettings(ToolboxIni* ini) override;
     void SaveSettings(ToolboxIni* ini) override;

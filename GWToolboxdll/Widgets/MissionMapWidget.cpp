@@ -28,6 +28,8 @@ namespace {
     GW::Vec2f mission_map_screen_pos;
     GW::Vec2f world_map_click_pos;
 
+    MinimapRenderContext mission_map_render_context;
+
     bool right_clicking = false;
 
     GW::UI::Frame* mission_map_frame = nullptr;
@@ -75,23 +77,23 @@ namespace {
     void Draw(IDirect3DDevice9*);
 
     std::vector<GW::UI::UIMessage> messages_hit;
-    GW::UI::UIInteractionCallback OnMissionMap_UICallback_Func = 0, OnMissionMap_UICallback_Ret = 0;
+    GW::UI::UIInteractionCallback OnMissionMap_UICallback_Func = nullptr, OnMissionMap_UICallback_Ret = nullptr;
 
     void OnMissionMap_UICallback(GW::UI::InteractionMessage* message, void* wparam, void* lparam)
     {
         GW::Hook::EnterHook();
         switch (message->message_id) {
-        case GW::UI::UIMessage::kInitFrame:
-            OnMissionMap_UICallback_Ret(message, wparam, lparam);
-            mission_map_frame = GW::UI::GetFrameById(message->frame_id);
-            break;
-        case GW::UI::UIMessage::kDestroyFrame:
-            mission_map_frame = nullptr;
-            OnMissionMap_UICallback_Ret(message, wparam, lparam);
-            break;
-        default:
-            OnMissionMap_UICallback_Ret(message, wparam, lparam);
-            break;
+            case GW::UI::UIMessage::kInitFrame:
+                OnMissionMap_UICallback_Ret(message, wparam, lparam);
+                mission_map_frame = GW::UI::GetFrameById(message->frame_id);
+                break;
+            case GW::UI::UIMessage::kDestroyFrame:
+                mission_map_frame = nullptr;
+                OnMissionMap_UICallback_Ret(message, wparam, lparam);
+                break;
+            default:
+                OnMissionMap_UICallback_Ret(message, wparam, lparam);
+                break;
         }
         GW::Hook::LeaveHook();
     }
@@ -162,11 +164,32 @@ namespace {
         }
         return true;
     }
-    void Draw(IDirect3DDevice9* dx_device) {
+
+    void Draw(IDirect3DDevice9* dx_device)
+    {
         if (!HookMissionMapFrame())
             return;
         if (!InitializeMissionMapParameters())
             return;
+
+#ifdef _DEBUG
+
+        mission_map_render_context.top_left = mission_map_top_left;
+        mission_map_render_context.bottom_right = mission_map_bottom_right;
+        // NB: 104.f is the mission map scale per gwinch
+        mission_map_render_context.base_scale = mission_map_scale.x * 104.f * mission_map_zoom;
+        mission_map_render_context.zoom_scale = 1.f;
+        mission_map_render_context.foreground_color = D3DCOLOR_ARGB(100, 0xe0, 0xe0, 0xe0);
+
+        // Anchor point is where the player appears on screen in the mission map
+        GW::Vec2f player_screen_pos;
+        WorldMapCoordsToMissionMapScreenPos(mission_map_center_pos, player_screen_pos);
+        mission_map_render_context.anchor_point = {player_screen_pos.x, player_screen_pos.y};
+
+
+        Minimap::Render(dx_device, mission_map_render_context);
+#endif
+
 
         const auto& lines = Minimap::Instance().custom_renderer.GetLines();
         const auto map_id = GW::Map::GetMapID();
@@ -193,9 +216,8 @@ namespace {
                 continue;
 
             // Add two vertices for the line
-            vertices.push_back({ projected_p1.x, projected_p1.y, 0.0f, 1.0f, (DWORD)line->color });
-            vertices.push_back({ projected_p2.x, projected_p2.y, 0.0f, 1.0f, (DWORD)line->color });
-
+            vertices.push_back({projected_p1.x, projected_p1.y, 0.0f, 1.0f, static_cast<DWORD>(line->color)});
+            vertices.push_back({projected_p2.x, projected_p2.y, 0.0f, 1.0f, static_cast<DWORD>(line->color)});
         }
         if (vertices.empty())
             return;
@@ -225,7 +247,7 @@ namespace {
         dx_device->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
         dx_device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
         dx_device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
-        dx_device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);  // Use a flexible vertex format
+        dx_device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE); // Use a flexible vertex format
 
         dx_device->DrawPrimitiveUP(D3DPT_LINELIST, vertices.size() / 2, vertices.data(), sizeof(Vertex));
 
@@ -253,7 +275,7 @@ void MissionMapWidget::SaveSettings(ToolboxIni* ini)
 }
 
 void MissionMapWidget::Draw(IDirect3DDevice9* dx_device)
-{ 
+{
     if (visible)
         ::Draw(dx_device);
     HookMissionMapFrame();

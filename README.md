@@ -100,3 +100,7 @@ For developers: there are a few things you should take note of:
 
 
 All images in `resources/icons` are from www.flaticon.com
+
+## Sponsors
+
+[![Termius Logo](./resources/termius-logo.svg)](https://termius.com) **[Termius](https://termius.com/)** provides a secure, reliable, and collaborative SSH client.

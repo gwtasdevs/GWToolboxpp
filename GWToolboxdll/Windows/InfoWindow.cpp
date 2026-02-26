@@ -211,6 +211,7 @@ namespace {
         auto draw_advanced = [&, skill] {
             InfoField("Addr", "%p", skill);
             InfoField("Type", "%d", skill->type);
+            InfoField("Flags", "%08x", skill->special);
             short file_ids[2];
             GetIdsFromFileId(skill->icon_file_id, file_ids);
             InfoField("FileIds", "%08x %04x %04x", skill->icon_file_id, file_ids[0], file_ids[1]);
@@ -1053,7 +1054,10 @@ namespace {
         if (ImGui::Button("Open Text Dev Window")) {
             GW::GameThread::Enqueue([] {
                 GW::GetCharContext()->player_flags |= 0x8;
-                GW::UI::Keypress((GW::UI::ControlAction)0x25);
+                GW::UI::UIPacket::kKeyAction packet;
+                packet.gw_key = (GW::UI::ControlAction)0x25;
+                packet.state_flags = 0x6; // Ctrl and shift
+                GW::UI::SendFrameUIMessage(GW::UI::GetChildFrame(GW::UI::GetFrameByLabel(L"Game"), 6), GW::UI::UIMessage::kKeyDown, &packet);
                 GW::GetCharContext()->player_flags ^= 0x8;
                 });
         }

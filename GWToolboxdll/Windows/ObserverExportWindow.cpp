@@ -10,6 +10,8 @@
 #include <Windows/ObserverExportWindow.h>
 #include <Utils/TextUtils.h>
 
+#include <curl/curl.h>
+
 void ObserverExportWindow::Initialize()
 {
     ToolboxWindow::Initialize();
@@ -52,6 +54,34 @@ nlohmann::json ObserverExportWindow::ToJSON_V_0_1()
             nlohmann::json json_party;
             json_party["party_id"] = party->party_id;
             json_party["stats"] = shared_stats_to_json(party->stats);
+            
+            // Party aggregate health snapshots (recorded every 15 seconds)
+            json_party["health_snapshots"] = nlohmann::json::array();
+            for (const auto& snapshot : party->health_snapshots) {
+                nlohmann::json snapshot_json;
+                snapshot_json["timestamp_ms"] = snapshot.timestamp_ms;
+                snapshot_json["hp_percentage"] = snapshot.hp_percentage;
+                snapshot_json["hp_value"] = snapshot.hp_value;
+                snapshot_json["max_hp"] = snapshot.max_hp;
+                json_party["health_snapshots"].push_back(snapshot_json);
+            }
+            
+            // Shrine captures (captured shrines by this party)
+            json_party["shrine_captures"] = nlohmann::json::array();
+            for (const auto& shrine_capture : party->shrine_captures) {
+                nlohmann::json shrine_json;
+                shrine_json["timestamp_ms"] = shrine_capture.timestamp_ms;
+                json_party["shrine_captures"].push_back(shrine_json);
+            }
+            
+            // Tower captures (captured towers/flags by this party)
+            json_party["tower_captures"] = nlohmann::json::array();
+            for (const auto& tower_capture : party->tower_captures) {
+                nlohmann::json tower_json;
+                tower_json["timestamp_ms"] = tower_capture.timestamp_ms;
+                json_party["tower_captures"].push_back(tower_json);
+            }
+            
             for (const uint32_t agent_id : party->agent_ids) {
                 // parties -> party -> agents
                 ObserverModule::ObservableAgent* agent = observer_module.GetObservableAgentById(agent_id);
@@ -72,6 +102,39 @@ nlohmann::json ObserverExportWindow::ToJSON_V_0_1()
                     json_agent["secondary"] = agent->secondary;
                     json_agent["profession"] = agent->profession;
                     json_agent["stats"] = shared_stats_to_json(agent->stats);
+
+                    // Death events (all deaths for this agent)
+                    json_agent["death_events"] = nlohmann::json::array();
+                    for (const auto& death : agent->death_events) {
+                        nlohmann::json death_json;
+                        death_json["timestamp_ms"] = death.timestamp_ms;
+                        death_json["position_x"] = death.position_x;
+                        death_json["position_y"] = death.position_y;
+                        death_json["killer_agent_id"] = death.killer_agent_id;
+                        death_json["killing_skill_id"] = death.killing_skill_id;
+                        death_json["is_npc"] = death.is_npc;
+                        json_agent["death_events"].push_back(death_json);
+                    }
+                    
+                    // Resurrection events (all resurrections for this agent)
+                    json_agent["resurrection_events"] = nlohmann::json::array();
+                    for (const auto& rez : agent->resurrection_events) {
+                        nlohmann::json rez_json;
+                        rez_json["timestamp_ms"] = rez.timestamp_ms;
+                        rez_json["resurrector_agent_id"] = rez.resurrector_agent_id;
+                        
+                        // Add resurrection type
+                        const char* res_type_str = "unknown";
+                        switch (rez.resurrection_type) {
+                            case ObserverModule::ResurrectionType::Skill: res_type_str = "skill"; break;
+                            case ObserverModule::ResurrectionType::BaseResurrection: res_type_str = "base_resurrection"; break;
+                            default: res_type_str = "unknown"; break;
+                        }
+                        rez_json["resurrection_type"] = res_type_str;
+                        
+                        json_agent["resurrection_events"].push_back(rez_json);
+                    }
+                    
                     for (const auto skill_id : agent->stats.skill_ids_used) {
                         // parties -> party -> agents -> agent -> skills
                         ObserverModule::ObservableSkill* skill = ObserverModule::Instance().GetObservableSkillById(skill_id);
@@ -113,11 +176,17 @@ nlohmann::json ObserverExportWindow::ToJSON_V_1_0()
     json["match_duration_ms"] = om.match_duration_ms.count();
     json["match_duration_secs"] = om.match_duration_secs.count();
     json["match_duration_mins"] = om.match_duration_mins.count();
+    json["match_type"] = Instance().match_type;
+    json["match_date"] = Instance().match_date;
+    json["mat_round"] = Instance().mat_round;
 
-    ObserverModule::ObservableMap* map = om.GetMap();
+    // Use the map from when the match started (if available), otherwise fall back to current map
+    ObserverModule::ObservableMap* map = om.match_start_map ? om.match_start_map : om.GetMap();
+    
     json["map"] = nlohmann::json::value_t::null;
     if (map) {
         json["map"] = {};
+        json["map"]["map_id"] = static_cast<uint32_t>(map->map_id);
         json["map"]["name"] = map->Name();
         json["map"]["description"] = map->Description();
         json["map"]["is_pvp"] = map->GetIsPvP();
@@ -170,6 +239,14 @@ nlohmann::json ObserverExportWindow::ToJSON_V_1_0()
         stats_json["total_skills_used_on_other_teams"] = action_to_json(stats.total_skills_used_on_other_teams);
         stats_json["total_skills_received_from_own_team"] = action_to_json(stats.total_skills_received_from_own_team);
         stats_json["total_skills_received_from_other_teams"] = action_to_json(stats.total_skills_received_from_other_teams);
+        stats_json["total_damage_dealt"] = stats.total_damage_dealt;
+        stats_json["total_damage_received"] = stats.total_damage_received;
+        stats_json["total_party_damage_dealt"] = stats.total_party_damage_dealt;
+        stats_json["total_party_damage_received"] = stats.total_party_damage_received;
+        stats_json["total_healing_dealt"] = stats.total_healing_dealt;
+        stats_json["total_healing_received"] = stats.total_healing_received;
+        stats_json["total_party_healing_dealt"] = stats.total_party_healing_dealt;
+        stats_json["total_party_healing_received"] = stats.total_party_healing_received;
         return stats_json;
     };
 
@@ -278,6 +355,41 @@ nlohmann::json ObserverExportWindow::ToJSON_V_1_0()
         json["parties"]["by_id"][party_id_s]["rank_str"] = party->rank_str;
         json["parties"]["by_id"][party_id_s]["rating"] = party->rating;
         json["parties"]["by_id"][party_id_s]["stats"] = shared_stats_to_json(party->stats);
+        
+        // Morale boost events (with timestamps)
+        json["parties"]["by_id"][party_id_s]["morale_boosts"] = nlohmann::json::array();
+        for (const auto& morale_boost : party->morale_boosts) {
+            nlohmann::json morale_json;
+            morale_json["timestamp_ms"] = morale_boost.timestamp_ms;
+            json["parties"]["by_id"][party_id_s]["morale_boosts"].push_back(morale_json);
+        }
+        
+        // Shrine capture events (with timestamps)
+        json["parties"]["by_id"][party_id_s]["shrine_captures"] = nlohmann::json::array();
+        for (const auto& shrine_capture : party->shrine_captures) {
+            nlohmann::json shrine_json;
+            shrine_json["timestamp_ms"] = shrine_capture.timestamp_ms;
+            json["parties"]["by_id"][party_id_s]["shrine_captures"].push_back(shrine_json);
+        }
+        
+        // Tower capture events (with timestamps)
+        json["parties"]["by_id"][party_id_s]["tower_captures"] = nlohmann::json::array();
+        for (const auto& tower_capture : party->tower_captures) {
+            nlohmann::json tower_json;
+            tower_json["timestamp_ms"] = tower_capture.timestamp_ms;
+            json["parties"]["by_id"][party_id_s]["tower_captures"].push_back(tower_json);
+        }
+        
+        // Party aggregate health snapshots (recorded every 15 seconds)
+        json["parties"]["by_id"][party_id_s]["health_snapshots"] = nlohmann::json::array();
+        for (const auto& snapshot : party->health_snapshots) {
+            nlohmann::json snapshot_json;
+            snapshot_json["timestamp_ms"] = snapshot.timestamp_ms;
+            snapshot_json["hp_percentage"] = snapshot.hp_percentage;
+            snapshot_json["hp_value"] = snapshot.hp_value;
+            snapshot_json["max_hp"] = snapshot.max_hp;
+            json["parties"]["by_id"][party_id_s]["health_snapshots"].push_back(snapshot_json);
+        }
     }
 
     // agents
@@ -390,6 +502,110 @@ nlohmann::json ObserverExportWindow::ToJSON_V_1_0()
                 json["agents"]["by_id"][agent_id_s]["stats"]["skills_received_from_agents"][caster_id_s][skill_id_s] = action_to_json(*it_skill->second);
             }
         }
+
+        // damage dealt (by agent)
+        for (auto& [target_id, damage] : agent->stats.damage_dealt_to_agents) {
+            std::string target_id_s = std::to_string(target_id);
+            json["agents"]["by_id"][agent_id_s]["stats"]["damage_dealt_to_agents"][target_id_s] = damage;
+        }
+
+        // damage received (by agent)
+        for (auto& [caster_id, damage] : agent->stats.damage_received_from_agents) {
+            std::string caster_id_s = std::to_string(caster_id);
+            json["agents"]["by_id"][agent_id_s]["stats"]["damage_received_from_agents"][caster_id_s] = damage;
+        }
+
+        // healing dealt (by agent)
+        for (auto& [target_id, healing] : agent->stats.healing_dealt_to_agents) {
+            std::string target_id_s = std::to_string(target_id);
+            json["agents"]["by_id"][agent_id_s]["stats"]["healing_dealt_to_agents"][target_id_s] = healing;
+        }
+
+        // healing received (by agent)
+        for (auto& [caster_id, healing] : agent->stats.healing_received_from_agents) {
+            std::string caster_id_s = std::to_string(caster_id);
+            json["agents"]["by_id"][agent_id_s]["stats"]["healing_received_from_agents"][caster_id_s] = healing;
+        }
+
+        // damage by skill
+        for (auto& [skill_id, damage] : agent->stats.damage_by_skill) {
+            std::string skill_id_s = std::to_string(std::to_underlying(skill_id));
+            json["agents"]["by_id"][agent_id_s]["stats"]["damage_by_skill"][skill_id_s] = damage;
+        }
+
+        // healing by skill
+        for (auto& [skill_id, healing] : agent->stats.healing_by_skill) {
+            std::string skill_id_s = std::to_string(std::to_underlying(skill_id));
+            json["agents"]["by_id"][agent_id_s]["stats"]["healing_by_skill"][skill_id_s] = healing;
+        }
+
+        // damage by skill to agents
+        for (auto& [target_id, skill_damage_map] : agent->stats.damage_by_skill_to_agents) {
+            std::string target_id_s = std::to_string(target_id);
+            for (auto& [skill_id, damage] : skill_damage_map) {
+                std::string skill_id_s = std::to_string(std::to_underlying(skill_id));
+                json["agents"]["by_id"][agent_id_s]["stats"]["damage_by_skill_to_agents"][target_id_s][skill_id_s] = damage;
+            }
+        }
+
+        // damage from skill from agents
+        for (auto& [caster_id, skill_damage_map] : agent->stats.damage_from_skill_from_agents) {
+            std::string caster_id_s = std::to_string(caster_id);
+            for (auto& [skill_id, damage] : skill_damage_map) {
+                std::string skill_id_s = std::to_string(std::to_underlying(skill_id));
+                json["agents"]["by_id"][agent_id_s]["stats"]["damage_from_skill_from_agents"][caster_id_s][skill_id_s] = damage;
+            }
+        }
+
+        // healing by skill to agents
+        for (auto& [target_id, skill_healing_map] : agent->stats.healing_by_skill_to_agents) {
+            std::string target_id_s = std::to_string(target_id);
+            for (auto& [skill_id, healing] : skill_healing_map) {
+                std::string skill_id_s = std::to_string(std::to_underlying(skill_id));
+                json["agents"]["by_id"][agent_id_s]["stats"]["healing_by_skill_to_agents"][target_id_s][skill_id_s] = healing;
+            }
+        }
+
+        // healing from skill from agents
+        for (auto& [caster_id, skill_healing_map] : agent->stats.healing_from_skill_from_agents) {
+            std::string caster_id_s = std::to_string(caster_id);
+            for (auto& [skill_id, healing] : skill_healing_map) {
+                std::string skill_id_s = std::to_string(std::to_underlying(skill_id));
+                json["agents"]["by_id"][agent_id_s]["stats"]["healing_from_skill_from_agents"][caster_id_s][skill_id_s] = healing;
+            }
+        }
+
+        // Death events (all deaths for this agent)
+        json["agents"]["by_id"][agent_id_s]["death_events"] = nlohmann::json::array();
+        for (const auto& death : agent->death_events) {
+            nlohmann::json death_json;
+            death_json["timestamp_ms"] = death.timestamp_ms;
+            death_json["position_x"] = death.position_x;
+            death_json["position_y"] = death.position_y;
+            death_json["killer_agent_id"] = death.killer_agent_id;
+            death_json["killing_skill_id"] = death.killing_skill_id;
+            death_json["is_npc"] = death.is_npc;
+            json["agents"]["by_id"][agent_id_s]["death_events"].push_back(death_json);
+        }
+        
+        // Resurrection events (all resurrections for this agent)
+        json["agents"]["by_id"][agent_id_s]["resurrection_events"] = nlohmann::json::array();
+        for (const auto& rez : agent->resurrection_events) {
+            nlohmann::json rez_json;
+            rez_json["timestamp_ms"] = rez.timestamp_ms;
+            rez_json["resurrector_agent_id"] = rez.resurrector_agent_id;
+            
+            // Add resurrection type
+            const char* res_type_str = "unknown";
+            switch (rez.resurrection_type) {
+                case ObserverModule::ResurrectionType::Skill: res_type_str = "skill"; break;
+                case ObserverModule::ResurrectionType::BaseResurrection: res_type_str = "base_resurrection"; break;
+                default: res_type_str = "unknown"; break;
+            }
+            rez_json["resurrection_type"] = res_type_str;
+            
+            json["agents"]["by_id"][agent_id_s]["resurrection_events"].push_back(rez_json);
+        }
     }
 
     json["name"] = name;
@@ -404,6 +620,98 @@ std::string ObserverExportWindow::PadLeft(std::string input, const uint8_t count
 }
 
 
+// Export to GWRank.com
+void ObserverExportWindow::ExportToGWRank()
+{
+    ObserverModule& observer_module = ObserverModule::Instance();
+    
+    // Check if match is finished
+    if (!observer_module.match_finished) {
+        GW::Chat::WriteChat(GW::Chat::Channel::CHANNEL_GWCA1, L"<c=#FF0000>Match is not finished yet. Cannot export to GWRank.com.</c>");
+        return;
+    }
+    
+    // Check if API key is configured
+    if (Instance().gwrank_api_key.empty()) {
+        GW::Chat::WriteChat(GW::Chat::Channel::CHANNEL_GWCA1, L"<c=#FF0000>API key not configured. Please set it in the Observer Export settings.</c>");
+        return;
+    }
+    
+    // Generate JSON v1.0
+    nlohmann::json json = ToJSON_V_1_0();
+    json["verson"] = "1.0";
+    std::string json_str = json.dump(4);
+    
+    // Initialize curl
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        GW::Chat::WriteChat(GW::Chat::Channel::CHANNEL_GWCA1, L"<c=#FF0000>Failed to initialize CURL for upload.</c>");
+        return;
+    }
+    
+    // Create multipart form
+    curl_mime* form = curl_mime_init(curl);
+    curl_mimepart* field = curl_mime_addpart(form);
+    curl_mime_name(field, "json_file");
+    curl_mime_data(field, json_str.c_str(), CURL_ZERO_TERMINATED);
+    curl_mime_filename(field, "match.json");
+    curl_mime_type(field, "application/json");
+    
+    // Prepare headers
+    struct curl_slist* headers = nullptr;
+    std::string auth_header = "Authorization: Bearer " + Instance().gwrank_api_key;
+    headers = curl_slist_append(headers, auth_header.c_str());
+    
+    // Configure curl
+    curl_easy_setopt(curl, CURLOPT_URL, Instance().gwrank_endpoint.c_str());
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_MIMEPOST, form);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+    
+    // SSL configuration - disable verification for compatibility
+    // Note: This makes the connection less secure but avoids CA certificate issues
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    
+    // Response buffer
+    std::string response_data;
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, +[](char* ptr, size_t size, size_t nmemb, void* userdata) -> size_t {
+        size_t total = size * nmemb;
+        static_cast<std::string*>(userdata)->append(ptr, total);
+        return total;
+    });
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_data);
+    
+    // Perform request
+    GW::Chat::WriteChat(GW::Chat::Channel::CHANNEL_GWCA1, L"<c=#00FF00>Uploading match data to GWRank.com...</c>");
+    CURLcode res = curl_easy_perform(curl);
+    
+    // Check result
+    if (res != CURLE_OK) {
+        wchar_t error_msg[512];
+        swprintf(error_msg, 512, L"<c=#FF0000>Failed to upload: %S</c>", curl_easy_strerror(res));
+        GW::Chat::WriteChat(GW::Chat::Channel::CHANNEL_GWCA1, error_msg);
+    } else {
+        long response_code = 0;
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
+        
+        if (response_code >= 200 && response_code < 300) {
+            GW::Chat::WriteChat(GW::Chat::Channel::CHANNEL_GWCA1, L"<c=#00FF00>Successfully uploaded match to GWRank.com!</c>");
+        } else {
+            wchar_t error_msg[256];
+            swprintf(error_msg, 256, L"<c=#FF0000>Upload failed with HTTP status %ld. Response: %S</c>", 
+                     response_code, response_data.substr(0, 100).c_str());
+            GW::Chat::WriteChat(GW::Chat::Channel::CHANNEL_GWCA1, error_msg);
+        }
+    }
+    
+    // Cleanup
+    curl_slist_free_all(headers);
+    curl_mime_free(form);
+    curl_easy_cleanup(curl);
+}
+
+
 // Export as JSON
 void ObserverExportWindow::ExportToJSON(Version version)
 {
@@ -411,23 +719,7 @@ void ObserverExportWindow::ExportToJSON(Version version)
     std::string filename;
     SYSTEMTIME time;
     GetLocalTime(&time);
-    std::string year = std::to_string(time.wYear);
-    std::string month = std::to_string(time.wMonth);
-    std::string day = std::to_string(time.wDay);
-    std::string hour = std::to_string(time.wHour);
-    std::string minute = std::to_string(time.wMinute);
-    std::string second = std::to_string(time.wSecond);
-    std::string export_time = PadLeft(year, 4, '0')
-                              + "-"
-                              + PadLeft(month, 2, '0')
-                              + "-"
-                              + PadLeft(day, 2, '0')
-                              + "T"
-                              + PadLeft(hour, 2, '0')
-                              + "-"
-                              + PadLeft(minute, 2, '0')
-                              + "-"
-                              + PadLeft(second, 2, '0');
+    std::string export_time = std::format("{:04}-{:02}-{:02}T{:02}-{:02}-{:02}", time.wYear, time.wMonth, time.wDay, time.wHour, time.wMinute, time.wSecond);
 
     switch (version) {
         case Version::V_0_1: {
@@ -449,9 +741,7 @@ void ObserverExportWindow::ExportToJSON(Version version)
             std::ranges::transform(name, name.begin(), [](const unsigned char c) {
                 return static_cast<unsigned char>(c == ' ' ? '_' : c);
             });
-            // replace non-alphanumeric with "x" to make simply FS safe, but also show something is missing
-            name = TextUtils::ctre_regex_replace<"[^A-Za-z0-9.-_]/g", "x">(name);
-            filename = export_time + "_" + name + ".json";
+            filename = TextUtils::SanitiseFilename(name) + ".json";
             json["filename"] = filename;
             break;
         }
@@ -508,6 +798,79 @@ void ObserverExportWindow::Draw(IDirect3DDevice9*)
         return ImGui::End();
     }
 
+    ImGui::Text("Match Information");
+    ImGui::Spacing();
+    
+    // Match Type dropdown
+    const char* match_types[] = { "AT A", "AT B", "AT C", "MAT", "Ladder", "Scrim" };
+    static int current_match_type = -1;
+    
+    // Find current selection index based on stored match_type
+    if (current_match_type == -1 && !Instance().match_type.empty()) {
+        for (int i = 0; i < 6; i++) {
+            if (Instance().match_type == match_types[i]) {
+                current_match_type = i;
+                break;
+            }
+        }
+    }
+    
+    if (ImGui::BeginCombo("Match Type", current_match_type >= 0 ? match_types[current_match_type] : "Select...")) {
+        for (int i = 0; i < 6; i++) {
+            const bool is_selected = (current_match_type == i);
+            if (ImGui::Selectable(match_types[i], is_selected)) {
+                current_match_type = i;
+                Instance().match_type = match_types[i];
+            }
+            if (is_selected) {
+                ImGui::SetItemDefaultFocus();
+            }
+        }
+        ImGui::EndCombo();
+    }
+    
+    // MAT Round dropdown (only shown if MAT is selected)
+    if (current_match_type == 3) { // MAT is at index 3
+        const char* mat_rounds[] = { "Qualification Stage", "Playoff", "Quarterfinals", "Semi-finals", "Finals" };
+        static int current_mat_round = -1;
+        
+        // Find current selection index based on stored mat_round
+        if (current_mat_round == -1 && !Instance().mat_round.empty()) {
+            for (int i = 0; i < 5; i++) {
+                if (Instance().mat_round == mat_rounds[i]) {
+                    current_mat_round = i;
+                    break;
+                }
+            }
+        }
+        
+        if (ImGui::BeginCombo("MAT Round", current_mat_round >= 0 ? mat_rounds[current_mat_round] : "Select...")) {
+            for (int i = 0; i < 5; i++) {
+                const bool is_selected = (current_mat_round == i);
+                if (ImGui::Selectable(mat_rounds[i], is_selected)) {
+                    current_mat_round = i;
+                    Instance().mat_round = mat_rounds[i];
+                }
+                if (is_selected) {
+                    ImGui::SetItemDefaultFocus();
+                }
+            }
+            ImGui::EndCombo();
+        }
+    }
+    
+    // Match Date input
+    char date_buf[64];
+    strncpy_s(date_buf, Instance().match_date.c_str(), 63);
+    if (ImGui::InputText("Match Date", date_buf, 64)) {
+        Instance().match_date = date_buf;
+    }
+    ImGui::ShowHelp("Format: YYYY-MM-DD (e.g., 2026-02-22)");
+    
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
     ImGui::Text("Export Observer matches to JSON");
 
     if (ImGui::Button("Export to JSON (Version 0.1)")) {
@@ -518,6 +881,33 @@ void ObserverExportWindow::Draw(IDirect3DDevice9*)
         ExportToJSON(Version::V_1_0);
     }
 
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    ImGui::Text("Upload to GWRank.com");
+    
+    ObserverModule& observer_module = ObserverModule::Instance();
+    bool can_export = observer_module.match_finished && !Instance().gwrank_api_key.empty();
+    
+    if (!observer_module.match_finished) {
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Match not finished");
+    } else if (Instance().gwrank_api_key.empty()) {
+        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "API key not configured");
+    }
+    
+    if (!can_export) {
+        ImGui::BeginDisabled();
+    }
+    
+    if (ImGui::Button("Export to GWRank.com")) {
+        ExportToGWRank();
+    }
+    
+    if (!can_export) {
+        ImGui::EndDisabled();
+    }
+
     ImGui::End();
 }
 
@@ -525,6 +915,23 @@ void ObserverExportWindow::Draw(IDirect3DDevice9*)
 void ObserverExportWindow::LoadSettings(ToolboxIni* ini)
 {
     ToolboxWindow::LoadSettings(ini);
+    
+    LOAD_STRING(gwrank_api_key);
+    LOAD_STRING(gwrank_endpoint);
+    LOAD_STRING(match_type);
+    LOAD_STRING(match_date);
+    LOAD_STRING(mat_round);
+    
+    if (gwrank_endpoint.empty()) {
+        gwrank_endpoint = "https://gwrank.com/api/v1/matches";
+    }
+    
+    // Prefill match_date with current date if empty
+    if (match_date.empty()) {
+        SYSTEMTIME time;
+        GetLocalTime(&time);
+        match_date = std::format("{:04}-{:02}-{:02}", time.wYear, time.wMonth, time.wDay);
+    }
 }
 
 
@@ -532,10 +939,33 @@ void ObserverExportWindow::LoadSettings(ToolboxIni* ini)
 void ObserverExportWindow::SaveSettings(ToolboxIni* ini)
 {
     ToolboxWindow::SaveSettings(ini);
+
+    SAVE_STRING(gwrank_api_key);
+    SAVE_STRING(gwrank_endpoint);
+    SAVE_STRING(match_type);
+    SAVE_STRING(match_date);
+    SAVE_STRING(mat_round);
 }
 
 // Draw settings
 void ObserverExportWindow::DrawSettingsInternal()
 {
-    // No internal settings yet
+    ImGui::TextUnformatted("GWRank.com API Integration");
+    ImGui::Text("Configure API credentials for exporting matches to GWRank.com");
+    ImGui::Spacing();
+    
+    char api_key_buf[256];
+    char endpoint_buf[256];
+    strncpy_s(api_key_buf, Instance().gwrank_api_key.c_str(), 255);
+    strncpy_s(endpoint_buf, Instance().gwrank_endpoint.c_str(), 255);
+    
+    if (ImGui::InputText("API Key", api_key_buf, 256, ImGuiInputTextFlags_Password)) {
+        Instance().gwrank_api_key = api_key_buf;
+    }
+    ImGui::ShowHelp("Enter your GWRank.com API key for authentication");
+    
+    if (ImGui::InputText("API Endpoint", endpoint_buf, 256)) {
+        Instance().gwrank_endpoint = endpoint_buf;
+    }
+    ImGui::ShowHelp("URL for the GWRank.com API endpoint (default: https://gwrank.com/api/v1/matches)");
 }

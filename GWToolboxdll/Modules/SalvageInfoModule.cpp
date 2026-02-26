@@ -22,12 +22,15 @@
 
 #include <Utils/GuiUtils.h>
 #include <Constants/EncStrings.h>
+#include <Utils/TextUtils.h>
+#include "PriceCheckerModule.h"
 
 using nlohmann::json;
 namespace {
 
     bool add_salvage_info_to_description = true;
     bool add_nicholas_info_to_description = true;
+    bool show_trader_value_for_salvage_items = false;
 
     void SignalItemDescriptionUpdated(const wchar_t* enc_name) {
         // Now we've got the wiki info parsed, trigger an item update ui message; this will refresh the item tooltip
@@ -135,45 +138,44 @@ namespace {
         if (!(formula && formula->material_cost_count))
             return;
 
-        std::vector<const wchar_t*> common_materials;
-        std::vector<const wchar_t*> rare_materials;
+        std::vector<std::wstring> common_materials;
+        std::vector<std::wstring> rare_materials;
         for (size_t i = 0; i < formula->material_cost_count; i++) {
             const auto material_id = formula->material_cost_buffer[i].material;
-            if (material_id > GW::Constants::MaterialSlot::Feather) {
-                rare_materials.push_back(material_name_from_slot(material_id));
+            const auto name = material_name_from_slot(material_id);
+            if (!name) continue;
+            const auto sell_price = PriceCheckerModule::GetTraderSellPrice(material_id);
+            auto* write_to = &common_materials;
+            if (material_id > GW::Constants::MaterialSlot::Feather) write_to = &rare_materials;
+            if (sell_price && show_trader_value_for_salvage_items) {
+                write_to->push_back(std::format(L"{}\x2\x108\x107 ({}g)\x1", name, sell_price));
             }
             else {
-                common_materials.push_back(material_name_from_slot(material_id));
+                write_to->push_back(name);
             }
         }
+        if (common_materials.empty() && rare_materials.empty()) return;
 
+        
+
+        std::wstring items;
         if (!common_materials.empty()) {
-            std::wstring items;
-            for (auto i : common_materials) {
-                if(!i) continue;
-                if (!items.empty())
-                    items += L"\x2\x108\x107, \x1\x2";
-                items += i;
-            }
-            if (!items.empty()) {
-                NewLineIfNotEmpty(description);
-                description += std::format(L"{}\x10a\x108\x107" L"Common Materials: \x1\x1\x2{}", GW::EncStrings::ItemCommon, items);
-            }
+            NewLineIfNotEmpty(items);
+            items += L"\x108\x107"
+                     "Common Materials: \x1\x2";
 
+            items += TextUtils::Join(common_materials, L"\x2\x108\x107, \x1\x2");
         }
         if (!rare_materials.empty()) {
-            std::wstring items;
-            for (auto i : rare_materials) {
-                if (!i) continue;
-                if (!items.empty())
-                    items += L"\x2\x108\x107, \x1\x2";
-                items += i;
-            }
-            if (!items.empty()) {
-                NewLineIfNotEmpty(description);
-                description += std::format(L"{}\x10a\x108\x107" L"Rare Materials: \x1\x1\x2{}", GW::EncStrings::ItemRare, items);
-            }
+            NewLineIfNotEmpty(items);
+            items += L"\x108\x107"
+                     "Rare Materials: \x1\x2";
+            items += TextUtils::Join(rare_materials, L"\x2\x108\x107, \x1\x2");
         }
+        if (!description.empty()) description += L"\x2";
+        description += L"\x108\x107<c=@ItemDull><brx>\x1\x2";
+        description += items;
+        description += L"\x2\x108\x107</c>\x1";
 
     }
     void AppendNicholasInfo(const uint32_t item_id, std::wstring& description) {
@@ -185,10 +187,10 @@ namespace {
         const auto current_time = time(nullptr);
         NewLineIfNotEmpty(description);
         if (collection_time <= current_time) {
-            description += std::format(L"{}\x10a\x108\x107Nicholas The Traveler collects {} of these right now!\x1\x1", GW::EncStrings::ItemUnique, nicholas_info->quantity);
+            description += std::format(L"{}\x10a\x108\x107<brx>Nicholas The Traveler collects {} of these right now!\x1\x1", GW::EncStrings::ItemUnique, nicholas_info->quantity);
         }
         else {
-            description += std::format(L"{}\x10a\x108\x107Nicholas The Traveler collects {} of these in {}!\x1\x1", GW::EncStrings::ItemUnique, nicholas_info->quantity, PrintRelativeTime(collection_time));
+            description += std::format(L"{}\x10a\x108\x107<brx>Nicholas The Traveler collects {} of these in {}!\x1\x1", GW::EncStrings::ItemUnique, nicholas_info->quantity, PrintRelativeTime(collection_time));
         }
     }
     std::wstring tmp_item_description;
@@ -258,6 +260,7 @@ void SalvageInfoModule::SaveSettings(ToolboxIni* ini)
     ToolboxModule::SaveSettings(ini);
     SAVE_BOOL(add_nicholas_info_to_description);
     SAVE_BOOL(add_salvage_info_to_description);
+    SAVE_BOOL(show_trader_value_for_salvage_items);
 }
 
 void SalvageInfoModule::LoadSettings(ToolboxIni* ini)
@@ -265,6 +268,7 @@ void SalvageInfoModule::LoadSettings(ToolboxIni* ini)
     ToolboxModule::LoadSettings(ini);
     LOAD_BOOL(add_nicholas_info_to_description);
     LOAD_BOOL(add_salvage_info_to_description);
+    LOAD_BOOL(show_trader_value_for_salvage_items);
 }
 
 void SalvageInfoModule::DrawSettingsInternal()
@@ -272,6 +276,12 @@ void SalvageInfoModule::DrawSettingsInternal()
     ImGui::TextDisabled("This module adds salvage and Nicholas information to item tooltips");
     ImGui::Checkbox("Show salvage materials in item description", &add_salvage_info_to_description);
     ImGui::ShowHelp("When hovering over a salvageable item, display which common and rare materials can be salvaged from it");
+    if (add_salvage_info_to_description) {
+        ImGui::Indent();
+        ImGui::Checkbox("Show trader value for salvage materials", &show_trader_value_for_salvage_items);
+        ImGui::Unindent();
+    }
+    
     ImGui::Checkbox("Show Nicholas the Traveler info in item description", &add_nicholas_info_to_description);
     ImGui::ShowHelp("When hovering over an item that Nicholas collects, display when he will collect it and how many he wants");
 }

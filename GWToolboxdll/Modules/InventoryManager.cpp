@@ -85,10 +85,12 @@ namespace {
 
     bool salvage_rare_mats = false;
     bool salvage_nicholas_items = true;
+    bool identify_greens = true;
     bool show_transact_quantity_popup = false;
     bool transaction_listeners_attached = false;
 
     bool wiki_link_on_context_menu = false;
+    bool market_search_on_context_menu = false;
     bool right_click_context_menu_in_explorable = true;
     bool right_click_context_menu_in_outpost = true;
 
@@ -1093,7 +1095,10 @@ namespace {
                 }
                 switch (identify_all_type) {
                     case InventoryManager::IdentifyAllType::All:
-                        return item;
+                        if (identify_greens || !item->IsGreen()) {
+                            return item;
+                        }
+                        break;
                     case InventoryManager::IdentifyAllType::Blue:
                         if (item->IsBlue()) {
                             return item;
@@ -1764,8 +1769,10 @@ void InventoryManager::SaveSettings(ToolboxIni* ini)
     SAVE_BOOL(only_use_superior_salvage_kits);
     SAVE_BOOL(salvage_rare_mats);
     SAVE_BOOL(salvage_nicholas_items);
+    SAVE_BOOL(identify_greens);
     SAVE_BOOL(trade_whole_stacks);
     SAVE_BOOL(wiki_link_on_context_menu);
+    SAVE_BOOL(market_search_on_context_menu);
     SAVE_BOOL(hide_unsellable_items);
     SAVE_BOOL(hide_golds_from_merchant);
     SAVE_BOOL(hide_weapon_sets_and_customized_items);
@@ -1794,8 +1801,10 @@ void InventoryManager::LoadSettings(ToolboxIni* ini)
     LOAD_BOOL(only_use_superior_salvage_kits);
     LOAD_BOOL(salvage_rare_mats);
     LOAD_BOOL(salvage_nicholas_items);
+    LOAD_BOOL(identify_greens);
     LOAD_BOOL(trade_whole_stacks);
     LOAD_BOOL(wiki_link_on_context_menu);
+    LOAD_BOOL(market_search_on_context_menu);
     LOAD_BOOL(hide_golds_from_merchant);
     LOAD_BOOL(hide_unsellable_items);
     LOAD_BOOL(hide_weapon_sets_and_customized_items);
@@ -1981,7 +1990,7 @@ uint16_t InventoryManager::StoreItems(uint16_t quantity, const std::vector<unsig
 
 GW::Item* InventoryManager::GetAvailableInventoryStack(GW::Item* like_item, const bool entire_stack)
 {
-    if (!like_item || static_cast<Item*>(like_item)->IsStackable()) {
+    if (!like_item || like_item->GetIsStackable()) {
         return nullptr;
     }
     GW::Item* best_item = nullptr;
@@ -2033,6 +2042,7 @@ void InventoryManager::DrawSettingsInternal()
     if (ImGui::Checkbox("Alt+Click", &move_to_trade_on_alt_click) && move_to_trade_on_alt_click) move_to_trade_on_double_click = false;
     ImGui::Unindent();
     ImGui::Checkbox("Show 'Guild Wars Wiki' link on item context menu", &wiki_link_on_context_menu);
+    ImGui::Checkbox("Show 'Search on Market' link on item context menu", &market_search_on_context_menu);
     ImGui::Checkbox("Prompt to change secondary profession when using a tome", &change_secondary_for_tome);
     ImGui::Text("Right click an item to open context menu in:");
     ImGui::Indent();
@@ -2059,6 +2069,8 @@ void InventoryManager::DrawSettingsInternal()
     ImGui::Checkbox("Bag 2", &bags_to_salvage_from[GW::Constants::Bag::Bag_2]);
     ImGui::Checkbox("Salvage All with Control+Click", &salvage_all_on_ctrl_click);
     ImGui::ShowHelp("Control+Click a salvage kit to open the Salvage All window");
+    ImGui::Checkbox("Identify green items", &identify_greens);
+    ImGui::ShowHelp("Untick to skip green items when doing Identify All");
     ImGui::Checkbox("Identify All with Control+Click", &identify_all_on_ctrl_click);
     ImGui::ShowHelp("Control+Click an identification kit to identify all items with it");
     ImGui::Checkbox("Auto re-use salvage kit", &auto_reuse_salvage_kit);
@@ -2313,6 +2325,9 @@ bool InventoryManager::DrawItemContextMenu(const bool open)
         if (wiki_link_on_context_menu) {
             return true;
         }
+        if (market_search_on_context_menu) {
+            return true;
+        }
         return item->IsIdentificationKit() || item->IsSalvageKit();
     };
     auto context_item_actual = context_item.item();
@@ -2512,6 +2527,10 @@ bool InventoryManager::DrawItemContextMenu(const bool open)
     if (wiki_link_on_context_menu && ImGui::Button("Guild Wars Wiki", size)) {
         ImGui::CloseCurrentPopup();
         GuiUtils::SearchWiki(context_item.wiki_name->wstring());
+    }
+    if (market_search_on_context_menu && context_item_actual->IsTradable() && ImGui::Button("Search on Market", size)) {
+        ImGui::CloseCurrentPopup();
+        GWMarketWindow::SearchItem(context_item.wiki_name->string());
     }
     if (ArmoryWindow::CanPreviewItem(context_item.item())) {
         if (ImGui::Button("Preview Item", size)) {

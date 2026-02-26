@@ -150,6 +150,7 @@ namespace GW {
         GWCA_API const wchar_t* GetEncodedLabel();
         GWCA_API const wchar_t* GetDecodedLabel();
         GWCA_API bool SetLabel(const wchar_t* enc_string);
+        GWCA_API bool SetFont(uint32_t);
     };
     struct MultiLineTextLabelFrame final : TextLabelFrame {
         GWCA_API const wchar_t* GetEncodedLabel();
