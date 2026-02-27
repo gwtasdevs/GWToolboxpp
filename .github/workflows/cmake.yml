@@ -17,35 +17,57 @@ jobs:
       tag: ${{ steps.check.outputs.tag }}
       run: ${{ steps.check.outputs.run }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          fetch-tags: true
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        fetch-tags: true
 
-      - name: Check for latest release
-        id: check
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          BODY=$(gh api repos/gwdevhub/GWToolboxpp/releases/latest --jq .body)
-          TAG=$(gh api repos/gwdevhub/GWToolboxpp/releases/latest --jq .tag_name)
-          echo "Latest upstream release tag: $TAG"
-          echo "body=$BODY" >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+    - name: Check for latest release
+      id: check
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        BODY=$(gh api repos/gwdevhub/GWToolboxpp/releases/latest --jq .body)
+        TAG=$(gh api repos/gwdevhub/GWToolboxpp/releases/latest --jq .tag_name)
+        echo "Latest upstream release tag: $TAG"
+        echo "body=$BODY" >> "$GITHUB_OUTPUT"
+        echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-          git tag
+        git tag
 
-          if git show-ref --tags --quiet --verify "refs/tags/$TAG"; then
-            echo "Already processed."
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "New version detected."
-          fi
+        if git show-ref --tags --quiet --verify "refs/tags/$TAG"; then
+          echo "Already processed."
+          echo "run=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "New version detected."
+        fi
+
+  merge:
+    runs-on: ubuntu-latest
+    needs: check
+    if: needs.check.outputs.run != 'false'
+    permissions:
+      contents: write
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Merge from upstream
+      env:
+        TAG: ${{ needs.check.outputs.tag }}
+      run: |
+        git remote add upstream https://github.com/gwdevhub/GWToolboxpp.git
+        git fetch upstream --tags
+        git checkout master
+        git merge "refs/tags/${TAG}" --no-edit
+        git push origin master
 
   build:
     runs-on: windows-latest
-    needs: check
+    needs: [check, merge]
     if: needs.check.outputs.run != 'false'
     timeout-minutes: 20
     permissions:
