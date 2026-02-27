@@ -31,10 +31,12 @@ jobs:
         BODY=$(gh api repos/gwdevhub/GWToolboxpp/releases/latest --jq .body)
         TAG=$(gh api repos/gwdevhub/GWToolboxpp/releases/latest --jq .tag_name)
         echo "Latest upstream release tag: $TAG"
-        echo "body=$BODY" >> "$GITHUB_OUTPUT"
+        {
+          echo "body<<EOF"
+          echo "$BODY"
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
         echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-
-        git tag
 
         if git show-ref --tags --quiet --verify "refs/tags/$TAG"; then
           echo "Already processed."
