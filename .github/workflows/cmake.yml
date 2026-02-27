@@ -13,6 +13,8 @@ jobs:
   check:
     runs-on: ubuntu-latest
     outputs:
+      body: ${{ steps.check.outputs.body }}
+      tag: ${{ steps.check.outputs.tag }}
       run: ${{ steps.check.outputs.run }}
     steps:
       - name: Checkout repository
@@ -26,8 +28,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          BODY=$(gh api repos/gwdevhub/GWToolboxpp/releases/latest --jq .body)
           TAG=$(gh api repos/gwdevhub/GWToolboxpp/releases/latest --jq .tag_name)
           echo "Latest upstream release tag: $TAG"
+          echo "body=$BODY" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
           git tag
@@ -121,6 +125,7 @@ jobs:
       shell: bash
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        RELEASE_NOTES: ${{ needs.check.outputs.body }}
       run: |
         VERSION=$(sed -n 's/.*set(GWTOOLBOXDLL_VERSION "\(.*\)").*/\1/p' CMakeLists.txt | tr -d '\r')
         BETA=$(sed -n 's/.*set(GWTOOLBOXDLL_VERSION_BETA "\(.*\)").*/\1/p' CMakeLists.txt | tr -d '\r')
@@ -165,4 +170,5 @@ jobs:
         # Create release
         gh release create "$TAG_NAME" \
           --title "$TAG_NAME" \
+          --notes "$RELEASE_NOTES" \
           GWToolboxdll.dll RawDialogs.dll SpeedrunScriptingTools.dll GWToolboxdll.pdb.gz gwca.dll
