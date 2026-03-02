@@ -73,7 +73,7 @@ jobs:
       run: |
         git remote add upstream https://github.com/gwdevhub/GWToolboxpp.git
         git fetch upstream
-        git checkout master
+        git checkout origin/master
         git merge "refs/tags/${TAG}" --no-edit
         git push origin master
 
@@ -84,7 +84,7 @@ jobs:
       run: |
         git remote add upstream https://github.com/gwdevhub/GWToolboxpp.git
         git fetch upstream
-        git checkout dev
+        git checkout origin/dev
         git reset --hard master
         git merge $DEV_COMMIT --no-edit
         git push origin dev -f
