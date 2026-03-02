@@ -14,6 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       body: ${{ steps.check.outputs.body }}
+      dev_commit: ${{ steps.check.outputs.dev_commit }}
       tag: ${{ steps.check.outputs.tag }}
       run: ${{ steps.check.outputs.run }}
     steps:
@@ -30,6 +31,7 @@ jobs:
       run: |
         BODY=$(gh api repos/gwdevhub/GWToolboxpp/releases/latest --jq .body)
         TAG=$(gh api repos/gwdevhub/GWToolboxpp/releases/latest --jq .tag_name)
+        DEV_COMMIT=$(gh api repos/gwdevhub/GWToolboxpp/commits/dev --jq .sha)
         echo "Latest upstream release tag: $TAG"
         {
           echo "body<<EOF"
@@ -37,12 +39,19 @@ jobs:
           echo "EOF"
         } >> "$GITHUB_OUTPUT"
         echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+        echo "dev_commit=$DEV_COMMIT" >> "$GITHUB_OUTPUT"
 
         if git show-ref --tags --quiet --verify "refs/tags/$TAG"; then
-          echo "Already processed."
-          echo "run=false" >> "$GITHUB_OUTPUT"
+          if git show-ref --tags --quiet --verify "refs/tags/$DEV_COMMIT"; then
+            echo "Already processed."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New dev version detected."
+            echo "run=dev" >> "$GITHUB_OUTPUT"
+          fi
         else
-          echo "New version detected."
+          echo "New stable version detected."
+          echo "run=true" >> "$GITHUB_OUTPUT"
         fi
 
   merge:
@@ -57,7 +66,8 @@ jobs:
       with:
         fetch-depth: 0
 
-    - name: Merge from upstream
+    - name: Merge from upstream master
+      if: needs.check.outputs.run == 'true'
       env:
         TAG: ${{ needs.check.outputs.tag }}
       run: |
@@ -66,6 +76,18 @@ jobs:
         git checkout master
         git merge "refs/tags/${TAG}" --no-edit
         git push origin master
+
+    - name: Merge from upstream dev
+      if: needs.check.outputs.run == 'dev'
+      env:
+        DEV_COMMIT: ${{ needs.check.outputs.dev_commit }}
+      run: |
+        git remote add upstream https://github.com/gwdevhub/GWToolboxpp.git
+        git fetch upstream --tags
+        git checkout dev
+        git reset --hard master
+        git merge $DEV_COMMIT --no-edit
+        git push origin dev -f
 
   build:
     runs-on: windows-latest
@@ -150,6 +172,7 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         RELEASE_NOTES: ${{ needs.check.outputs.body }}
+        DEV_COMMIT: ${{ needs.check.outputs.run == 'dev' && needs.check.outputs.dev_commit || '' }}
       run: |
         VERSION=$(sed -n 's/.*set(GWTOOLBOXDLL_VERSION "\(.*\)").*/\1/p' CMakeLists.txt | tr -d '\r')
         BETA=$(sed -n 's/.*set(GWTOOLBOXDLL_VERSION_BETA "\(.*\)").*/\1/p' CMakeLists.txt | tr -d '\r')
@@ -159,10 +182,14 @@ jobs:
           exit 1
         fi
 
-        if [ -z "$BETA" ]; then
-          TAG_NAME="${VERSION}_Release"
+        if [ -n "$DEV_COMMIT" ]; then
+          TAG_NAME="$DEV_COMMIT"
         else
-          TAG_NAME="${VERSION}_${BETA}"
+          if [ -z "$BETA" ]; then
+            TAG_NAME="${VERSION}_Release"
+          else
+            TAG_NAME="${VERSION}_${BETA}"
+          fi
         fi
 
         echo "Detected version: $VERSION"
@@ -192,7 +219,15 @@ jobs:
         gzip -c "$BIN_DIR/GWToolboxdll.pdb" > GWToolboxdll.pdb.gz
 
         # Create release
-        gh release create "$TAG_NAME" \
-          --title "$TAG_NAME" \
-          --notes "$RELEASE_NOTES" \
-          GWToolboxdll.dll RawDialogs.dll SpeedrunScriptingTools.dll GWToolboxdll.pdb.gz gwca.dll
+        if [ -n "$DEV_COMMIT" ]; then
+          gh release create "$TAG_NAME" \
+            --title "$TAG_NAME" \
+            --notes "$RELEASE_NOTES" \
+            --prerelease \
+            GWToolboxdll.dll RawDialogs.dll SpeedrunScriptingTools.dll GWToolboxdll.pdb.gz gwca.dll
+        else
+          gh release create "$TAG_NAME" \
+            --title "$TAG_NAME" \
+            --notes "$RELEASE_NOTES" \
+            GWToolboxdll.dll RawDialogs.dll SpeedrunScriptingTools.dll GWToolboxdll.pdb.gz gwca.dll
+        fi
