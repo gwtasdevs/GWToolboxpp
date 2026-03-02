@@ -85,7 +85,7 @@ jobs:
         git remote add upstream https://github.com/gwdevhub/GWToolboxpp.git
         git fetch upstream
         git checkout -b dev
-        git reset --hard master
+        git reset --hard origin/master
         git merge $DEV_COMMIT --no-edit
         git push origin dev -f
 
