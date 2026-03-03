@@ -74,6 +74,8 @@ jobs:
         git remote add upstream https://github.com/gwdevhub/GWToolboxpp.git
         git fetch upstream
         git checkout master
+        git config --global user.email "bot@github.com"
+        git config --global user.name "GitHub Actions Bot"
         git merge "refs/tags/${TAG}" --no-edit
         git push origin master
 
@@ -86,6 +88,8 @@ jobs:
         git fetch upstream
         git checkout -b dev
         git reset --hard origin/master
+        git config --global user.email "bot@github.com"
+        git config --global user.name "GitHub Actions Bot"
         git merge $DEV_COMMIT --no-edit
         git push origin dev -f
 
