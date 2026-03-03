@@ -227,7 +227,6 @@ jobs:
         if [ -n "$DEV_COMMIT" ]; then
           gh release create "$TAG_NAME" \
             --title "$TAG_NAME" \
-            --notes "$RELEASE_NOTES" \
             --prerelease \
             GWToolboxdll.dll RawDialogs.dll SpeedrunScriptingTools.dll GWToolboxdll.pdb.gz gwca.dll
         else
