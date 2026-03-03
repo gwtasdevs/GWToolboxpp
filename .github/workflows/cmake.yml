@@ -42,7 +42,7 @@ jobs:
         echo "dev_commit=$DEV_COMMIT" >> "$GITHUB_OUTPUT"
 
         if git show-ref --tags --quiet --verify "refs/tags/$TAG"; then
-          if git show-ref --tags --quiet --verify "refs/tags/$DEV_COMMIT"; then
+          if git show-ref --tags --quiet --verify "refs/tags/commit-$DEV_COMMIT"; then
             echo "Already processed."
             echo "run=false" >> "$GITHUB_OUTPUT"
           else
@@ -187,7 +187,7 @@ jobs:
         fi
 
         if [ -n "$DEV_COMMIT" ]; then
-          TAG_NAME="$DEV_COMMIT"
+          TAG_NAME="commit-$DEV_COMMIT"
         else
           if [ -z "$BETA" ]; then
             TAG_NAME="${VERSION}_Release"
