@@ -1143,7 +1143,7 @@ void WorldMapWidget::Draw(IDirect3DDevice9*)
         controls_window_rect.Translate(mouse_offset);
     }
     hovered_map_portal = 0;
-    #ifdef _DEBUG
+    #if 0
     DrawAreaOverlays();
     const auto current_map_info = GW::Map::GetMapInfo();
     for (auto& [_, map_info] : map_info_by_file_id) {

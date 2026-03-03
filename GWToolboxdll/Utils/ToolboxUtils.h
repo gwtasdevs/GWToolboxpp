@@ -48,6 +48,7 @@ namespace GW {
     namespace Constants {
         enum class SkillID : uint32_t;
         enum class TitleID : uint32_t;
+        enum class MaterialSlot : uint32_t;
         // Blunt, Piercing, Slashing, Cold, Lightning, Fire, Chaos, Dark, Holy, Nature, Sacrifice, Earth, Generic, Dark
         enum class DamageType : uint8_t {
             Blunt,
@@ -182,6 +183,13 @@ namespace GW {
         const char* GetDamageTypeName(const GW::Constants::DamageType type);
         const char* GetRarityName(const GW::Constants::Rarity rarity);
         const char* GetItemTypeName(const GW::Constants::ItemType item_type);
+
+        struct MaterialInfo {
+            const wchar_t* enc_name; // for tooltip display
+            int model_id;            // for price lookup
+        };
+
+        const MaterialInfo* GetMaterialInfo(GW::Constants::MaterialSlot slot);
 
         uint32_t GetUses(GW::Item* item);
         uint32_t GetAlcoholPointsPerUse(GW::Item* item);

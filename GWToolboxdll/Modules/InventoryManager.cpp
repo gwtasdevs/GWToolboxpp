@@ -1318,6 +1318,7 @@ namespace {
 
     void DrawMerchantHiddenItemsSettings()
     {
+        ImGui::NewLine();
         // Two-column layout for merchant items using tables
         if (ImGui::BeginTable("merchant_settings_table", 2, ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV)) {
             ImGui::TableSetupColumn("Hidden from Merchant", ImGuiTableColumnFlags_WidthStretch);
@@ -2028,7 +2029,9 @@ bool InventoryManager::IsSameItem(const GW::Item* item1, const GW::Item* item2)
 
 void InventoryManager::DrawSettingsInternal()
 {
-    ImGui::TextDisabled("This module is responsible for extra item functions via ctrl+click, right click or double click");
+    ImGui::NewLine();
+    ImGui::TextDisabled("Control extra item functions via ctrl+click, right click or double click");
+    ImGui::Separator();
     ImGui::Checkbox("Hide unsellable items from merchant window", &hide_unsellable_items);
     ImGui::Checkbox("Hide weapon sets and customized items from merchant window", &hide_weapon_sets_and_customized_items);
     ImGui::Checkbox("Hide gold items from merchant window", &hide_golds_from_merchant);
@@ -2077,13 +2080,7 @@ void InventoryManager::DrawSettingsInternal()
     ImGui::ShowHelp("When a salvage kit is used up immediately by salvaging without a popup,\ncheck this box to 're-use' the kit ready for the next item.");
     ImGui::Checkbox("Auto re-use identification kit", &auto_reuse_id_kit);
     ImGui::ShowHelp("When a identification kit is used up immediately by identifying an item,\ncheck this box to 're-use' the kit ready for the next item.");
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
     DrawMerchantHiddenItemsSettings();
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
 }
 
 void InventoryManager::Update(float)
