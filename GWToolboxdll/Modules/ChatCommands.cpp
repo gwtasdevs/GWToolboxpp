@@ -1840,9 +1840,7 @@ void ChatCommands::SkillToUse::Update()
     }
     const auto lslot = slot - 1;
     const GW::SkillbarSkill& skill = skillbar->skills[lslot];
-    if (skill.skill_id == GW::Constants::SkillID::No_Skill
-        || skill.skill_id == GW::Constants::SkillID::Mystic_Healing
-        || skill.skill_id == GW::Constants::SkillID::Cautery_Signet) {
+    if (skill.skill_id == GW::Constants::SkillID::No_Skill) {
         slot = 0;
         return;
     }
