@@ -36,8 +36,8 @@ namespace {
         if (!agent) {
             return 0;
         }
-        if (agent->primary) {
-            return agent->primary;
+        if (agent->primary != GW::Constants::ProfessionByte::None) {
+            return (uint32_t)agent->primary;
         }
         const GW::NPC* npc = GW::Agents::GetNPCByID(agent->player_number);
         if (!npc) {
