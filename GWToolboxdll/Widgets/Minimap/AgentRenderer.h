@@ -190,6 +190,7 @@ private:
     float size_boss = 125.f;
     float size_minion = 50.f;
     float size_marked_target = 75.f;
+    bool marked_target_inherit_custom_agents = false;
     Shape_e default_shape = Tear;
     Shape_e shape_player = Tear;
     Shape_e shape_players = Tear;
