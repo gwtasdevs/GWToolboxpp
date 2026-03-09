@@ -193,31 +193,31 @@ namespace GW
 
             namespace UW
             {
-                constexpr int ChainedSoul = 2317;
-                constexpr int DyingNightmare = 2318;
-                constexpr int ObsidianBehemoth = 2319;
-                constexpr int ObsidianGuardian = 2320;
-                constexpr int TerrorwebDryder = 2321;
-                constexpr int TerrorwebDryderSilver = 2322;
-                constexpr int KeeperOfSouls = 2323;
-                constexpr int TerrorwebQueen = 2324; // boss-like
-                constexpr int SmiteCrawler = 2325;
-                constexpr int WailingLord = 2326; // Note: same as FoW::Banshee
-                constexpr int BanishedDreamRider = 2327;
-                // 2324 ?
-                constexpr int FourHorseman = 2329; // all four share the same id
-                constexpr int MindbladeSpectre = 2330;
+                constexpr int ChainedSoul = 2367;
+                constexpr int DyingNightmare = 2368;
+                constexpr int ObsidianBehemoth = 2369;
+                constexpr int ObsidianGuardian = 2370;
+                constexpr int TerrorwebDryder = 2371;
+                constexpr int TerrorwebDryderSilver = 2372;
+                constexpr int KeeperOfSouls = 2373;
+                constexpr int TerrorwebQueen = 2374; // boss-like
+                constexpr int SmiteCrawler = 2375;
+                constexpr int WailingLord = 2376; // Note: same as FoW::Banshee
+                constexpr int BanishedDreamRider = 2377;
+                // 2378 ?
+                constexpr int FourHorseman = 2379; // all four share the same id
+                constexpr int MindbladeSpectre = 2380;
 
-                constexpr int DeadCollector = 2332;
-                constexpr int DeadThresher = 2333;
-                constexpr int ColdfireNight = 2334;
-                constexpr int StalkingNight = 2335;
-                // 2332 ?
-                constexpr int ChargedBlackness = 2337;
-                constexpr int GraspingDarkness = 2338;
-                constexpr int BladedAatxe = 2339;
+                constexpr int DeadCollector = 2382;
+                constexpr int DeadThresher = 2383;
+                constexpr int ColdfireNight = 2384;
+                constexpr int StalkingNight = 2385;
+                // 2386 ?
+                constexpr int ChargedBlackness = 2387;
+                constexpr int GraspingDarkness = 2388;
+                constexpr int BladedAatxe = 2389;
 
-                // 2336 ?
+                // 2390 ?
                 constexpr int Slayer = 2391;
                 constexpr int SkeletonOfDhuum1 = 2392;
                 constexpr int SkeletonOfDhuum2 = 2393;
