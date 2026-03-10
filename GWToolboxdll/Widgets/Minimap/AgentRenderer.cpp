@@ -36,8 +36,8 @@ namespace {
         if (!agent) {
             return 0;
         }
-        if (agent->primary) {
-            return agent->primary;
+        if (agent->primary != GW::Constants::ProfessionByte::None) {
+            return (uint32_t)agent->primary;
         }
         const GW::NPC* npc = GW::Agents::GetNPCByID(agent->player_number);
         if (!npc) {
@@ -207,6 +207,7 @@ void AgentRenderer::LoadSettings(const ToolboxIni* ini, const char* section)
     LoadDefaultSizes();
     
     LOAD_FLOAT(size_marked_target);
+    LOAD_BOOL(marked_target_inherit_custom_agents);
     LOAD_FLOAT(size_default);
     LOAD_FLOAT(size_player);
     LOAD_FLOAT(size_signpost);
@@ -287,6 +288,7 @@ void AgentRenderer::SaveSettings(ToolboxIni* ini, const char* section) const
     SAVE_FLOAT(size_boss);
     SAVE_FLOAT(size_minion);
     SAVE_FLOAT(size_marked_target);
+    SAVE_BOOL(marked_target_inherit_custom_agents);
     SAVE_UINT(default_shape);
     SAVE_UINT(shape_player);
     SAVE_UINT(shape_players);
@@ -413,6 +415,10 @@ void AgentRenderer::DrawSettings()
         ImGui::DragFloat("Minion Size", &size_minion, 1.0f, 1.0f, 0.0f, "%.0f");
         ImGui::DragFloat("Marked Target Size", &size_marked_target, 1.0f, 1.0f, 0.0f, "%.0f");
         ImGui::ShowHelp("Agents highlighted as marked target via /marktarget command");
+        // Right-align the checkbox
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::CalcItemWidth() - ImGui::GetFrameHeight());
+        ImGui::Checkbox("Marked Targets Inherit Custom Size/Shape", &marked_target_inherit_custom_agents);
+        ImGui::ShowHelp("When enabled, agents highlighted via /marktarget use their custom agent size and shape if one is defined");
         static std::array items = {"Tear", "Circle", "Square", "Big Circle"};
         ImGui::Combo("Default Shape", reinterpret_cast<int*>(&default_shape), items.data(), items.size());
         ImGui::Combo("Player Shape", reinterpret_cast<int*>(&shape_player), items.data(), items.size());
@@ -883,7 +889,12 @@ void AgentRenderer::Render(IDirect3DDevice9* device)
         if (!agent->GetIsAlive()) {
             continue;
         }
-        Enqueue(default_shape, agent, size_marked_target, color_marked_target);
+        // Apply custom size/shape if defined && marked_target_inherit_custom_agents == true
+        const auto* cas = GetCustomAgentsToDraw(agent);
+        const auto* ca = cas && !cas->empty() ? cas->front() : nullptr;
+        const auto size = marked_target_inherit_custom_agents && ca && ca->size_active && ca->size >= 0 ? ca->size : size_marked_target;
+        const auto shape = marked_target_inherit_custom_agents && ca && ca->shape_active ? ca->shape : default_shape;
+        Enqueue(shape, agent, size, color_marked_target);
     }
 
     // 4. target if it's a non-player
@@ -896,7 +907,11 @@ void AgentRenderer::Render(IDirect3DDevice9* device)
             }
         }
         if (marked) {
-            Enqueue(default_shape, target, size_marked_target, color_marked_target);
+            // Apply custom size/shape if defined && marked_target_inherit_custom_agents == true
+            const auto* ca = custom_agents_for_this_agent && !custom_agents_for_this_agent->empty() ? custom_agents_for_this_agent->front() : nullptr;
+            const auto size = marked_target_inherit_custom_agents && ca && ca->size_active && ca->size >= 0 ? ca->size : size_marked_target;
+            const auto shape = marked_target_inherit_custom_agents && ca && ca->shape_active ? ca->shape : default_shape;
+            Enqueue(shape, target, size, color_marked_target);
         }
 
         if (!marked && !custom_agents_for_this_agent) {

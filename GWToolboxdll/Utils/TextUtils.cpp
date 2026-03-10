@@ -386,6 +386,13 @@ namespace TextUtils {
         });
         return out;
     }
+    std::wstring FormatFloat(float value, int max_decimal_places)
+    {
+        auto str = std::format(L"{:.{}f}", value, max_decimal_places);
+        str.erase(str.find_last_not_of(L'0') + 1);
+        if (str.back() == L'.') str.pop_back();
+        return str;
+    }
 
     std::string SanitizePlayerName(const std::string_view str)
     {
