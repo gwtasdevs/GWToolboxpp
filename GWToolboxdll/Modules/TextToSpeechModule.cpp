@@ -1482,17 +1482,8 @@ return audio_data;
             }
 
             // Save to cache
-            Resources::EnsureFolderExists(audio->path.parent_path());
-            FILE* fp = fopen(audio->path.string().c_str(), "wb");
-            if (!fp) {
-                VoiceLog("Failed to open file for writing: %s", audio->path.string().c_str());
-                delete audio;
-                return generating_voice = false;
-            }
-            const auto written = fwrite(audio_data.data(), sizeof(audio_data[0]), audio_data.size(), fp);
-            fclose(fp);
-            if (written < 1) {
-                VoiceLog("Failed to write audio data to file: %s", audio->path.string().c_str());
+            if (!Resources::WriteFile(audio->path, audio_data)) {
+                VoiceLog("Failed to write audio data to file: %s", TextUtils::WStringToString(audio->path.wstring()).c_str());
                 delete audio;
                 return generating_voice = false;
             }
