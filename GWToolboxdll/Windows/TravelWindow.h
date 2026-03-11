@@ -9,6 +9,7 @@ namespace GuiUtils {
     class EncString;
 }
 namespace GW {
+    enum class Continent : uint32_t;
     namespace Constants {
         enum class Language;
         enum class ServerRegion;
@@ -56,6 +57,8 @@ public:
     void LoadSettings(ToolboxIni* ini) override;
     void SaveSettings(ToolboxIni* ini) override;
     void DrawSettingsInternal() override;
+    static GW::Constants::MapID GetNearestOutpostToLocation(const GW::Continent continent, const GW::Vec2f& world_map_pos);
+    static GW::Constants::MapID GetNearestOutpostToPlayer();
     static GW::Constants::MapID GetNearestOutpost(GW::Constants::MapID map_to);
 
 private:

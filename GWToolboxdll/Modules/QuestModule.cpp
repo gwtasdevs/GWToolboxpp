@@ -37,8 +37,6 @@ namespace {
     bool show_paths_to_all_quests = false;
     bool keep_current_quest_when_new_quest_added = false;
 
-    clock_t fetching_all_quest_info = 0;
-
     bool fetch_missing_quest_info_queued = false;
 
     GW::HookEntry pre_ui_message_entry;
@@ -413,11 +411,6 @@ namespace {
                         QuestModule::EmulateQuestSelected(player_chosen_quest_id);
                         break;
                     }
-                    if ((quest->log_state & 0x1) && TIMER_DIFF(fetching_all_quest_info) < 1000) {
-                        status->blocked = true;
-                        QuestModule::EmulateQuestSelected(player_chosen_quest_id);
-                        break;
-                    }
                 }
             } break;
             case GW::UI::UIMessage::kStartMapLoad:
@@ -777,25 +770,15 @@ void QuestModule::Update(float)
         // NB: We only do this once the loading splash screen is gone
         fetch_missing_quest_info_queued = 0;
         GW::GameThread::Enqueue([] {
-            const auto current_map = GW::Map::GetMapInfo();
-            if (!current_map) return;
-            bool requested = false;
             const auto quest_log = GW::QuestMgr::GetQuestLog();
-            player_chosen_quest_id = GW::QuestMgr::GetActiveQuestId();
+            const auto active_quest = GW::QuestMgr::GetActiveQuestId();
             if (!quest_log) return;
+            BlockQuestSound();
             for (auto& quest : *quest_log) {
-                if (quest.map_to == GW::Constants::MapID::Count) continue;
                 if ((quest.log_state & 1)) continue;
-                const auto map = GW::Map::GetMapInfo(quest.map_to);
-                if (!(map && map->continent == current_map->continent)) continue;
-                GW::QuestMgr::RequestQuestInfo(&quest, true);
-                requested = true;
+                GW::QuestMgr::RequestQuestInfoId(quest.quest_id, true);
             }
-            if (requested) {
-                // Block quest change sound that this will trigger.
-                BlockQuestSound();
-                fetching_all_quest_info = TIMER_INIT();
-            }
+            GW::QuestMgr::SetActiveQuestId(active_quest);
         });
     }
 
