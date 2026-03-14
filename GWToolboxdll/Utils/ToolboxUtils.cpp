@@ -571,7 +571,7 @@ namespace GW {
             if (!(agent && agent->GetIsLivingType() && agent->GetAsAgentLiving()->IsNPC())) 
                 return GetAgentEncName(agent);
             const auto npc = GW::Agents::GetNPCByID(((GW::AgentLiving*)agent)->player_number);
-            return (npc && (npc->npc_flags & 0x10000) == 0);
+            return npc;
         }
         bool IsAgentCarryingBundle(uint32_t agent_id)
         {

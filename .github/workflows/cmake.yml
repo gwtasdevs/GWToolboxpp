@@ -78,6 +78,9 @@ jobs:
         git config --global user.name "GitHub Actions Bot"
         git merge "refs/tags/${TAG}" --no-edit
         git push origin master
+        git checkout -b dev
+        git reset --hard origin/master
+        git push origin dev -f
 
     - name: Merge from upstream dev
       if: needs.check.outputs.run == 'dev'
@@ -87,7 +90,6 @@ jobs:
         git remote add upstream https://github.com/gwdevhub/GWToolboxpp.git
         git fetch upstream
         git checkout -b dev
-        git reset --hard origin/master
         git config --global user.email "bot@github.com"
         git config --global user.name "GitHub Actions Bot"
         git merge $DEV_COMMIT --no-edit
@@ -121,18 +123,6 @@ jobs:
       run: |
         git clone https://github.com/microsoft/vcpkg.git
         .\vcpkg\bootstrap-vcpkg.bat
-
-    - name: Install rust
-      uses: dtolnay/rust-toolchain@stable
-
-    - name: Patch GWCA
-      run: |
-        git clone https://github.com/gwtasdevs/GWCA.git
-        cp .\Dependencies\GWCA\bin\gwca.dll .\GWCA\gwca.dll
-        cd .\GWCA
-        cargo run
-        cd ..
-        cp .\GWCA\gwca.dll .\Dependencies\GWCA\bin\gwca.dll
 
     - name: Set VCPKG_ROOT
       run: |
@@ -220,7 +210,6 @@ jobs:
         cp "$BIN_DIR/GWToolboxdll.dll" .
         cp "$BIN_DIR/RawDialogs.dll" .
         cp "$BIN_DIR/SpeedrunScriptingTools.dll" .
-        cp "${{runner.workspace}}/GWToolboxpp/Dependencies/GWCA/bin/gwca.dll" .
         gzip -c "$BIN_DIR/GWToolboxdll.pdb" > GWToolboxdll.pdb.gz
 
         # Create release
@@ -228,10 +217,10 @@ jobs:
           gh release create "$TAG_NAME" \
             --title "$TAG_NAME" \
             --prerelease \
-            GWToolboxdll.dll RawDialogs.dll SpeedrunScriptingTools.dll GWToolboxdll.pdb.gz gwca.dll
+            GWToolboxdll.dll RawDialogs.dll SpeedrunScriptingTools.dll GWToolboxdll.pdb.gz
         else
           gh release create "$TAG_NAME" \
             --title "$TAG_NAME" \
             --notes "$RELEASE_NOTES" \
-            GWToolboxdll.dll RawDialogs.dll SpeedrunScriptingTools.dll GWToolboxdll.pdb.gz gwca.dll
+            GWToolboxdll.dll RawDialogs.dll SpeedrunScriptingTools.dll GWToolboxdll.pdb.gz
         fi
