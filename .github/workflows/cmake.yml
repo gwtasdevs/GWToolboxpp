@@ -19,7 +19,7 @@ jobs:
       run: ${{ steps.check.outputs.run }}
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0
         fetch-tags: true
@@ -62,9 +62,10 @@ jobs:
       contents: write
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0
+        ref: ${{ needs.check.outputs.run == 'dev' && 'dev' || 'master' }}
 
     - name: Merge from upstream master
       if: needs.check.outputs.run == 'true'
@@ -89,7 +90,7 @@ jobs:
       run: |
         git remote add upstream https://github.com/gwdevhub/GWToolboxpp.git
         git fetch upstream
-        git checkout -b dev
+        git checkout dev
         git config --global user.email "bot@github.com"
         git config --global user.name "GitHub Actions Bot"
         git merge $DEV_COMMIT --no-edit
