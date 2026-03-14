@@ -34,6 +34,7 @@ namespace TextUtils {
     std::string ToLower(std::string s);
     std::wstring ToLower(std::wstring s);
     std::wstring RemoveDiacritics(std::wstring_view s);
+    std::wstring FormatFloat(float value, int max_decimal_places = 3);
 
     std::wstring SanitizePlayerName(std::wstring_view str);
     std::wstring SanitizeForCSV(const std::wstring_view str);

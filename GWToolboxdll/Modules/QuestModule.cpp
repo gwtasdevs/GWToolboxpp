@@ -37,8 +37,6 @@ namespace {
     bool show_paths_to_all_quests = false;
     bool keep_current_quest_when_new_quest_added = false;
 
-    clock_t fetching_all_quest_info = 0;
-
     bool fetch_missing_quest_info_queued = false;
 
     GW::HookEntry pre_ui_message_entry;
@@ -53,6 +51,16 @@ namespace {
     GW::Quest custom_quest_marker;
     GW::Vec2f custom_quest_marker_world_pos;
     GW::Constants::QuestID player_chosen_quest_id = GW::Constants::QuestID::None;
+    struct PendingSetActiveQuest {
+        GW::Constants::QuestID quest_id = GW::Constants::QuestID::None;
+        clock_t requested_at = 0;
+        bool notify_server = false;
+        void reset(GW::Constants::QuestID _quest_id, bool _notify_server = false) { 
+            requested_at = TIMER_INIT();
+            quest_id = _quest_id;
+            notify_server = _notify_server;
+        }
+    } pending_set_active_quest;
     bool setting_custom_quest_marker = false;
 
     const wchar_t* custom_quest_marker_enc_name = L"\x452"; // "Map Travel"
@@ -410,12 +418,7 @@ namespace {
                     // Quest assigned without user interaction
                     if (keep_current_quest_when_new_quest_added) {
                         status->blocked = true;
-                        QuestModule::EmulateQuestSelected(player_chosen_quest_id);
-                        break;
-                    }
-                    if ((quest->log_state & 0x1) && TIMER_DIFF(fetching_all_quest_info) < 1000) {
-                        status->blocked = true;
-                        QuestModule::EmulateQuestSelected(player_chosen_quest_id);
+                        QuestModule::SetActiveQuestId(player_chosen_quest_id,true);
                         break;
                     }
                 }
@@ -428,14 +431,14 @@ namespace {
                 if (setting_custom_quest_marker) {
                     // This triggers if the player has no quests, or the map has just loaded; we want to "undo" this by spoofing the previous quest selection if there is one
                     status->blocked = true;
-                    QuestModule::EmulateQuestSelected(GW::QuestMgr::GetActiveQuestId());
+                    QuestModule::SetActiveQuestId(GW::QuestMgr::GetActiveQuestId(), false);
                     return;
                 }
                 player_chosen_quest_id = quest_id;
                 if (quest_id == custom_quest_id) {
                     // If the player has chosen the custom quest, spoof the response without asking the server
                     status->blocked = true;
-                    QuestModule::EmulateQuestSelected(quest_id);
+                    QuestModule::SetActiveQuestId(quest_id, false);
                 }
             }
             break;
@@ -725,12 +728,22 @@ void QuestModule::Initialize()
     
 }
 
-void QuestModule::EmulateQuestSelected(GW::Constants::QuestID quest_id)
+bool QuestModule::SetActiveQuestId(GW::Constants::QuestID quest_id, bool notify_server)
 {
     Instance().Initialize();
     const auto quest = GW::QuestMgr::GetQuest(quest_id);
-    if (!quest)
-        return;
+    if (pending_set_active_quest.quest_id != quest_id) {
+        pending_set_active_quest.reset(quest_id, notify_server);
+    }
+    if (!quest) {
+        return false;
+    }
+    pending_set_active_quest.reset(GW::Constants::QuestID::None);
+    BlockQuestSound();
+    if (notify_server) {
+        GW::QuestMgr::SetActiveQuestId(quest_id);
+        return true;
+    }
     GW::UI::UIPacket::kServerActiveQuestChanged packet = {
         .quest_id = quest->quest_id,
         .marker = quest->marker,
@@ -738,10 +751,10 @@ void QuestModule::EmulateQuestSelected(GW::Constants::QuestID quest_id)
         .map_id = quest->map_to,
         .log_state = quest->log_state
     };
-    BlockQuestSound();
     GW::UI::SendUIMessage(GW::UI::UIMessage::kClientActiveQuestChanged, &packet);
     GW::GetWorldContext()->active_quest_id = quest->quest_id;
     GW::UI::SendUIMessage(GW::UI::UIMessage::kServerActiveQuestChanged, &packet);
+    return true;
 }
 
 void QuestModule::SignalTerminate()
@@ -777,26 +790,22 @@ void QuestModule::Update(float)
         // NB: We only do this once the loading splash screen is gone
         fetch_missing_quest_info_queued = 0;
         GW::GameThread::Enqueue([] {
-            const auto current_map = GW::Map::GetMapInfo();
-            if (!current_map) return;
-            bool requested = false;
             const auto quest_log = GW::QuestMgr::GetQuestLog();
-            player_chosen_quest_id = GW::QuestMgr::GetActiveQuestId();
+            const auto active_quest = GW::QuestMgr::GetActiveQuestId();
             if (!quest_log) return;
+            BlockQuestSound();
             for (auto& quest : *quest_log) {
-                if (quest.map_to == GW::Constants::MapID::Count) continue;
                 if ((quest.log_state & 1)) continue;
-                const auto map = GW::Map::GetMapInfo(quest.map_to);
-                if (!(map && map->continent == current_map->continent)) continue;
-                GW::QuestMgr::RequestQuestInfo(&quest, true);
-                requested = true;
+                GW::QuestMgr::RequestQuestInfoId(quest.quest_id, true);
             }
-            if (requested) {
-                // Block quest change sound that this will trigger.
-                BlockQuestSound();
-                fetching_all_quest_info = TIMER_INIT();
-            }
+            SetActiveQuestId(active_quest);
         });
+    }
+    if (pending_set_active_quest.quest_id != GW::Constants::QuestID::None) {
+        if (TIMER_DIFF(pending_set_active_quest.requested_at) > 3000 
+            || SetActiveQuestId(pending_set_active_quest.quest_id, pending_set_active_quest.notify_server)) {
+            pending_set_active_quest.reset(GW::Constants::QuestID::None);
+        }
     }
 
 
