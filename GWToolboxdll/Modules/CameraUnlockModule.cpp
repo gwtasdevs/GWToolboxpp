@@ -17,6 +17,7 @@ namespace {
 
     bool forward_fix_z = true;
     float cam_speed = default_cam_speed;
+    float cam_max_distance = 900.f;
 
     GW::HookEntry ChatCmdHookEntry;
 
@@ -110,6 +111,15 @@ namespace {
                 }
                 Log::Flash("Camera speed is now %f", cam_speed);
             }
+            else if (arg1 == L"distance") {
+                if (argc > 2) {
+                    float dist = 900.f;
+                    if (TextUtils::ParseFloat(TextUtils::ToLower(argv[2]).c_str(), &dist)) {
+                        GW::CameraMgr::SetMaxDist(dist);
+                        cam_max_distance = dist;
+                    }
+                }
+            }
             else {
                 Log::Error("Invalid argument.");
             }
@@ -135,6 +145,9 @@ void CameraUnlockModule::LoadSettings(ToolboxIni* ini) {
     ToolboxModule::LoadSettings(ini);
     LOAD_BOOL(forward_fix_z);
     LOAD_FLOAT(cam_speed);
+    LOAD_FLOAT(cam_max_distance);
+    std::clamp(cam_max_distance, 25.f, 5000.f);
+    GW::CameraMgr::SetMaxDist(cam_max_distance);
 }
 
 void CameraUnlockModule::SaveSettings(ToolboxIni* ini)
@@ -142,6 +155,7 @@ void CameraUnlockModule::SaveSettings(ToolboxIni* ini)
     ToolboxModule::SaveSettings(ini);
     SAVE_BOOL(forward_fix_z);
     SAVE_FLOAT(cam_speed);
+    LOAD_FLOAT(cam_max_distance);
 }
 void CameraUnlockModule::DrawSettingsInternal()
 {
@@ -151,6 +165,10 @@ void CameraUnlockModule::DrawSettingsInternal()
     ImGui::Checkbox("Fix height when moving forward", &forward_fix_z);
     ImGui::InputFloat("Camera speed", &cam_speed);
     ImGui::Unindent();
+    if (ImGui::InputFloat("Camera max distance", &cam_max_distance)) {
+        std::clamp(cam_max_distance, 25.f, 5000.f);
+        GW::CameraMgr::SetMaxDist(cam_max_distance);
+    }  
 }
 
 bool CameraUnlockModule::WndProc(const UINT Message, const WPARAM wParam, const LPARAM) {

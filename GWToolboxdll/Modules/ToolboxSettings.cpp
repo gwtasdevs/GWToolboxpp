@@ -29,7 +29,7 @@
 #include <Modules/MouseFix.h>
 #include <Modules/GuildWarsSettingsModule.h>
 #include <Modules/PriceCheckerModule.h>
-#include <Modules/SalvageInfoModule.h>
+#include <Modules/ItemTooltipModule.h>
 #include <Modules/ResignLogModule.h>
 #include <Modules/PartyBroadcastModule.h>
 #include <Modules/CodeOptimiserModule.h>
@@ -156,7 +156,7 @@ namespace {
         KeyboardLanguageFix::Instance(),
         GuildWarsSettingsModule::Instance(),
         PriceCheckerModule::Instance(),
-        SalvageInfoModule::Instance(),
+        ItemTooltipModule::Instance(),
         ResignLogModule::Instance(),
         QuestModule::Instance(),
         PartyBroadcast::Instance(),
