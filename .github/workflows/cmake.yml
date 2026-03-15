@@ -225,8 +225,11 @@ jobs:
 
         # Create release
         if [ -n "$DEV_COMMIT" ]; then
+          DEV_COMMIT_SHORT=${DEV_COMMIT::7}
+
           gh release create "$TAG_NAME" \
-            --title "$TAG_NAME" \
+            --title "commit-$DEV_COMMIT_SHORT" \
+            --notes "[$DEV_COMMIT_SHORT](https://github.com/gwdevhub/GWToolboxpp/commit/$DEV_COMMIT)" \
             --prerelease \
             GWToolboxdll.dll RawDialogs.dll SpeedrunScriptingTools.dll GWToolboxdll.pdb.gz gwca.dll
         else
