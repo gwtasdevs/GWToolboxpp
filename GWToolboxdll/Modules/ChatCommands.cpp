@@ -45,6 +45,7 @@
 #include <Keys.h>
 #include <Logger.h>
 
+#include <Constants/EncStrings.h>
 #include <Modules/ChatCommands.h>
 #include <Modules/GameSettings.h>
 #include <Modules/ChatSettings.h>
@@ -63,6 +64,7 @@
 
 #include "QuestModule.h"
 #include <Utils/ToolboxUtils.h>
+#include "ChatFilter.h"
 
 constexpr auto CMDTITLE_KEEP_CURRENT = 0xfffe;
 constexpr auto CMDTITLE_REMOVE_CURRENT = 0xffff;
@@ -209,6 +211,40 @@ namespace {
     bool IsNearestStr(const wchar_t* str)
     {
         return wcscmp(str, L"nearest") == 0 || wcscmp(str, L"closest") == 0;
+    }
+ 
+
+    typedef std::unordered_map<uint32_t, std::wstring> FlaggableHeroNames;
+    void GetFlaggableHeroNames(std::function<void(FlaggableHeroNames*)> cb)
+    {
+        GW::WorldContext* w = GW::GetWorldContext();
+        GW::HeroFlagArray* f = w ? &w->hero_flags : nullptr;
+        if (!f) return cb(nullptr);
+        auto names_out = new FlaggableHeroNames();
+        struct DecodedParam {
+            uint32_t agent_id = 0;
+            FlaggableHeroNames* names_out;
+            std::function<void(FlaggableHeroNames*)> cb;
+            size_t hero_count;
+        };
+
+        auto decoded_cb = [](void* wparam, const wchar_t* decoded) {
+            auto p = static_cast<DecodedParam*>(wparam);
+            auto names_out = p->names_out;
+            names_out->emplace(p->agent_id, TextUtils::ToLower(decoded));
+            if (names_out->size() == p->hero_count) {
+                GW::GameThread::Enqueue([names_out, cb = p->cb]() {
+                    cb(names_out);
+                    delete names_out;
+                });
+            }
+            delete p;
+        };
+        for (const auto& flag : *f) {
+            auto decoded_param = new DecodedParam{flag.agent_id, names_out, cb, f->size()};
+            const auto name = GW::Agents::GetAgentEncName(flag.agent_id);
+            GW::UI::AsyncDecodeStr(name, decoded_cb, decoded_param);
+        }
     }
 
     std::map<std::string, ChatCommands::PendingTransmo> npc_transmos;
@@ -817,6 +853,95 @@ namespace {
         }
     }
 
+    const char* CmdHeroBehaviour_syntax = "'/hero [avoid|guard|attack|target] [hero_index] [silent]' to set your hero behavior or target in an explorable area.\n"
+                                          "If hero_index is not provided, all heroes behaviours will be adjusted.\n"
+                                            "Add 'silent' to suppress chat message from the hero.";
+    void CHAT_CMD_FUNC(CmdHeroBehaviour)
+    {
+        GW::WorldContext* w = GW::GetWorldContext();
+        GW::HeroFlagArray* flags = w ? &w->hero_flags : nullptr;
+        if (!flags) return;
+        // Argument validation
+        if (argc < 2) {
+            return Log::Warning(CmdHeroBehaviour_syntax);
+        }
+
+        // Check if last argument is "silent" - suppress hero behavior chat messages
+        int effective_argc = argc;
+        if (argc >= 2 && TextUtils::ToLower(argv[argc - 1]) == L"silent") {
+            constexpr clock_t SUPPRESS_MS = 1000;
+            ChatFilter::BlockMessageForMs(GW::EncStrings::HeroBehavior::Fight, SUPPRESS_MS);
+            ChatFilter::BlockMessageForMs(GW::EncStrings::HeroBehavior::Guard, SUPPRESS_MS);
+            ChatFilter::BlockMessageForMs(GW::EncStrings::HeroBehavior::Avoid, SUPPRESS_MS);
+            effective_argc--;
+        }
+
+        // set behavior based on command message
+        auto behaviour = 0xff;
+        const std::wstring arg1 = TextUtils::ToLower(argv[1]);
+        if (arg1 == L"avoid") {
+            behaviour = (uint32_t)GW::HeroBehavior::AvoidCombat; // avoid combat
+        }
+        else if (arg1 == L"guard") {
+            behaviour = (uint32_t)GW::HeroBehavior::Guard; // guard
+        }
+        else if (arg1 == L"attack") {
+            behaviour = (uint32_t)GW::HeroBehavior::Fight; // attack
+        }
+        else if (arg1 == L"target") {
+            behaviour = 0xff; // target
+        }
+        else {
+            return Log::Warning(CmdHeroBehaviour_syntax);
+        }
+
+        auto flag_hero = [behaviour](uint32_t agent_id) {
+            if (behaviour == 0xff) {
+                if (!GW::Agents::IsAgentCarryingBundle(agent_id)) GW::PartyMgr::SetHeroTarget(agent_id, GW::Agents::GetTargetId());
+            }
+            return GW::PartyMgr::SetHeroBehavior(agent_id, (GW::HeroBehavior)behaviour);
+        };
+
+        if (effective_argc < 3) {
+            for (const auto& flag : *flags) {
+                flag_hero(flag.agent_id);
+            }
+            return;
+        }
+        std::wstring hero_name = argv[2];
+        size_t hero_index = 0; // This is 1 based!
+        if (TextUtils::ParseUInt(hero_name.c_str(), &hero_index)) {
+            if (hero_index < 1 || hero_index > flags->size()) {
+                Log::LogW(L"Failed to find hero %d", hero_index);
+                return;
+            }
+            size_t out_index = 0;
+            for (const auto& flag : *flags) {
+                const auto hero_id = static_cast<GW::Constants::HeroID>(flag.hero_id);
+                HeroBuildsWindow::GetPartyHeroByID(hero_id, &out_index);
+                if (out_index == hero_index) {
+                    flag_hero(flag.agent_id);
+                    return;
+                }
+            }
+            return;
+        }
+        GetFlaggableHeroNames([hero_name, flag_hero](FlaggableHeroNames* hero_names) {
+            bool flagged = false;
+            if (hero_names) {
+                for (const auto& [agent_id, name] : *hero_names) {
+                    if (name.starts_with(hero_name)) {
+                        flag_hero(agent_id);
+                        flagged = true;
+                    }
+                }
+            }
+            if (!flagged) {
+                Log::LogW(L"Failed to find hero %s", hero_name.c_str());
+            }
+        });
+    }
+
     const auto button_syntax = "'/button [button_label] [button_label...]' e.g. /button \"BtnBuy\" \"BtnAccept\" \"BtnOk\"\n"
                                "Allows you to interact with UI buttons on-screen if you know the labels";
 
@@ -964,14 +1089,14 @@ namespace {
     constexpr std::array profession_names = {L"", L"warrior", L"ranger", L"monk", L"necromancer", L"mesmer", L"elementalist", L"assassin", L"ritualist", L"paragon", L"dervish"};
 
     // Returns matching profession index (1-10), or 0 if no match
-    static size_t FindProfessionMatch(const std::wstring& search)
+    static GW::Constants::ProfessionByte FindProfessionMatch(const std::wstring& search)
     {
         for (size_t i = 1; i < profession_names.size(); i++) {
             if (wcsstr(profession_names.at(i), search.c_str())) {
-                return i;
+                return (GW::Constants::ProfessionByte)i;
             }
         }
-        return 0;
+        return GW::Constants::ProfessionByte::None;
     }
 
     void CHAT_CMD_FUNC(CmdAddHenchman)
@@ -981,10 +1106,9 @@ namespace {
         const std::wstring search = TextUtils::ToLower(GetRemainingArgsWstr(message, 1));
 
         const auto profession = FindProfessionMatch(search);
-        if (profession) {
+        if (profession != GW::Constants::ProfessionByte::None) {
             for (auto& agent_id : w->henchmen_agent_ids) {
-                const auto agent = (GW::AgentLiving*)GW::Agents::GetAgentByID(agent_id);
-                if (agent && agent->GetIsLivingType() && agent->primary == profession) {
+                if (GW::Agents::GetAgentPrimary(agent_id) == profession) {
                     GW::GameThread::Enqueue([agent_id]() {
                         GW::PartyMgr::AddHenchman(agent_id);
                     });
@@ -995,7 +1119,7 @@ namespace {
         auto agent_names = new std::map<uint32_t, std::wstring>();
         for (auto& agent_id : w->henchmen_agent_ids) {
             (*agent_names)[agent_id] = L"";
-            GW::Agents::AsyncGetAgentName(GW::Agents::GetAgentByID(agent_id), (*agent_names)[agent_id]);
+            GW::Agents::AsyncGetAgentName(agent_id, (*agent_names)[agent_id]);
         }
         AddPartyMemberByName(search.c_str(), agent_names, [](uint32_t found) {
             GW::PartyMgr::AddHenchman(found);
@@ -1009,9 +1133,9 @@ namespace {
         const std::wstring search = TextUtils::ToLower(GetRemainingArgsWstr(message, 1));
 
         const auto profession = FindProfessionMatch(search);
-        if (profession) {
+        if (profession != GW::Constants::ProfessionByte::None) {
             for (auto& hero : w->hero_info) {
-                if (hero.primary == profession) {
+                if (hero.primary == (GW::Constants::Profession)profession) {
                     GW::GameThread::Enqueue([hero_id = hero.hero_id]() {
                         GW::PartyMgr::AddHero(hero_id);
                     });
@@ -1038,6 +1162,35 @@ namespace {
             GW::GameThread::Enqueue(GW::PartyMgr::LeaveParty);
         }
         
+    }
+    struct SkillToUse {
+        uint32_t slot = 0; // 1-8 range
+        float skill_usage_delay = 0.f;
+        clock_t skill_timer = clock();
+        void Update();
+    } skill_to_use;
+    const char* useskill_syntax = "'/useskill <skill>' starts using the skill on recharge.\n"
+                                  "Use the skill number instead of <skill> (e.g. '/useskill 5').\n"
+                                  "Use empty '/useskill' or '/useskill stop' to stop all.\n"
+                                  "Use '/useskill <skill>' to stop the skill.";
+    void CHAT_CMD_FUNC(CmdUseSkill)
+    {
+        if (!IsMapReady() || argc < 2) {
+            Log::Warning(useskill_syntax);
+            return;
+        }
+        const std::wstring arg1 = TextUtils::ToLower(argv[1]);
+        if (arg1 == L"stop" || arg1 == L"off") {
+            return;
+        }
+        uint32_t num = 0;
+        if (!TextUtils::ParseUInt(argv[1], &num) || num > 8) {
+            Log::Warning(useskill_syntax);
+            return;
+        }
+        if (skill_to_use.slot == num) num = 0;
+        skill_to_use.slot = num;
+        skill_to_use.skill_usage_delay = .0f;
     }
 
     void HookOnChatInteraction() {
@@ -1118,8 +1271,7 @@ namespace {
         }
 
         ImGui::Bullet();
-        ImGui::Text("'/hero [avoid|guard|attack|target] [hero_index]' to set your hero behavior or target in an explorable area.\n"
-            "If hero_index is not provided, all heroes behaviours will be adjusted.");
+        ImGui::Text(CmdHeroBehaviour_syntax);
         const auto toggle_hint = "<name> options: helm, costume, costume_head, cape, <window_or_widget_name>";
         ImGui::Bullet();
         ImGui::Text("'/hide <name>' closes the window, in-game feature or widget titled <name>.");
@@ -1197,12 +1349,11 @@ namespace {
         ImGui::Text("'/travel <town> [dis]', '/tp <town> [dis]' or '/to <town> [dis]' travel to outpost best matching <town> name. \n"
             "[dis] can be any of: ae, ae1, ee, eg, int, etc");
         ImGui::Bullet();
+        ImGui::Text("'/travel outpost' travel to nearest unlocked outpost to your current position.");
+        ImGui::Bullet();
         ImGui::Text("'/travel [zv|zb|zm]' travel to nearest unlocked outpost to daily quest.");
         ImGui::Bullet();
-        ImGui::Text("'/useskill <skill>' starts using the skill on recharge. "
-            "Use the skill number instead of <skill> (e.g. '/useskill 5'). "
-            "Use empty '/useskill' or '/useskill stop' to stop all. "
-            "Use '/useskill <skill>' to stop the skill.");
+        ImGui::Text(useskill_syntax);
         ImGui::Bullet();
         ImGui::Text("'/volume [master|music|background|effects|dialog|ui] <amount (0-100)>' set in-game volume.");
         ImGui::Bullet();
@@ -1821,7 +1972,7 @@ void ChatCommands::SearchAgent::Update()
     Reset();
 }
 
-void ChatCommands::SkillToUse::Update()
+void SkillToUse::Update()
 {
     if (!slot) {
         return;
@@ -1844,6 +1995,7 @@ void ChatCommands::SkillToUse::Update()
         slot = 0;
         return;
     }
+    if (skillbar->cast_array.size()) return; // Don't use skill if we've got anything queued
     const GW::Skill& skilldata = *GW::SkillbarMgr::GetSkillConstantData(skill.skill_id);
     if ((skilldata.adrenaline == 0 && skill.GetRecharge() == 0) || (skilldata.adrenaline > 0 && skill.adrenaline_a == skilldata.adrenaline)) {
         GW::SkillbarMgr::UseSkill(lslot, GW::Agents::GetTargetId());
@@ -2454,27 +2606,7 @@ void CHAT_CMD_FUNC(ChatCommands::CmdTarget)
     return TargetNearest(GetRemainingArgsWstr(message, 1), Living | Gadget | Item);
 }
 
-void CHAT_CMD_FUNC(ChatCommands::CmdUseSkill)
-{
-    auto& skill_to_use = Instance().skill_to_use;
-    skill_to_use.slot = 0;
-    if (!IsMapReady() || argc < 2) {
-        return;
-    }
-    const std::wstring arg1 = TextUtils::ToLower(argv[1]);
-    if (arg1 == L"stop" || arg1 == L"off") {
-        return;
-    }
-    uint32_t num = 0;
-    if (!TextUtils::ParseUInt(argv[1], &num) || num > 8) {
-        Log::ErrorW(L"Invalid argument '%s', please use an integer value of 1 to 8", argv[1]);
-        return;
-    }
-    if (skill_to_use.slot == num)
-        num = 0;
-    skill_to_use.slot = num;
-    skill_to_use.skill_usage_delay = .0f;
-}
+
 
 void CHAT_CMD_FUNC(ChatCommands::CmdSCWiki)
 {
@@ -3138,117 +3270,7 @@ void CHAT_CMD_FUNC(ChatCommands::CmdReapplyTitle)
     }
 }
 
-void GetFlaggableHeroNames(std::function<void(std::map<uint32_t, std::wstring>*)> cb)
-{
-    GW::WorldContext* w = GW::GetWorldContext();
-    GW::HeroFlagArray* f = w ? &w->hero_flags : nullptr;
-    if (!f) return cb(nullptr);
-    auto names_out = new std::map<uint32_t, std::wstring>();
-    struct DecodedParam {
-        uint32_t agent_id = 0;
-        std::map<uint32_t, std::wstring>* names_out;
-        std::function<void(std::map<uint32_t, std::wstring>*)> cb;
-        size_t hero_count;
-    };
 
-    auto decoded_cb = [](void* wparam, const wchar_t* decoded) {
-        auto p = static_cast<DecodedParam*>(wparam);
-        auto names_out = p->names_out;
-        names_out->emplace(p->agent_id, TextUtils::ToLower(decoded));
-        if (names_out->size() == p->hero_count) {
-            GW::GameThread::Enqueue([names_out, cb = p->cb]() {
-                cb(names_out);
-                delete names_out;
-            });
-        }
-        delete p;
-    };
-    for (const auto& flag : *f) {
-        auto decoded_param = new DecodedParam{flag.agent_id, names_out, cb, f->size()};
-        const auto name = GW::Agents::GetAgentEncName(flag.agent_id);
-        GW::UI::AsyncDecodeStr(name, decoded_cb, decoded_param);
-    }
-}
-
-void CHAT_CMD_FUNC(ChatCommands::CmdHeroBehaviour)
-{
-    const wchar_t* syntax = L"Syntax: /hero [avoid|guard|attack|target] [hero_name|hero_index]";
-
-    GW::WorldContext* w = GW::GetWorldContext();
-    GW::HeroFlagArray* flags = w ? &w->hero_flags : nullptr;
-    if (!flags) return;
-    // Argument validation
-    if (argc < 2) {
-        return Log::ErrorW(syntax);
-    }
-    // set behavior based on command message
-    auto behaviour = 0xff;
-    const std::wstring arg1 = TextUtils::ToLower(argv[1]);
-    if (arg1 == L"avoid") {
-        behaviour = (uint32_t)GW::HeroBehavior::AvoidCombat; // avoid combat
-    }
-    else if (arg1 == L"guard") {
-        behaviour = (uint32_t)GW::HeroBehavior::Guard; // guard
-    }
-    else if (arg1 == L"attack") {
-        behaviour = (uint32_t)GW::HeroBehavior::Fight; // attack
-    }
-    else if (arg1 == L"target") {
-        behaviour = 0xff; // target
-    }
-    else {
-        return Log::ErrorW(syntax);
-    }
-
-    auto flag_hero = [behaviour](uint32_t agent_id) {
-        if (behaviour == 0xff) {
-            if (!GW::Agents::IsAgentCarryingBundle(agent_id))
-                GW::PartyMgr::SetHeroTarget(agent_id, GW::Agents::GetTargetId());
-        }
-        return GW::PartyMgr::SetHeroBehavior(agent_id, (GW::HeroBehavior)behaviour);
-    };
-
-
-    if (argc < 3) {
-        for (const auto& flag : *flags) {
-            flag_hero(flag.agent_id);
-        }
-        return;
-    }
-    std::wstring hero_name = argv[2];
-    size_t hero_index = 0; // This is 1 based!
-    if (TextUtils::ParseUInt(hero_name.c_str(), &hero_index)) {
-        if (hero_index < 1 || hero_index > flags->size()) {
-            Log::ErrorW(L"Failed to find hero %d", hero_index);
-            return;
-        }
-        size_t out_index = 0;
-        for (const auto& flag : *flags) {
-            const auto hero_id = static_cast<GW::Constants::HeroID>(flag.hero_id);
-            HeroBuildsWindow::GetPartyHeroByID(hero_id, &out_index);
-            if (out_index == hero_index) {
-                flag_hero(flag.agent_id);
-                return;
-            }
-        }
-        return;
-    }
-    GetFlaggableHeroNames([hero_name, flag_hero](std::map<uint32_t, std::wstring>* hero_names) {
-        bool flagged = false;
-        if (hero_names) {
-            for (const auto& [agent_id, name] : *hero_names) {
-                if (name.starts_with(hero_name)) {
-                    flag_hero(agent_id);
-                    flagged = true;
-                }
-            }
-        }
-        if (!flagged) {
-            Log::ErrorW(L"Failed to find hero %s", hero_name.c_str());
-        }
-    });
-
-}
 
 void CHAT_CMD_FUNC(ChatCommands::CmdVolume)
 {

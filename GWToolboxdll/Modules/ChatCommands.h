@@ -79,7 +79,6 @@ private:
     static void CHAT_CMD_FUNC(CmdChest);
     static void CHAT_CMD_FUNC(CmdAfk);
     static void CHAT_CMD_FUNC(CmdTarget);
-    static void CHAT_CMD_FUNC(CmdUseSkill);
     static void CHAT_CMD_FUNC(CmdShow);
     static void CHAT_CMD_FUNC(CmdHide);
     static void CHAT_CMD_FUNC(CmdToggle);
@@ -93,7 +92,6 @@ private:
     static void CHAT_CMD_FUNC(CmdTransmoTarget);
     static void CHAT_CMD_FUNC(CmdTransmoParty);
     static void CHAT_CMD_FUNC(CmdTransmoAgent);
-    static void CHAT_CMD_FUNC(CmdHeroBehaviour);
     static void CHAT_CMD_FUNC(CmdPingQuest);
     static void CHAT_CMD_FUNC(CmdMorale);
     static void CHAT_CMD_FUNC(CmdVolume);
@@ -135,12 +133,7 @@ private:
         }
     } npc_to_find;
 
-    struct SkillToUse {
-        uint32_t slot = 0; // 1-8 range
-        float skill_usage_delay = 0.f;
-        clock_t skill_timer = clock();
-        void Update();
-    } skill_to_use;
+
 
     struct QuestPing {
         GW::Constants::QuestID quest_id = static_cast<GW::Constants::QuestID>(0);

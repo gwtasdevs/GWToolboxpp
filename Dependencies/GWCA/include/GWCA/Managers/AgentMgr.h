@@ -14,6 +14,7 @@ namespace GW {
     struct Player;
     struct MapAgent;
     struct AgentLiving;
+    struct AgentCharData;
 
     typedef Array<NPC> NPCArray;
     typedef Array<Agent *> AgentArray;
@@ -45,9 +46,6 @@ namespace GW {
         // === Dialogs ===
         // Same as pressing button (id) while talking to an NPC.
         GWCA_API bool SendDialog(uint32_t dialog_id);
-
-        // Returns last dialog id sent to the server. Requires the hook.
-        GWCA_API bool GetIsAgentTargettable(const GW::Agent* agent);
 
         // === Agent Array ===
 
@@ -90,8 +88,11 @@ namespace GW {
         GWCA_API MapAgentArray* GetMapAgentArray();
         GWCA_API uint32_t CountAllegianceInRange(GW::Constants::Allegiance allegiance, float sqr_range);
 
+        GWCA_API AgentCharData* GetAgentCharData(uint32_t agent_id);
         GWCA_API MapAgent* GetMapAgentByID(uint32_t agent_id);
 
+        GWCA_API GW::Constants::ProfessionByte GetAgentPrimary(uint32_t agent_id);
+        GWCA_API GW::Constants::ProfessionByte GetAgentSecondary(uint32_t agent_id);
         // === Other Arrays ===
         GWCA_API PlayerArray* GetPlayerArray();
 
@@ -127,7 +128,6 @@ namespace GW {
 // ============================================================
 extern "C" {
     GWCA_API bool     SendDialog(uint32_t dialog_id);
-    GWCA_API bool     GetIsAgentTargettable(const void* agent);
 
     GWCA_API uint32_t GetObservingId();
     GWCA_API uint32_t GetControlledCharacterId();

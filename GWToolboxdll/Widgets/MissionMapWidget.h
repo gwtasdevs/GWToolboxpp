@@ -26,6 +26,7 @@ public:
     void LoadSettings(ToolboxIni*) override;
     void SaveSettings(ToolboxIni*) override;
     void Draw(IDirect3DDevice9* pDevice) override;
+    void Update(float) override;
     void DrawSettingsInternal() override;
     void Terminate() override;
     bool WndProc(UINT Message, WPARAM, LPARAM lParam) override;
