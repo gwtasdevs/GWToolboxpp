@@ -173,6 +173,25 @@ jobs:
       with:
         path: ${{runner.workspace}}/GWToolboxpp/bin/RelWithDebInfo/
 
+    - name: Generate app token to access private plugins
+      id: private-plugins-app-token
+      continue-on-error: true
+      uses: actions/create-github-app-token@v3
+      with:
+        app-id: ${{ vars.PRIVATE_PLUGINS_CLIENT_ID }}
+        private-key: ${{ secrets.PRIVATE_PLUGINS_KEY }}
+        owner: gwtasdevs
+        repositories: ${{ vars.PRIVATE_PLUGINS_REPO }}
+
+    - name: Download private plugin assets
+      continue-on-error: true
+      env:
+        GH_TOKEN: ${{ steps.private-plugins-app-token.outputs.token }}
+        PRIVATE_PLUGINS_REPO: ${{ vars.PRIVATE_PLUGINS_REPO }}
+      run: |
+        mkdir -p ./plugin-binaries
+        gh release download --repo gwtasdevs/$PRIVATE_PLUGINS_REPO -pattern "*.dll" --dir ./plugin-binaries
+
     - name: Check version and create release
       shell: bash
       env:
@@ -217,11 +236,12 @@ jobs:
         git push origin "$TAG_NAME"
 
         # Prepare artifacts
+        mkdir -p ./plugin-binaries
         BIN_DIR="${{runner.workspace}}/GWToolboxpp/bin/RelWithDebInfo"
         cp "$BIN_DIR/GWToolboxdll.dll" .
-        cp "$BIN_DIR/DialogsWindow.dll" .
-        cp "$BIN_DIR/RawDialogs.dll" .
-        cp "$BIN_DIR/SpeedrunScriptingTools.dll" .
+        cp "$BIN_DIR/DialogsWindow.dll" ./plugin-binaries
+        cp "$BIN_DIR/RawDialogs.dll" ./plugin-binaries
+        cp "$BIN_DIR/SpeedrunScriptingTools.dll" ./plugin-binaries
         cp "${{runner.workspace}}/GWToolboxpp/Dependencies/GWCA/bin/gwca.dll" .
         gzip -c "$BIN_DIR/GWToolboxdll.pdb" > GWToolboxdll.pdb.gz
 
@@ -233,10 +253,10 @@ jobs:
             --title "commit-$DEV_COMMIT_SHORT" \
             --notes "[$DEV_COMMIT_SHORT](https://github.com/gwdevhub/GWToolboxpp/commit/$DEV_COMMIT)" \
             --prerelease \
-            GWToolboxdll.dll DialogsWindow.dll RawDialogs.dll SpeedrunScriptingTools.dll GWToolboxdll.pdb.gz gwca.dll
+            GWToolboxdll.dll GWToolboxdll.pdb.gz gwca.dll ./plugin-binaries/*
         else
           gh release create "$TAG_NAME" \
             --title "$TAG_NAME" \
             --notes "$RELEASE_NOTES" \
-            GWToolboxdll.dll DialogsWindow.dll RawDialogs.dll SpeedrunScriptingTools.dll GWToolboxdll.pdb.gz gwca.dll
+            GWToolboxdll.dll GWToolboxdll.pdb.gz gwca.dll ./plugin-binaries/*
         fi
