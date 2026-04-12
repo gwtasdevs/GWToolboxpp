@@ -73,14 +73,8 @@ namespace {
                 continue;
             }
             auto tag_name = js["tag_name"].get<std::string>();
-            // Handle commit-based prerelease tags from gwtasdevs CI.
-            // These have no version in the tag, so use the compiled-in version;
-            // the file size comparison will determine if it's a newer build.
-            const bool is_commit_tag = tag_name.starts_with("commit-");
-            const auto version_number_len = is_commit_tag
-                ? std::string::npos
-                : tag_name.find(tag_name.contains("_Release") ? "_Release" : "_Beta", 0);
-            if (version_number_len == std::string::npos && !is_commit_tag) {
+            const auto version_number_len = tag_name.find(tag_name.contains("_Release") ? "_Release" : "_Beta", 0);
+            if (version_number_len == std::string::npos) {
                 continue;
             }
             if (!(js.contains("assets") && js["assets"].is_array() && js["assets"].size() > 0)) {
@@ -100,17 +94,9 @@ namespace {
                     continue; // This release doesn't have a dll download.
                 }
                 release->download_url = asset["browser_download_url"].get<std::string>();
-                if (is_commit_tag) {
-                    // commit-* builds embed the tag in GWTOOLBOXDLL_VERSION_BETA,
-                    // so construct the version the same way: base version + tag_name.
-                    release->version = GWTOOLBOXDLL_VERSION;
-                    release->version.append(tag_name);
-                }
-                else {
-                    release->version = tag_name.substr(0, version_number_len);
-                    if (is_prerelease) {
-                        release->version += tag_name.substr(version_number_len + 1);
-                    }
+                release->version = tag_name.substr(0, version_number_len);
+                if (is_prerelease) {
+                    release->version += tag_name.substr(version_number_len + 1);
                 }
                 std::ranges::transform(release->version, release->version.begin(), [](const auto chr) { return static_cast<char>(std::tolower(chr)); });
                 release->body = js["body"].get<std::string>();
