@@ -157,10 +157,17 @@ jobs:
       # access regardless of the host operating system
       shell: bash
       working-directory: ${{runner.workspace}}/GWToolboxpp/build
-      run: cmake $GITHUB_WORKSPACE --preset=vcpkg
-      env:
-        VCPKG_ROOT: ${{ env.VCPKG_ROOT }}
-        VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+      run: |
+        CMAKE_ARGS="--preset=vcpkg"
+        if [ "$IS_DEV_BUILD" = "true" ]; then
+            CMAKE_ARGS="$CMAKE_ARGS -DGWTOOLBOXDLL_VERSION_BETA=commit-$DEV_COMMIT"
+            fi
+            cmake $GITHUB_WORKSPACE $CMAKE_ARGS
+          env:
+            VCPKG_ROOT: ${{ env.VCPKG_ROOT }}
+            VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+            IS_DEV_BUILD: ${{ needs.check.outputs.run == 'dev' }}
+            DEV_COMMIT: ${{ needs.check.outputs.dev_commit }}
 
     - name: Build
       working-directory: ${{runner.workspace}}/GWToolboxpp/build
