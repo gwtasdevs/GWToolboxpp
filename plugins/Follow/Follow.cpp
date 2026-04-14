@@ -90,8 +90,8 @@ void FollowPlugin::DrawSettings()
     }
 }
 
-void FollowPlugin::Initialize(ImGuiContext* ctx, ImGuiAllocFns fns, HMODULE toolbox_dll) {
-
+void FollowPlugin::Initialize(ImGuiContext* ctx, ImGuiAllocFns fns, HMODULE toolbox_dll)
+{
     ToolboxPlugin::Initialize(ctx, fns, toolbox_dll);
     
     GW::Chat::CreateCommand(&ChatCmd_HookEntry, L"follow", [](GW::HookStatus*, const wchar_t*, const int, const LPWSTR*) 
@@ -100,10 +100,9 @@ void FollowPlugin::Initialize(ImGuiContext* ctx, ImGuiAllocFns fns, HMODULE tool
         logMessage(following ? "Activated" : "Deactivated");
     });
 }
+
 void FollowPlugin::SignalTerminate()
 {
-    ToolboxPlugin::SignalTerminate();
-
     GW::Chat::DeleteCommand(&ChatCmd_HookEntry, L"follow");
-    GW::DisableHooks();
+    ToolboxPlugin::SignalTerminate();
 }

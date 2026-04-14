@@ -2,7 +2,6 @@
 
 #include <Condition.h>
 #include <ToolboxUIPlugin.h>
-#include <FontLoader.h>
 #include <Enums.h>
 
 #include <IconsFontAwesome5.h>

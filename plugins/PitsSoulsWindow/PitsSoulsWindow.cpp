@@ -15,6 +15,7 @@ DLLAPI ToolboxPlugin* ToolboxPluginInstance()
     static PitsSoulsWindow instance;
     return &instance;
 }
+
 namespace {
     GW::HookEntry InstanceLoadFile_Entry;
 
@@ -161,6 +162,7 @@ void PitsSoulsWindow::Initialize(ImGuiContext* ctx, ImGuiAllocFns fns, HMODULE t
         resetSouls();
     });
 }
+
 void PitsSoulsWindow::SignalTerminate()
 {
     ToolboxUIPlugin::SignalTerminate();

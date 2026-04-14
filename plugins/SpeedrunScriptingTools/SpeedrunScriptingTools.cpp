@@ -1170,9 +1170,8 @@ bool SpeedrunScriptingTools::WndProc(const UINT Message, const WPARAM wParam, LP
 void SpeedrunScriptingTools::Initialize(ImGuiContext* ctx, const ImGuiAllocFns allocator_fns, HMODULE toolbox_dll)
 {
     ToolboxPlugin::Initialize(ctx, allocator_fns, toolbox_dll);
-    GW::Initialize();
 
-    GW::StoC::RegisterPostPacketCallback<GW::Packet::StoC::InstanceLoadFile>(&InstanceLoadFile_Entry, [this](GW::HookStatus*, const GW::Packet::StoC::InstanceLoadFile*) 
+    GW::StoC::RegisterPostPacketCallback<GW::Packet::StoC::InstanceLoadFile>(&InstanceLoadFile_Entry, [this](GW::HookStatus*, const GW::Packet::StoC::InstanceLoadFile*)
     {
         ScriptVariableManager::getInstance().clear();
         isInLoadingScreen = false;
@@ -1310,17 +1309,5 @@ void SpeedrunScriptingTools::SignalTerminate()
     GW::UI::RemoveUIMessageCallback(&BeginSkillCast_Entry, GW::UI::UIMessage::kAgentSkillStartedCast);
     GW::UI::RemoveUIMessageCallback(&GotoTargetDialog_Entry, GW::UI::UIMessage::kDialogBody);
 
-    GW::DisableHooks();
     ToolboxPlugin::SignalTerminate();
-}
-
-bool SpeedrunScriptingTools::CanTerminate()
-{
-    return GW::Hook::GetInHookCount() == 0;
-}
-
-void SpeedrunScriptingTools::Terminate()
-{
-    ToolboxPlugin::Terminate();
-    GW::Terminate();
 }

@@ -16,7 +16,8 @@ DLLAPI ToolboxPlugin* ToolboxPluginInstance()
     static DhuumCalculator instance;
     return &instance;
 }
-namespace 
+
+namespace
 {
     struct DhuumStatus {
         float hp;
@@ -87,6 +88,7 @@ void DhuumCalculator::Update(float delay)
     {
         return;
     }
+
     history.push_back({dhuum->hp - 0.25f, 1.f - context->progress_bar->progress, now});
     while (history.size() && diff(now, history.front().time) > 48'000)
     {

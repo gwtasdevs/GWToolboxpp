@@ -1,9 +1,8 @@
 #include "AgentPopTimer.h"
 
-#include "FontLoader.h"
-
 #include <chrono>
 
+#include <Utils/FontLoader.h>
 #include <GWCA/GWCA.h>
 #include <GWCA/Utilities/Hook.h>
 #include <GWCA/Constants/ItemIds.h>
@@ -142,13 +141,19 @@ namespace
     GW::HookEntry UseItem_Entry;
     GW::HookEntry InstanceLoadFile_Entry;
 
+    // Targetable minipet model IDs
+    constexpr uint32_t MiniPetGuildLord = 36648;
+    constexpr uint32_t MiniPetHighPriestZhang = 36649;
+    constexpr uint32_t MiniPetGhostlyPriest = 36650;
+    constexpr uint32_t MiniPetRiftWarden = 36651;
+
     bool isTargetableMiniPet(uint32_t itemId)
     {
         switch (itemId) {
-            case GW::Constants::ItemID::GuildLord:
-            case GW::Constants::ItemID::HighPriestZhang:
-            case GW::Constants::ItemID::GhostlyPriest:
-            case GW::Constants::ItemID::RiftWarden:
+            case MiniPetGuildLord:
+            case MiniPetHighPriestZhang:
+            case MiniPetGhostlyPriest:
+            case MiniPetRiftWarden:
                 return true;
             default:
                 return false;
@@ -230,7 +235,7 @@ void AgentPopTimer::drawCircleSegment(float circlePortion, float thickness) cons
         }
         const auto phi = 2 * pi * circlePortion;
         drawList->PathLineTo(ImVec2(center.x + (float)std::cos(-phi - pi / 2) * radius, center.y + (float)std::sin(-phi - pi / 2) * radius));
-        drawList->PathStroke(ImGui::ColorConvertFloat4ToU32(color), false, thickness);
+        drawList->PathStroke(ImGui::ColorConvertFloat4ToU32(color), 0, thickness);
     }
 
     auto yOffset = 0.f;
@@ -241,7 +246,7 @@ void AgentPopTimer::drawCircleSegment(float circlePortion, float thickness) cons
         const auto centiseconds = (int)(100 * (1.f - circlePortion));
         const auto text = std::to_string(centiseconds / 10) + "." + std::to_string(centiseconds % 10);
         ImGui::PushStyleColor(ImGuiCol_Text, color);
-        ImGui::PushFont(FontLoader::GetFont(FontLoader::font_sizes[fontSizeIndex + 3]));
+        ImGui::PushFont(nullptr, static_cast<float>(FontLoader::font_sizes[fontSizeIndex + 3]));
         const auto textSize = ImGui::CalcTextSize(text.c_str());
         yOffset = showIcon && texture ? (textSize.y + imageSizes[imageSizeIndex].y) / 2 : 0;
 
@@ -255,7 +260,7 @@ void AgentPopTimer::drawCircleSegment(float circlePortion, float thickness) cons
     if (showIcon && texture) 
     {
         const auto imageSize = imageSizes[imageSizeIndex];
-        ImGui::SetCursorPos((size + thickness) * 0.5 - imageSize * 0.25  - ImVec2(0, yOffset/4) + offset);
+        ImGui::SetCursorPos((size + thickness - imageSize) * 0.5  - ImVec2(0, yOffset/4) + offset);
         ImGui::Image((ImTextureID)(intptr_t)*texture, imageSize);
     }
 }
@@ -273,11 +278,14 @@ void AgentPopTimer::Draw(IDirect3DDevice9* pDevice)
     const auto thickness = radius / 5;
     ImGui::SetNextWindowSize(ImVec2(2 * (radius + thickness), 2 * (radius + thickness)));
     SetNextWindowCenter(ImGuiCond_FirstUseEver);
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0, 0, 0, 0));
     if (ImGui::Begin(Name(), nullptr, GetWinFlags() | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollbar)) 
     {
         const auto circlePortion = (float)msSincePop / 10'000;
         drawCircleSegment(circlePortion, thickness);
     }
+    ImGui::End();
+    ImGui::PopStyleColor();
 }
 
 void AgentPopTimer::DrawSettings()

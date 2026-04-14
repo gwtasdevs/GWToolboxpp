@@ -13,15 +13,14 @@
 #include <GWCA/GameEntities/Agent.h>
 #include <GWCA/GameEntities/Skill.h>
 
-#include <GWCA/GWCA.h>
 #include <GWCA/Packets/StoC.h>
-#include <GWCA/Utilities/Hooker.h>
 
 DLLAPI ToolboxPlugin* ToolboxPluginInstance()
 {
     static ProjectileIndicator instance;
     return &instance;
 }
+
 namespace 
 {
     GW::HookEntry projectileHook;
@@ -56,8 +55,8 @@ namespace
     }
 }
 
-void ProjectileIndicator::Initialize(ImGuiContext* ctx, ImGuiAllocFns fns, HMODULE toolbox_dll) {
-
+void ProjectileIndicator::Initialize(ImGuiContext* ctx, ImGuiAllocFns fns, HMODULE toolbox_dll)
+{
     ToolboxUIPlugin::Initialize(ctx, fns, toolbox_dll);
 
     GW::StoC::RegisterPacketCallback<GW::Packet::StoC::AgentProjectileLaunched>(&projectileHook, [this](GW::HookStatus* status, GW::Packet::StoC::AgentProjectileLaunched* packet) -> void {
@@ -198,6 +197,7 @@ void ProjectileIndicator::DrawSettings()
         ShellExecute(nullptr, "open", discordInviteLink, nullptr, nullptr, SW_SHOWNORMAL);
     }
 }
+
 void ProjectileIndicator::LoadSettings(const wchar_t* folder)
 {
     ToolboxUIPlugin::LoadSettings(folder);

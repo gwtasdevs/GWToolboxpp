@@ -104,6 +104,7 @@ void Slowload::stopSlowLoad()
         status = Status::Inactive;
     });
 }
+
 bool Slowload::WndProc(const UINT Message, const WPARAM wParam, LPARAM lparam)
 {
     if (GW::Chat::GetIsTyping() || GW::MemoryMgr::GetGWWindowHandle() != GetActiveWindow()) {

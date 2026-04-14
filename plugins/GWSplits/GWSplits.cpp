@@ -8,6 +8,8 @@
 
 #include <BackupManager.h>
 #include <PluginUtils.h>
+#include <Utils/FontLoader.h>
+#include <io.h>
 
 #include <GWCA/Packets/StoC.h>
 #include <GWCA/Constants/Constants.h>
@@ -501,7 +503,7 @@ bool GWSplits::drawRuns()
             if (ImGui::Button("Copy run", ImVec2(100, 0))) 
             {
                 if (const auto encoded = encodeString(std::to_string(currentVersion) + " " + serialize(**runIt))) {
-                    PluginUtils::logMessage("Copy run " + (*runIt)->name + " to clipboard", Name());
+                    logMessage("Copy run " + (*runIt)->name + " to clipboard", Name());
                     ImGui::SetClipboardText(encoded->c_str());
                 }
             }
@@ -689,7 +691,7 @@ void GWSplits::Draw(IDirect3DDevice9* pDevice)
 
     ImGui::SetNextWindowSize(ImVec2(100, 0), ImGuiCond_FirstUseEver);
     if (ImGui::Begin(Name(), GetVisiblePtr(), GetWinFlags())) {
-        ImGui::PushFont(FontLoader::GetFont(FontLoader::font_sizes[fontSizeIndex]));
+        ImGui::PushFont(nullptr, static_cast<float>(FontLoader::font_sizes[fontSizeIndex]));
         if (settingsFolder && !isCurrentRunTracked)
         {
             if (std::ranges::any_of(currentSplits, &Split::isPB)) {
@@ -810,7 +812,7 @@ void GWSplits::Draw(IDirect3DDevice9* pDevice)
             ImGui::Separator();
         if (showRunTime)
         {
-            ImGui::PushFont(FontLoader::GetFont(FontLoader::font_sizes[fontSizeIndex + 2]));
+            ImGui::PushFont(nullptr, static_cast<float>(FontLoader::font_sizes[fontSizeIndex + 2]));
             ImGui::PushStyleColor(ImGuiCol_Text, lastSegmentColor);
             rightAlignedText(timeToString(runTime));
             ImGui::PopStyleColor();
@@ -998,7 +1000,7 @@ void GWSplits::LoadSettings(const wchar_t* folder)
 
     if (runs.empty() && BackupManager::getInstance().backupCount(PluginUtils::StringToWString(Name())) > 0) 
     {
-        PluginUtils::logMessage("No runs loaded, but automatic backups found. Type \"/restore " + std::string{Name()} + " help\" to see options for restoring backups", Name());
+        logMessage("No runs loaded, but automatic backups found. Type \"/restore " + std::string{Name()} + " help\" to see options for restoring backups", Name());
     }
 }
 
@@ -1175,39 +1177,39 @@ void GWSplits::Initialize(ImGuiContext* ctx, ImGuiAllocFns fns, HMODULE toolbox_
         }
         if (argc < 3 || PluginUtils::ToLower(argv[2]) == L"recent")
         {
-            PluginUtils::logMessage("Restore most recent backup", instance->Name());
+            logMessage("Restore most recent backup", instance->Name());
             iniToLoad = BackupManager::getInstance().load(pluginName, BackupManager::LoadType::Latest);
         }
         else if (PluginUtils::ToLower(argv[2]) == L"largest")
         {
-            PluginUtils::logMessage("Restore largest backup", instance->Name());
+            logMessage("Restore largest backup", instance->Name());
             iniToLoad = BackupManager::getInstance().load(pluginName, BackupManager::LoadType::Largest);
         }
         else if (PluginUtils::ToLower(argv[2]) == L"list")
         {
-            PluginUtils::logMessage("Available backups:", instance->Name());
+            logMessage("Available backups:", instance->Name());
             const auto paths = BackupManager::getInstance().list(pluginName);
             for (const auto& path : paths) 
             {
                 const auto name = path.filename().string().substr(0, 1);
                 const auto time = std::format("{:%Y-%m-%d %H:%M}", std::filesystem::last_write_time(path));
                 const auto size = std::filesystem::file_size(path);
-                PluginUtils::logMessage(std::format("Backup {}, Last change {}, File size {}", name, time, size), instance->Name());
+                logMessage(std::format("Backup {}, Last change {}, File size {}", name, time, size), instance->Name());
             }
         }
         else if (PluginUtils::ToLower(argv[2]) == L"help")
         {
-            PluginUtils::logMessage("Type \"/restore " + std::string{instance->Name()} + " recent\" to restore the most recent backup", instance->Name());
-            PluginUtils::logMessage("Type \"/restore " + std::string{instance->Name()} + " largest\" to restore the largest backup", instance->Name());
-            PluginUtils::logMessage("Type \"/restore " + std::string{instance->Name()} + " list\" to show the available backups", instance->Name());
-            PluginUtils::logMessage("Type \"/restore " + std::string{instance->Name()} + " $NUMBER\" to restore a specific backup", instance->Name());
-            PluginUtils::logMessage("Type \"/restore " + std::string{instance->Name()} + " help\" to show this menu", instance->Name());
+            logMessage("Type \"/restore " + std::string{instance->Name()} + " recent\" to restore the most recent backup", instance->Name());
+            logMessage("Type \"/restore " + std::string{instance->Name()} + " largest\" to restore the largest backup", instance->Name());
+            logMessage("Type \"/restore " + std::string{instance->Name()} + " list\" to show the available backups", instance->Name());
+            logMessage("Type \"/restore " + std::string{instance->Name()} + " $NUMBER\" to restore a specific backup", instance->Name());
+            logMessage("Type \"/restore " + std::string{instance->Name()} + " help\" to show this menu", instance->Name());
         }
         else {
             try 
             {
                 const auto index = std::stoi(argv[2]);
-                PluginUtils::logMessage("Restore backup " + std::to_string(index), instance->Name());
+                logMessage("Restore backup " + std::to_string(index), instance->Name());
                 iniToLoad = BackupManager::getInstance().load(pluginName, BackupManager::LoadType::Index, index);
             }
             catch (...) {

@@ -1,9 +1,5 @@
 #include "ShadowstepPredictor.h"
 
-#include <GWCA/GameEntities/Pathing.h>
-#include <GWCA/GameEntities/Agent.h>
-#include <GWCA/GameEntities/Skill.h>
-
 #include <GWCA/Managers/MapMgr.h>
 #include <GWCA/Managers/AgentMgr.h>
 #include <GWCA/Managers/UIMgr.h>
@@ -11,25 +7,18 @@
 #include <GWCA/Managers/StoCMgr.h>
 #include <GWCA/Managers/SkillbarMgr.h>
 
-#include <GWCA/Utilities/Scanner.h>
-#include <GWCA/Utilities/Hooker.h>
-#include <GWCA/Utilities/Hook.h>
+#include <GWCA/GameEntities/Skill.h>
 
 #include <GWCA/Packets/StoC.h>
 
-#include <Utils/FontLoader.h>
-
-#include <PluginUtils.h>
-
-namespace 
+namespace
 {
     GW::HookEntry skillCastEntry;
     GW::HookEntry genericValueEntry;
     GW::HookEntry instanceLoadEntry;
-} // namespace
 
-std::optional<PluginUtils::SkillbarInfo> skillbarInfo;
-const GW::PathingMapArray* path_map = nullptr;
+    const GW::PathingMapArray* path_map = nullptr;
+} // namespace
 
 DLLAPI ToolboxPlugin* ToolboxPluginInstance()
 {
@@ -49,9 +38,8 @@ void ShadowstepPredictor::Update(float delta)
         chances.clear();
         return;
     }
-    if (!skillbarInfo) skillbarInfo = PluginUtils::getSkillbarInfo();
     if (!path_map) path_map = GW::Map::GetPathingMap();
-    if (!path_map || !skillbarInfo) 
+    if (!path_map) 
     {
         chances.clear();
         return;
@@ -134,10 +122,10 @@ void ShadowstepPredictor::Update(float delta)
             return;
         }
 
-        if (allyJumpChances)
-            chances[id] = *allyJumpChances;
+        if (enemyJumpChances)
+            chances[id] = *enemyJumpChances;
         else
-            allyJumpChances = chances[id] = dcPrediction(playerPathPoint, target, path_map);
+            enemyJumpChances = chances[id] = dcPrediction(playerPathPoint, target, path_map);
     };
 
     if (showEnemyShadowSteps) 
@@ -158,7 +146,7 @@ namespace
 {
     void drawOverlay(ImVec2 topLeft, ImVec2 size, OutcomeChances chances, ImVec4 success, ImVec4 partial, ImVec4 failure) 
     {
-        const auto draw_list = ImGui::GetBackgroundDrawList();
+        const auto draw_list = ImGui::GetForegroundDrawList();
 
         const auto successStart = topLeft.x;
         const auto partialStart = successStart + chances.success * size.x;
@@ -176,17 +164,30 @@ namespace
 
 void ShadowstepPredictor::Draw(IDirect3DDevice9*) 
 {
-    if (!GetVisiblePtr() || !*GetVisiblePtr() || !skillbarInfo)
+    if (!GetVisiblePtr() || !*GetVisiblePtr())
         return;
     const auto skillbar = GW::SkillbarMgr::GetPlayerSkillbar();
     if (!skillbar) return;
 
-    
+    auto* skillbar_frame = GW::UI::GetFrameByLabel(L"Skillbar");
+    if (!skillbar_frame || !skillbar_frame->IsVisible() || !skillbar_frame->IsCreated())
+        return;
+
+    const auto imgui_viewport = ImGui::GetMainViewport();
+
     for (size_t i = 0; i < 8; i++) 
     {
         if (!chances.contains(skillbar->skills[i].skill_id))
             continue;
-        drawOverlay(skillbarInfo->positions[i], {skillbarInfo->width, skillbarInfo->height}, chances[skillbar->skills[i].skill_id], successColor, partialColor, failureColor);
+
+        auto* skill_frame = GW::UI::GetChildFrame(skillbar_frame, i);
+        if (!skill_frame) continue;
+
+        const auto screen_pos = skill_frame->position.GetTopLeftOnScreen();
+        const auto size = skill_frame->position.GetSizeOnScreen();
+        const ImVec2 topLeft{screen_pos.x + imgui_viewport->Pos.x, screen_pos.y + imgui_viewport->Pos.y};
+
+        drawOverlay(topLeft, {size.x, size.y}, chances[skillbar->skills[i].skill_id], successColor, partialColor, failureColor);
     }
 }
 

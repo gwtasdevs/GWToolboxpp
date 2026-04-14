@@ -4,8 +4,7 @@
 
 #include <IconsFontAwesome5.h>
 
-class DeathPenaltyTimer : public ToolboxUIPlugin 
-{
+class DeathPenaltyTimer : public ToolboxUIPlugin {
 public:
     DeathPenaltyTimer();
     ~DeathPenaltyTimer() override = default;
@@ -20,7 +19,7 @@ public:
     void Update(float) override;
 
     void Initialize(ImGuiContext* ctx, ImGuiAllocFns allocator_fns, HMODULE toolbox_dll) override;
-    void Terminate() override;
+    void SignalTerminate() override;
 
 private:
     void drawCircleSegment(float circlePortion, float thickness) const;

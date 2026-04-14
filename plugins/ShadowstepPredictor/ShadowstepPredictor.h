@@ -2,10 +2,9 @@
 
 #include <ToolboxUIPlugin.h>
 
-#include <Pathing.h>
-
 #include <GWCA/Constants/Skills.h>
-#include <GWCA/GameEntities/Pathing.h>
+
+#include <Pathing.h>
 
 #include <IconsFontAwesome5.h>
 

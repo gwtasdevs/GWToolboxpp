@@ -1,9 +1,8 @@
 #include "DeathPenaltyTimer.h"
 
-#include "FontLoader.h"
-
 #include <chrono>
 
+#include <Utils/FontLoader.h>
 #include <GWCA/GWCA.h>
 #include <GWCA/Utilities/Hook.h>
 #include <GWCA/Constants/AgentIDs.h>
@@ -143,7 +142,7 @@ void DeathPenaltyTimer::drawCircleSegment(float circlePortion, float thickness) 
         }
         const auto phi = 2 * pi * circlePortion;
         drawList->PathLineTo(ImVec2(center.x + (float)std::cos(-phi - pi / 2) * radius, center.y + (float)std::sin(-phi - pi / 2) * radius));
-        drawList->PathStroke(ImGui::ColorConvertFloat4ToU32(color), false, thickness);
+        drawList->PathStroke(ImGui::ColorConvertFloat4ToU32(color), 0, thickness);
     }
 
     auto yOffset = 0.f;
@@ -153,7 +152,7 @@ void DeathPenaltyTimer::drawCircleSegment(float circlePortion, float thickness) 
         const auto centiseconds = (int)(150 * (1.f - circlePortion));
         const auto text = std::to_string(centiseconds / 10) + "." + std::to_string(centiseconds % 10);
         ImGui::PushStyleColor(ImGuiCol_Text, color);
-        ImGui::PushFont(FontLoader::GetFont(FontLoader::font_sizes[fontSizeIndex + 3]));
+        ImGui::PushFont(nullptr, static_cast<float>(FontLoader::font_sizes[fontSizeIndex + 3]));
         const auto textSize = ImGui::CalcTextSize(text.c_str());
         yOffset = showIcon && texture ? (textSize.y + imageSizes[imageSizeIndex].y) / 2 : 0;
 
@@ -289,8 +288,6 @@ void DeathPenaltyTimer::SaveSettings(const wchar_t* folder)
 void DeathPenaltyTimer::Initialize(ImGuiContext* ctx, ImGuiAllocFns allocator_fns, HMODULE toolbox_dll)
 {
     ToolboxUIPlugin::Initialize(ctx, allocator_fns, toolbox_dll);
-    
-    GW::Initialize();
 
     using namespace std::chrono_literals;
     lastRevive = std::chrono::steady_clock::now() - 1h;
@@ -303,8 +300,8 @@ void DeathPenaltyTimer::Initialize(ImGuiContext* ctx, ImGuiAllocFns allocator_fn
     });
 }
 
-void DeathPenaltyTimer::Terminate()
+void DeathPenaltyTimer::SignalTerminate()
 {
-    GW::Terminate();
-    ToolboxUIPlugin::Terminate();
+    GW::StoC::RemovePostCallback<GW::Packet::StoC::InstanceLoadFile>(&InstanceLoadFile_Entry);
+    ToolboxUIPlugin::SignalTerminate();
 }
