@@ -199,13 +199,27 @@ jobs:
         repositories: DialogsPlugins
 
     - name: Download private plugin assets
+      id: private-plugins-download
       continue-on-error: true
       env:
         GH_TOKEN: ${{ steps.private-plugins-app-token.outputs.token }}
       run: |
         mkdir -p ./output-artifacts
-        gh release download --repo gwtasdevs/DialogsPlugins -pattern "*.dll" --dir ./output-artifacts
-        gh attestation verify ./output-artifacts/*.dll -R gwtasdevs/DialogsPlugins
+        gh release download --repo gwtasdevs/DialogsPlugins --pattern "*.dll" --pattern "*.sigstore.json" --dir ./output-artifacts
+
+    - name: Install Cosign
+      uses: sigstore/cosign-installer@v4.1.1
+
+    - name: Attest private plugins
+      run: |
+        for file in ./output-artifacts/*.dll; do
+          cosign verify-blob \
+            --bundle "${file}.sigstore.json" \
+            --certificate-identity-regexp "https://github.com/gwtasdevs/DialogsPlugins" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$file"
+        done
+        rm -rf ./output-artifacts/*.sigstore.json
 
     - name: Check version and create release
       shell: bash
