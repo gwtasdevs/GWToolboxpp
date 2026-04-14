@@ -255,11 +255,9 @@ jobs:
         mkdir -p ./output-artifacts
         BIN_DIR="${{runner.workspace}}/GWToolboxpp/bin/RelWithDebInfo"
         cp "$BIN_DIR/GWToolboxdll.dll" ./output-artifacts
-        cp "$BIN_DIR/DialogsWindow.dll" ./output-artifacts
-        cp "$BIN_DIR/RawDialogs.dll" ./output-artifacts
         cp "$BIN_DIR/SpeedrunScriptingTools.dll" ./output-artifacts
         cp "${{runner.workspace}}/GWToolboxpp/Dependencies/GWCA/bin/gwca.dll" ./output-artifacts
-        gzip -c "$BIN_DIR/GWToolboxdll.pdb" > ./output-artifactsGWToolboxdll.pdb.gz
+        gzip -c "$BIN_DIR/GWToolboxdll.pdb" > ./output-artifacts/GWToolboxdll.pdb.gz
 
         # Create release
         if [ -n "$DEV_COMMIT_SHORT" ]; then
