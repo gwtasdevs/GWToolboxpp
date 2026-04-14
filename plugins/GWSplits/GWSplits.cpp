@@ -6,7 +6,7 @@
 #include <enumUtils.h>
 #include <Keys.h>
 
-//#include <BackupManager.h>
+#include <BackupManager.h>
 #include <PluginUtils.h>
 
 #include <GWCA/Packets/StoC.h>
@@ -17,12 +17,12 @@
 #include <GWCA/Managers/MapMgr.h>
 #include <GWCA/Managers/UIMgr.h>
 #include <GWCA/Managers/MemoryMgr.h>
+#include <GWCA/Managers/ChatMgr.h>
 
 #include <GWCA/GWCA.h>
 #include <GWCA/Utilities/Hooker.h>
 #include <GWCA/Utilities/Hook.h>
 
-#include <imgui.h>
 #include <ImGuiCppWrapper.h>
 
 DLLAPI ToolboxPlugin* ToolboxPluginInstance()
@@ -37,8 +37,7 @@ namespace {
     GW::HookEntry DisplayDialogue_Entry;
     GW::HookEntry DungeonReward_Entry;
     GW::HookEntry DoACompleteZone_Entry;
-    GW::HookEntry RestoreChatCmd_HookEntry;
-    GW::HookEntry ResetrunChatCmd_HookEntry;
+    GW::HookEntry ChatCmd_HookEntry;
 
     static void onDisplayDialogDecoded(void* instancePtr, const wchar_t* decoded)
     {
@@ -502,7 +501,7 @@ bool GWSplits::drawRuns()
             if (ImGui::Button("Copy run", ImVec2(100, 0))) 
             {
                 if (const auto encoded = encodeString(std::to_string(currentVersion) + " " + serialize(**runIt))) {
-                    logMessage("Copy run " + (*runIt)->name + " to clipboard", Name());
+                    PluginUtils::logMessage("Copy run " + (*runIt)->name + " to clipboard", Name());
                     ImGui::SetClipboardText(encoded->c_str());
                 }
             }
@@ -992,15 +991,15 @@ void GWSplits::loadFromIniFile(const wchar_t* filePath)
 void GWSplits::LoadSettings(const wchar_t* folder)
 {
     ToolboxUIPlugin::LoadSettings(folder);
-    //BackupManager::getInstance().initialize(folder);
+    BackupManager::getInstance().initialize(folder);
     settingsFolder = folder;
 
     loadFromIniFile(GetSettingFile(folder).c_str());
 
-    //if (runs.empty() && BackupManager::getInstance().backupCount(PluginUtils::StringToWString(Name())) > 0) 
-    //{
-    //    logMessage("No runs loaded, but automatic backups found. Type \"/restore " + std::string{Name()} + " help\" to see options for restoring backups", Name());
-    //}
+    if (runs.empty() && BackupManager::getInstance().backupCount(PluginUtils::StringToWString(Name())) > 0) 
+    {
+        PluginUtils::logMessage("No runs loaded, but automatic backups found. Type \"/restore " + std::string{Name()} + " help\" to see options for restoring backups", Name());
+    }
 }
 
 bool GWSplits::WndProc(const UINT Message, const WPARAM wParam, LPARAM lparam)
@@ -1098,8 +1097,8 @@ void GWSplits::SaveSettings(const wchar_t* folder)
     }
     
     PLUGIN_ASSERT(ini.SaveFile(GetSettingFile(folder).c_str()) == SI_OK);
-    /*if (runs.size())
-        BackupManager::getInstance().save(PluginUtils::StringToWString(Name()), GetSettingFile(folder));*/
+    if (runs.size())
+        BackupManager::getInstance().save(PluginUtils::StringToWString(Name()), GetSettingFile(folder));
 }
 
 void GWSplits::handleTrigger(Trigger triggerType, std::function<bool(const Split&)> extraConditions)
@@ -1160,7 +1159,7 @@ void GWSplits::Initialize(ImGuiContext* ctx, ImGuiAllocFns fns, HMODULE toolbox_
         handleTrigger(Trigger::DoaZoneComplete, [&](const Split& s){ return s.triggerData.doaZone == doaZone; });
     });
 
- /*   GW::Chat::CreateCommand(&RestoreChatCmd_HookEntry, L"restore", [](GW::HookStatus* status, const wchar_t*, const int argc, const LPWSTR* argv) {
+    /*GW::Chat::CreateCommand(L"restore", [](GW::HookStatus* status, const wchar_t*, const int argc, const LPWSTR* argv) {
         const auto instance = static_cast<GWSplits*>(ToolboxPluginInstance());
         if (!instance || argc < 2) {
             status->blocked = false;
@@ -1176,39 +1175,39 @@ void GWSplits::Initialize(ImGuiContext* ctx, ImGuiAllocFns fns, HMODULE toolbox_
         }
         if (argc < 3 || PluginUtils::ToLower(argv[2]) == L"recent")
         {
-            logMessage("Restore most recent backup", instance->Name());
+            PluginUtils::logMessage("Restore most recent backup", instance->Name());
             iniToLoad = BackupManager::getInstance().load(pluginName, BackupManager::LoadType::Latest);
         }
         else if (PluginUtils::ToLower(argv[2]) == L"largest")
         {
-            logMessage("Restore largest backup", instance->Name());
+            PluginUtils::logMessage("Restore largest backup", instance->Name());
             iniToLoad = BackupManager::getInstance().load(pluginName, BackupManager::LoadType::Largest);
         }
         else if (PluginUtils::ToLower(argv[2]) == L"list")
         {
-            logMessage("Available backups:", instance->Name());
+            PluginUtils::logMessage("Available backups:", instance->Name());
             const auto paths = BackupManager::getInstance().list(pluginName);
             for (const auto& path : paths) 
             {
                 const auto name = path.filename().string().substr(0, 1);
                 const auto time = std::format("{:%Y-%m-%d %H:%M}", std::filesystem::last_write_time(path));
                 const auto size = std::filesystem::file_size(path);
-                logMessage(std::format("Backup {}, Last change {}, File size {}", name, time, size), instance->Name());
+                PluginUtils::logMessage(std::format("Backup {}, Last change {}, File size {}", name, time, size), instance->Name());
             }
         }
         else if (PluginUtils::ToLower(argv[2]) == L"help")
         {
-            logMessage("Type \"/restore " + std::string{instance->Name()} + " recent\" to restore the most recent backup", instance->Name());
-            logMessage("Type \"/restore " + std::string{instance->Name()} + " largest\" to restore the largest backup", instance->Name());
-            logMessage("Type \"/restore " + std::string{instance->Name()} + " list\" to show the available backups", instance->Name());
-            logMessage("Type \"/restore " + std::string{instance->Name()} + " $NUMBER\" to restore a specific backup", instance->Name());
-            logMessage("Type \"/restore " + std::string{instance->Name()} + " help\" to show this menu", instance->Name());
+            PluginUtils::logMessage("Type \"/restore " + std::string{instance->Name()} + " recent\" to restore the most recent backup", instance->Name());
+            PluginUtils::logMessage("Type \"/restore " + std::string{instance->Name()} + " largest\" to restore the largest backup", instance->Name());
+            PluginUtils::logMessage("Type \"/restore " + std::string{instance->Name()} + " list\" to show the available backups", instance->Name());
+            PluginUtils::logMessage("Type \"/restore " + std::string{instance->Name()} + " $NUMBER\" to restore a specific backup", instance->Name());
+            PluginUtils::logMessage("Type \"/restore " + std::string{instance->Name()} + " help\" to show this menu", instance->Name());
         }
         else {
             try 
             {
                 const auto index = std::stoi(argv[2]);
-                logMessage("Restore backup " + std::to_string(index), instance->Name());
+                PluginUtils::logMessage("Restore backup " + std::to_string(index), instance->Name());
                 iniToLoad = BackupManager::getInstance().load(pluginName, BackupManager::LoadType::Index, index);
             }
             catch (...) {
@@ -1222,7 +1221,7 @@ void GWSplits::Initialize(ImGuiContext* ctx, ImGuiAllocFns fns, HMODULE toolbox_
         }
     });*/
 
-    GW::Chat::CreateCommand(&ResetrunChatCmd_HookEntry, L"resetrun", [](GW::HookStatus*, const wchar_t*, const int, const LPWSTR*) {
+    GW::Chat::CreateCommand(&ChatCmd_HookEntry, L"resetrun", [](GW::HookStatus*, const wchar_t*, const int, const LPWSTR*) {
         const auto instance = static_cast<GWSplits*>(ToolboxPluginInstance());
         if (!instance) return;
 
@@ -1238,15 +1237,14 @@ void GWSplits::Initialize(ImGuiContext* ctx, ImGuiAllocFns fns, HMODULE toolbox_
 
 void GWSplits::SignalTerminate()
 {
-    //GW::Chat::DeleteCommand(&RestoreChatCmd_HookEntry);
-    GW::Chat::DeleteCommand(&ResetrunChatCmd_HookEntry);
+    ToolboxUIPlugin::SignalTerminate();
 
     GW::StoC::RemovePostCallback<GW::Packet::StoC::InstanceLoadInfo>(&InstanceLoadStart_Entry);
     GW::StoC::RemovePostCallback<GW::Packet::StoC::InstanceLoadInfo>(&InstanceTimer_Entry);
     GW::StoC::RemovePostCallback<GW::Packet::StoC::DisplayDialogue>(&DisplayDialogue_Entry);
     GW::StoC::RemovePostCallback<GW::Packet::StoC::DungeonReward>(&DungeonReward_Entry);
     GW::StoC::RemovePostCallback<GW::Packet::StoC::DoACompleteZone>(&DoACompleteZone_Entry);
-    ToolboxUIPlugin::SignalTerminate();
+    GW::Chat::DeleteCommand(&ChatCmd_HookEntry, L"resetrun");
 
     InstanceInfo::getInstance().terminate();
     QuestInfo::getInstance().terminate();
