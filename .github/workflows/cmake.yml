@@ -64,7 +64,10 @@ jobs:
     needs: check
     if: needs.check.outputs.run != 'false'
     permissions:
+      artifact-metadata: write
+      attestations: write
       contents: write
+      id-token: write
     steps:
     - name: Checkout repository
       uses: actions/checkout@v6
@@ -193,16 +196,16 @@ jobs:
         app-id: ${{ vars.PRIVATE_PLUGINS_CLIENT_ID }}
         private-key: ${{ secrets.PRIVATE_PLUGINS_KEY }}
         owner: gwtasdevs
-        repositories: ${{ vars.PRIVATE_PLUGINS_REPO }}
+        repositories: DialogsPlugins
 
     - name: Download private plugin assets
       continue-on-error: true
       env:
         GH_TOKEN: ${{ steps.private-plugins-app-token.outputs.token }}
-        PRIVATE_PLUGINS_REPO: ${{ vars.PRIVATE_PLUGINS_REPO }}
       run: |
-        mkdir -p ./plugin-binaries
-        gh release download --repo gwtasdevs/$PRIVATE_PLUGINS_REPO -pattern "*.dll" --dir ./plugin-binaries
+        mkdir -p ./output-artifacts
+        gh release download --repo gwtasdevs/DialogsPlugins -pattern "*.dll" --dir ./output-artifacts
+        gh attestation verify ./output-artifacts/*.dll -R gwtasdevs/DialogsPlugins
 
     - name: Check version and create release
       shell: bash
@@ -249,14 +252,14 @@ jobs:
         git push origin "$TAG_NAME"
 
         # Prepare artifacts
-        mkdir -p ./plugin-binaries
+        mkdir -p ./output-artifacts
         BIN_DIR="${{runner.workspace}}/GWToolboxpp/bin/RelWithDebInfo"
-        cp "$BIN_DIR/GWToolboxdll.dll" .
-        cp "$BIN_DIR/DialogsWindow.dll" ./plugin-binaries
-        cp "$BIN_DIR/RawDialogs.dll" ./plugin-binaries
-        cp "$BIN_DIR/SpeedrunScriptingTools.dll" ./plugin-binaries
-        cp "${{runner.workspace}}/GWToolboxpp/Dependencies/GWCA/bin/gwca.dll" .
-        gzip -c "$BIN_DIR/GWToolboxdll.pdb" > GWToolboxdll.pdb.gz
+        cp "$BIN_DIR/GWToolboxdll.dll" ./output-artifacts
+        cp "$BIN_DIR/DialogsWindow.dll" ./output-artifacts
+        cp "$BIN_DIR/RawDialogs.dll" ./output-artifacts
+        cp "$BIN_DIR/SpeedrunScriptingTools.dll" ./output-artifacts
+        cp "${{runner.workspace}}/GWToolboxpp/Dependencies/GWCA/bin/gwca.dll" ./output-artifacts
+        gzip -c "$BIN_DIR/GWToolboxdll.pdb" > ./output-artifactsGWToolboxdll.pdb.gz
 
         # Create release
         if [ -n "$DEV_COMMIT_SHORT" ]; then
@@ -264,10 +267,15 @@ jobs:
             --title "commit-$DEV_COMMIT_SHORT" \
             --notes "[$DEV_COMMIT_SHORT](https://github.com/gwdevhub/GWToolboxpp/commit/$DEV_COMMIT_SHORT)" \
             --prerelease \
-            GWToolboxdll.dll GWToolboxdll.pdb.gz gwca.dll ./plugin-binaries/*
+            ./output-artifacts/*
         else
           gh release create "$TAG_NAME" \
             --title "$TAG_NAME" \
             --notes "$RELEASE_NOTES" \
-            GWToolboxdll.dll GWToolboxdll.pdb.gz gwca.dll ./plugin-binaries/*
+            ./output-artifacts/*
         fi
+
+    - name: Attest
+      uses: actions/attest@v4
+      with:
+        subject-path: ./output-artifacts/*
