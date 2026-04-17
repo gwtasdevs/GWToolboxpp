@@ -80,14 +80,7 @@ void FollowPlugin::DrawSettings()
     ImGui::InputFloat("inches away", &followDistance);
     ImGui::PopItemWidth();
 
-    ImGui::Text("Version 1.0.2. For new releases, feature requests and bug reports check out");
-    ImGui::SameLine();
-
-    constexpr auto discordInviteLink = "https://discord.gg/ZpKzer4dK9";
-    ImGui::TextColored(ImColor{102, 187, 238, 255}, discordInviteLink);
-    if (ImGui::IsItemClicked()) {
-        ShellExecute(nullptr, "open", discordInviteLink, nullptr, nullptr, SW_SHOWNORMAL);
-    }
+    ImGui::Text("Version 1.0.3");
 }
 
 void FollowPlugin::Initialize(ImGuiContext* ctx, ImGuiAllocFns fns, HMODULE toolbox_dll)

@@ -262,14 +262,7 @@ void ShadowstepPredictor::DrawSettings()
     ImGui::ColorEdit4("Partial", reinterpret_cast<float*>(&partialColor.x));
     ImGui::ColorEdit4("Failure", reinterpret_cast<float*>(&failureColor.x));
 
-    ImGui::Text("Version 1.0.4. For new releases, feature requests and bug reports check out");
-    ImGui::SameLine();
-
-    constexpr auto discordInviteLink = "https://discord.gg/ZpKzer4dK9";
-    ImGui::TextColored(ImColor{102, 187, 238, 255}, discordInviteLink);
-    if (ImGui::IsItemClicked()) {
-        ShellExecute(nullptr, "open", discordInviteLink, nullptr, nullptr, SW_SHOWNORMAL);
-    }
+    ImGui::Text("Version 1.0.5");
 }
 
 void ShadowstepPredictor::Initialize(ImGuiContext* ctx, const ImGuiAllocFns allocator_fns, const HMODULE toolbox_dll)

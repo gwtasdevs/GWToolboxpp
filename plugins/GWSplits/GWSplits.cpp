@@ -945,13 +945,7 @@ void GWSplits::DrawSettings()
         }
     }
 
-    ImGui::Text("Version 1.3.3. For new releases, feature requests and bug reports check out");
-    ImGui::SameLine();
-    constexpr auto discordInviteLink = "https://discord.gg/ZpKzer4dK9";
-    ImGui::TextColored(ImColor{102, 187, 238, 255}, discordInviteLink);
-    if (ImGui::IsItemClicked()) {
-        ShellExecute(nullptr, "open", discordInviteLink, nullptr, nullptr, SW_SHOWNORMAL);
-    }
+    ImGui::Text("Version 1.3.4");
 }
 
 void GWSplits::loadFromIniFile(const wchar_t* filePath)
