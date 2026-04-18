@@ -203,9 +203,15 @@ jobs:
       continue-on-error: true
       env:
         GH_TOKEN: ${{ steps.private-plugins-app-token.outputs.token }}
+        IS_DEV_BUILD: ${{ needs.check.outputs.run == 'dev' }}
       run: |
         mkdir -p ./output-artifacts
-        gh release download --repo gwtasdevs/DialogsPlugins --pattern "*.dll" --pattern "*.sigstore.json" --dir ./output-artifacts
+        DOWNLOAD_ARGS=(--repo gwtasdevs/DialogsPlugins --pattern "*.dll" --pattern "*.sigstore.json" --dir ./output-artifacts)
+        if [ "$IS_DEV_BUILD" = "true" ]; then
+          TAG=$(gh api repos/gwtasdevs/DialogsPlugins/releases --jq '[.[] | select(.prerelease)][0].tag_name')
+          DOWNLOAD_ARGS+=("$TAG")
+        fi
+        gh release download "${DOWNLOAD_ARGS[@]}"
 
     - name: Install Cosign
       uses: sigstore/cosign-installer@v4.1.1
