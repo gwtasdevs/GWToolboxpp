@@ -21,6 +21,8 @@ CMakeCache.txt
 *.tlog
 *.recipe
 *.res
+# Cmake workaround
+CMakeUserPresets.json
 
 # Bloated Windows Databases
 *.sdf
