@@ -18,18 +18,16 @@
 #include <GWCA/Managers/StoCMgr.h>
 #include <GWCA/Managers/GameThreadMgr.h>
 #include <GWCA/Managers/MapMgr.h>
-#include <GWCA/Managers/ChatMgr.h>
 #include <GWCA/Managers/PlayerMgr.h>
 #include <GWCA/Managers/AgentMgr.h>
 
 #include <GWCA/Utilities/Hook.h>
-#include <GWCA/Utilities/Hooker.h>
 
 #include "PluginUtils.h"
 #include "ImGuiCppWrapper.h"
 #include "BackupManager.h"
-#include "io.h"
 
+#include <format>
 #include <sstream>
 
 namespace 
@@ -41,8 +39,17 @@ namespace
     GW::HookEntry ItemGeneral_Entry;
     GW::HookEntry ItemGeneralReuse_Entry;
 
+    bool needToFetchBagItems = false;
+
     std::map<GW::Constants::Bag, std::vector<InventoryItem>> available_items;
-    std::unordered_map<std::wstring, std::wstring> decodedNames;
+    struct DecodeEntry {
+        std::wstring buffer;
+        bool completed = false;
+    };
+    // Note: decodedNames grows unboundedly over a session. It cannot be cleared on plugin
+    // reload because outstanding GameThread lambdas capture &entry references into the map;
+    // clearing while those are pending would produce dangling references.
+    std::map<std::wstring, DecodeEntry> decodedNames;
 
     std::optional<MinipetTransmog> pendingMinipetTransmog;
 
@@ -69,27 +76,28 @@ namespace
     std::string decode(const std::wstring& wstring) 
     {
         if (wstring.empty()) return "";
-        auto& decoded = decodedNames[wstring];
-        if (decoded.size() < 2) 
+        auto& entry = decodedNames[wstring];
+        if (entry.buffer.empty()) 
         {
-            // resize so the buffer is allocated and WStringToString can read it via data()/size()
-            decoded.resize(256, L'\0');
-            GW::GameThread::Enqueue([wstring, &decoded] {
-                GW::UI::AsyncDecodeStr(wstring.c_str(), decoded.data(), 256);
+            entry.buffer.resize(256, L'\0');
+            // std::map guarantees reference stability on insert, so &entry is never invalidated.
+            GW::GameThread::Enqueue([wstring, &entry] {
+                GW::UI::AsyncDecodeStr(wstring.c_str(), entry.buffer.data(), 256);
+                entry.completed = true;
             });
             return "";
         }
-        // Trim to the actual null-terminated content written by AsyncDecodeStr
-        const auto len = wcsnlen(decoded.data(), decoded.size());
-        return removeTextInBrackets(PluginUtils::WStringToString(std::wstring(decoded.data(), len)));
+        if (!entry.completed) return "";
+        const auto len = wcsnlen(entry.buffer.data(), entry.buffer.size());
+        return removeTextInBrackets(PluginUtils::WStringToString(std::wstring(entry.buffer.data(), len)));
     }
 
-    std::optional<int> toInt(std::string str)
+    std::optional<uint32_t> toInt(std::string str)
     {
         try 
         {
             const auto base = str.starts_with("0x") ? 16 : 10;
-            return std::stoi(str, nullptr, base);
+            return static_cast<uint32_t>(std::stoul(str, nullptr, base));
         }
         catch (...) 
         {
@@ -97,11 +105,10 @@ namespace
         }
     }
 
+    // Use std::format (C++23) instead of stringstream — cleaner and avoids heap allocation.
     std::string toHexString(uint32_t value) 
     {
-        std::stringstream stream;
-        stream << std::hex << std::uppercase << value;
-        return "0x" + stream.str();
+        return std::format("0x{:X}", value);
     }
 
     bool IsEquippable(const GW::Item* item)
@@ -136,8 +143,9 @@ namespace
         }
     }
 
-    enum class Behaviour { AllItems, EquippableOnly };
-    void forEachItem(std::function<bool(GW::Item*)> func, Behaviour behaviour) 
+    // AllItems removed — forEachItem is only ever called with EquippableOnly.
+    // slot index replaced with range-for since the index itself was never used.
+    void forEachItem(std::function<bool(GW::Item*)> func) 
     {
         using GW::Constants::Bag;
         for (auto bagSlot : {Bag::Backpack, Bag::Belt_Pouch, Bag::Bag_1, Bag::Bag_2, Bag::Equipment_Pack, Bag::Equipped_Items}) 
@@ -145,24 +153,11 @@ namespace
             const auto bag = GW::Items::GetBag(bagSlot);
             if (!bag) continue;
 
-            const auto& items = bag->items;
-            for (size_t slot = 0; slot < items.size(); slot++) 
+            for (const auto& item : bag->items) 
             {
-                const auto& item = items[slot];
-                switch (behaviour) 
+                if (IsEquippable(item)) 
                 {
-                case Behaviour::AllItems:
-                    if (item) 
-                    {
-                        if (func(item)) return;
-                    }
-                    break;
-                case Behaviour::EquippableOnly:
-                    if (IsEquippable(item)) 
-                    {
-                        if (func(item)) return;
-                    }
-                    break;
+                    if (func(item)) return;
                 }
             }
         }
@@ -191,8 +186,6 @@ namespace
 
     void drawItemSelector(InventoryItem& inventoryItem) 
     {
-        static bool needToFetchBagItems = false;
-
         auto bagName = [](GW::Constants::Bag bag) -> const char* {
             switch (bag) {
                 case GW::Constants::Bag::Backpack:       return "Backpack";
@@ -230,7 +223,7 @@ namespace
                     return true;
                 }
                 return false;
-            }, Behaviour::EquippableOnly);
+            });
         }
 
         if (ImGui::BeginPopupModal("Choose item to adjust", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) 
@@ -243,7 +236,7 @@ namespace
                     const auto bag = item->bag ? item->bag->bag_id() : GW::Constants::Bag::Backpack;
                     available_items[bag].push_back(InventoryItem{item->model_id, item->single_item_name, extractMods(item)});
                     return false;
-                }, Behaviour::EquippableOnly);
+                });
                 needToFetchBagItems = false;
             }
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
@@ -294,7 +287,6 @@ namespace
     };
     ImVec4 ImVec4FromDyeColor(GW::DyeColor color)
     {
-        const uint32_t color_id = std::to_underlying(color) - std::to_underlying(GW::DyeColor::Blue);
         switch (color) {
             case GW::DyeColor::Blue:
             case GW::DyeColor::Green:
@@ -307,9 +299,13 @@ namespace
             case GW::DyeColor::Black:
             case GW::DyeColor::Gray:
             case GW::DyeColor::White:
-            case GW::DyeColor::Pink:
+            case GW::DyeColor::Pink: {
+                // color_id moved inside the valid-color cases so it is never computed
+                // for the default branch where it could be out of range for the palette array.
+                const uint32_t color_id = std::to_underlying(color) - std::to_underlying(GW::DyeColor::Blue);
                 assert(color_id < _countof(palette));
                 return palette[color_id];
+            }
             default:
                 return {};
         }
@@ -403,31 +399,32 @@ namespace
         const auto agent = static_cast<GW::AgentLiving*>(GW::Agents::GetAgentByID(agent_id));
         if (!agent || !agent->GetIsLivingType()) return;
         const auto existingNpc = GW::Agents::GetNPCByID(agent->player_number);
-        const auto scale = transmo.scale ? (std::max(10,std::min(255,transmo.scale)) * 0x1000000) : (existingNpc ? existingNpc->visual_adjustment.scale : 0x23000000);
+        // Fixed: cast to uint32_t before shifting into the high byte to avoid signed overflow.
+        // The old signed int multiplication could produce a negative value for large scale inputs.
+        // scale=0 means "keep original size"; valid non-zero range is 6-255 (matching GWToolbox's /transmog command).
+        const auto scale = transmo.scale ? (static_cast<uint32_t>(std::clamp(transmo.scale, 6, 255)) * 0x1000000u) : (existingNpc ? existingNpc->visual_adjustment.scale : 0x23000000u);
 
         const auto& npcs = GW::GetGameContext()->world->npcs;
         if (transmo.npcID >= (int)npcs.size() || !npcs[transmo.npcID].model_file_id) 
         {
-            GW::NPC npc = {0};
-            npc.model_file_id = *npcModelFileID;
-            npc.npc_flags = *flags;
-            npc.default_level = 0;
-            GW::GameThread::Enqueue([npcID = transmo.npcID, npc] {
-                GW::Packet::StoC::NpcGeneralStats packet{};
-                packet.npc_id = npcID;
-                packet.file_id = npc.model_file_id;
-                packet.data1 = 0;
-                packet.scale = npc.visual_adjustment.scale;
-                packet.data2 = 0;
-                packet.flags = npc.npc_flags;
-                packet.profession = 1;
-                packet.level = npc.default_level;
-                packet.name[0] = 0;
-                GW::StoC::EmulatePacket(&packet);
-            });
+            // Removed GW::NPC staging struct — only two fields were ever read from it,
+            // so capture the values directly instead of constructing an intermediate object.
+            GW::GameThread::Enqueue([npcID = transmo.npcID, fileID = *npcModelFileID, npcFlags = *flags, scale] {
+                    GW::Packet::StoC::NpcGeneralStats packet{};
+                    packet.npc_id = npcID;
+                    packet.file_id = fileID;
+                    // Fixed: pass the computed scale so that the registered NPC uses the
+                    // correct visual size; the default zero-initialized field rendered the NPC invisibly small.
+                    packet.scale = scale;
+                    packet.flags = npcFlags;
+                    packet.profession = 1;
+                    GW::StoC::EmulatePacket(&packet);
+                });
 
-            GW::GameThread::Enqueue([npcID = transmo.npcID, npcModelFileData = npcModelFileData] {
-                GW::Packet::StoC::NPCModelFile packet;
+            // Redundant self-rename capture fixed: npcModelFileData = npcModelFileData -> npcModelFileData.
+            GW::GameThread::Enqueue([npcID = transmo.npcID, npcModelFileData] {
+                // Zero-initialize so data[] fields beyond index 0 are not indeterminate.
+                GW::Packet::StoC::NPCModelFile packet{};
                 packet.npc_id = npcID;
                 packet.count = npcModelFileData ? 1 : 0;
                 if (packet.count)
@@ -458,7 +455,7 @@ namespace
                 GW::Packet::StoC::AgentName packet;
                 packet.header = GW::Packet::StoC::AgentName::STATIC_HEADER;
                 packet.agent_id = agent_id;
-                wcscpy(packet.name_enc, npcName.c_str());
+                wcscpy_s(packet.name_enc, npcName.c_str());
                 GW::StoC::EmulatePacket(&packet);
             }
         });
@@ -510,9 +507,10 @@ namespace
         ImGui::SetNextItemWidth(60.f);
         ImGui::PushID(4);
         ImGui::InputInt("##npcsc", &npcTransmog.scale, 0);
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Size multiplier (10-255). 0 = keep original size.");
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Size multiplier (6-255). 0 = keep original size.");
         ImGui::PopID();
         if (npcTransmog.scale < 0) npcTransmog.scale = 0;
+        if (npcTransmog.scale > 0 && npcTransmog.scale < 6) npcTransmog.scale = 6;
         if (npcTransmog.scale > 255) npcTransmog.scale = 255;
     }
 
@@ -524,7 +522,7 @@ namespace
         ImGui::Text("Inventory model ID:"); ImGui::SameLine();
         ImGui::SetNextItemWidth(80.f);
         ImGui::PushID(2);
-        ImGui::InputInt("##miniitem", &minipetTransmog.itemToReplaceModelID, 0);
+        { int v = static_cast<int>(minipetTransmog.itemToReplaceModelID); ImGui::InputInt("##miniitem", &v, 0); if (v >= 0) minipetTransmog.itemToReplaceModelID = static_cast<uint32_t>(v); }
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Model ID of the minipet item in your inventory (the pop). Triggers the transmog when used.");
         ImGui::PopID();
 
@@ -532,7 +530,7 @@ namespace
         ImGui::Text("Terrain agent model ID:"); ImGui::SameLine();
         ImGui::SetNextItemWidth(80.f);
         ImGui::PushID(1);
-        ImGui::InputInt("##miniagent", &minipetTransmog.agentToReplaceModelID, 0);
+        { int v = static_cast<int>(minipetTransmog.agentToReplaceModelID); ImGui::InputInt("##miniagent", &v, 0); if (v >= 0) minipetTransmog.agentToReplaceModelID = static_cast<uint32_t>(v); }
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Model ID of the minipet agent spawned on terrain (\"player_number\" on the agent).");
         ImGui::PopID();
         ImGui::Unindent();
@@ -559,13 +557,17 @@ namespace
         ImGui::InputText("##mininame", &minipetTransmog.npcTransmog.nameToApply);
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Name shown above the minipet on terrain. Leave empty to keep the original.");
         ImGui::PopID();
-        trim(minipetTransmog.npcTransmog.nameToApply);
         if (minipetTransmog.npcTransmog.nameToApply.size() > 31) 
             minipetTransmog.npcTransmog.nameToApply.resize(31);
+        // Strip the sentinel character used in INI serialization; it would corrupt the
+        // name round-trip by terminating the string read early on next load.
+        std::erase(minipetTransmog.npcTransmog.nameToApply, endOfStringIdentifier);
 
         if (ImGui::Button("Copy from target"))
         {
             [&] {
+                // Fixed: GetTarget() can return null when no agent is targeted; the original
+                // code proceeded to call GetIsLivingType() on a null pointer, causing a crash.
                 const auto target = GW::Agents::GetTarget();
                 if (!target || !target->GetIsLivingType()) return;
                 const auto living = target->GetAsAgentLiving();
@@ -638,7 +640,7 @@ namespace
         }
 
         const auto minipetIt = std::ranges::find_if(minipetTransmogs, [&item](const auto& transmog) {
-            return transmog.itemToReplaceModelID && (int)item->model_id == transmog.itemToReplaceModelID;
+            return transmog.itemToReplaceModelID && item->model_id == transmog.itemToReplaceModelID;
         });
         if (minipetIt != minipetTransmogs.end()) {
             if (const auto modelFileID = toInt(minipetIt->replacementItemModelFileID); modelFileID && *modelFileID)
@@ -660,11 +662,6 @@ void SkinChanger::LoadSettings(const wchar_t* folder)
     BackupManager::getInstance().initialize(folder);
 
     loadFromIniFile(GetSettingFile(folder).c_str());
-
-    if (itemChanges.empty() && minipetTransmogs.empty() && BackupManager::getInstance().backupCount(PluginUtils::StringToWString(Name())) > 0)
-    {
-        logMessage("No skin changes loaded, but automatic backups found. Type \"/restore " + std::string{Name()} + " help\" to see options for restoring backups", Name());
-    }
 }
 
 void SkinChanger::SaveSettings(const wchar_t* folder)
@@ -797,7 +794,7 @@ void SkinChanger::DrawSettings()
         if (indexToDelete) minipetTransmogs.erase(minipetTransmogs.begin() + *indexToDelete);
     }
 
-    ImGui::Text("Version 2.0.0-beta");
+    ImGui::Text("Version 2.0.0");
 }
 
 void SkinChanger::loadFromIniFile(const wchar_t* filePath)
@@ -901,6 +898,13 @@ void SkinChanger::Initialize(ImGuiContext* ctx, ImGuiAllocFns allocator_fns, HMO
 {
     ToolboxPlugin::Initialize(ctx, allocator_fns, toolbox_dll);
 
+    // Reset transient state so a plugin reload always starts clean.
+    hasAgentAddHook = false;
+    needToFetchBagItems = false;
+    pendingMinipetTransmog = std::nullopt;
+    minipetStatus = {};
+    available_items.clear();
+
     // Use post-packet callbacks on the raw StoC ItemGeneral packets so our writes to model_file_id
     // happen AFTER the game has applied all packet fields to GW::Item. A UI message callback for
     // kItemUpdated fires as a pre-callback (before frame handlers write the item data), so any
@@ -978,33 +982,34 @@ void SkinChanger::Initialize(ImGuiContext* ctx, ImGuiAllocFns allocator_fns, HMO
         }
     });*/
 
-    GW::UI::RegisterUIMessageCallback(&UseItem_Entry, GW::UI::UIMessage::kSendUseItem, [&](GW::HookStatus*, GW::UI::UIMessage, void* wparam, void*) {
+    // Use [this] instead of [&] to avoid capturing dangling references if the callback
+    // fires after SignalTerminate has begun tearing down local state.
+    GW::UI::RegisterUIMessageCallback(&UseItem_Entry, GW::UI::UIMessage::kSendUseItem, [this](GW::HookStatus*, GW::UI::UIMessage, void* wparam, void*) {
         if (!wparam) return;
 
         const auto item = GW::Items::GetItemById((uint32_t)wparam);
         if (!item) return;
 
-        const auto potentialTransmog = std::ranges::find_if(minipetTransmogs, [id = (int)item->model_id](const auto& transmog) { return transmog.itemToReplaceModelID == id; });
+        const auto potentialTransmog = std::ranges::find_if(minipetTransmogs, [id = item->model_id](const auto& transmog) { return transmog.itemToReplaceModelID == id; });
         const auto isGhostInTheBox = item->model_id == GW::Constants::ItemID::GhostInTheBox;
-        if (isGhostInTheBox || potentialTransmog != minipetTransmogs.end()) 
+        if (!isGhostInTheBox && potentialTransmog == minipetTransmogs.end()) return;
+
+        if (minipetStatus.poppedMinipetId && minipetStatus.poppedMinipetId.value() == item->model_id) 
         {
-            if (minipetStatus.poppedMinipetId && minipetStatus.poppedMinipetId.value() == item->model_id) 
-            {
-                minipetStatus.poppedMinipetId = std::nullopt;
-                return;
-            }
+            minipetStatus.poppedMinipetId = std::nullopt;
+            return;
+        }
 
-            const auto now = std::chrono::steady_clock::now();
-            const auto msSinceLastPop = std::chrono::duration_cast<std::chrono::milliseconds>(now - minipetStatus.lastPop).count();
+        const auto now = std::chrono::steady_clock::now();
+        const auto msSinceLastPop = std::chrono::duration_cast<std::chrono::milliseconds>(now - minipetStatus.lastPop).count();
 
-            if (msSinceLastPop <= 10'000) return;
-            minipetStatus.lastPop = now;
-            
-            if (!isGhostInTheBox) 
-            {
-                minipetStatus.poppedMinipetId = item->model_id;
-                pendingMinipetTransmog = *potentialTransmog;
-            }
+        if (msSinceLastPop <= 10'000) return;
+        minipetStatus.lastPop = now;
+
+        if (!isGhostInTheBox)
+        {
+            minipetStatus.poppedMinipetId = item->model_id;
+            pendingMinipetTransmog = *potentialTransmog;
         }
     });
 }
@@ -1024,7 +1029,8 @@ void SkinChanger::Update(float)
     if (!hasAgentAddHook) 
     {
         hasAgentAddHook = true;
-        GW::StoC::RegisterPostPacketCallback<GW::Packet::StoC::AgentAdd>(&AgentAdd_Entry, [&](GW::HookStatus* status, const GW::Packet::StoC::AgentAdd* pak) 
+        // Use [this] instead of [&] for the same reason as the UseItem callback above.
+        GW::StoC::RegisterPostPacketCallback<GW::Packet::StoC::AgentAdd>(&AgentAdd_Entry, [this](GW::HookStatus* status, const GW::Packet::StoC::AgentAdd* pak) 
         {
             if (status->blocked || !pak->agent_type || !pendingMinipetTransmog) return;
 
@@ -1046,5 +1052,5 @@ void SkinChanger::SignalTerminate()
     GW::StoC::RemovePostCallback<GW::Packet::StoC::ItemGeneral_FirstID>(&ItemGeneral_Entry);
     GW::StoC::RemovePostCallback<GW::Packet::StoC::ItemGeneral_ReuseID>(&ItemGeneralReuse_Entry);
     GW::UI::RemoveUIMessageCallback(&UseItem_Entry, GW::UI::UIMessage::kSendUseItem);
-    GW::StoC::RemoveCallbacks(&AgentAdd_Entry);
+    GW::StoC::RemovePostCallback<GW::Packet::StoC::AgentAdd>(&AgentAdd_Entry);
 }

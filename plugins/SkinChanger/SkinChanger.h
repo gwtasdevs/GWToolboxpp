@@ -41,8 +41,8 @@ struct NpcTransmog
 
 struct MinipetTransmog 
 {
-    int itemToReplaceModelID = 0;
-    int agentToReplaceModelID = 0;
+    uint32_t itemToReplaceModelID = 0;
+    uint32_t agentToReplaceModelID = 0;
     std::string replacementItemModelFileID = "0x";
 
     // Agent transmo model information
@@ -69,8 +69,12 @@ public:
 
     void loadFromIniFile(const wchar_t* filePath);
 
-    void applyOverrideToItem(GW::Item* item) const;
-
     std::vector<ItemChange> itemChanges;
     std::vector<MinipetTransmog> minipetTransmogs;
+
+private:
+    // Fixed: moved from public to private — this is an internal helper called only from
+    // within the class (packet callbacks and instance-load hooks) and should not be part
+    // of the public plugin interface.
+    void applyOverrideToItem(GW::Item* item) const;
 };
