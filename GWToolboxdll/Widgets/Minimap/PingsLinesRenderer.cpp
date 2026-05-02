@@ -407,7 +407,7 @@ void PingsLinesRenderer::DrawShadowstepLine(IDirect3DDevice9*)
     FindPath_Func(&start, &end, 10'000.f, cnt, &cnt, &pathArray[0]);
     if (cnt == 0) return;
 
-    constexpr std::array<ImU32, 8> colors = {Colors::Red(), Colors::Green(), Colors::Blue(), Colors::Yellow(), Colors::Pink(), Colors::Orange(), Colors::Lime(), Colors::Gold()};
+    constexpr std::array<ImU32, 10> colors = {Colors::Red(), Colors::Green(), Colors::Blue(), Colors::Yellow(), Colors::Pink(), Colors::Orange(), Colors::Lime(), Colors::Gold(), Colors::Amber(), Colors::Cyan()};
     EnqueueVertex(player->pos.x, player->pos.y, Colors::Magenta());
     EnqueueVertex(pathArray[0].pos.x, pathArray[0].pos.y, Colors::Magenta());
 
