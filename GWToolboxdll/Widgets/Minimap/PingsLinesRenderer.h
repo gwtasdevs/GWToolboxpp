@@ -177,6 +177,7 @@ private:
     float maxrange_interp_begin = 0.85f;
     float maxrange_interp_end = 0.95f;
     bool reduce_ping_spam = false;
+    bool show_pathing_steps = false;
 
     // for markers
     Marker marker;

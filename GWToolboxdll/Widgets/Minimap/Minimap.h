@@ -121,6 +121,7 @@ public:
     void DrawSettingsInternal() override;
 
     [[nodiscard]] float GetMapRotation() const;
+    std::vector<GW::Vec2f> ShadowstepPathingLocations() const;
     [[nodiscard]] GW::Vec2f ShadowstepLocation() const;
 
     // 0 is 'all' flag, 1 to 7 is each hero
