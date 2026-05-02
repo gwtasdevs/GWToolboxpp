@@ -406,7 +406,7 @@ bool GWSplits::drawSplits(std::vector<Split>& splits)
         const auto offset = 126.f + (treeOpen ? 0.f : 21.f);
         ImGui::SameLine(ImGui::GetContentRegionAvail().x - offset);
         ImGui::PushItemWidth(70.f);
-        if (ImGui::InputText("", &splitIt->displayTrackedTime)) {
+        if (ImGui::InputText("##TrackedTime", &splitIt->displayTrackedTime)) {
             splitIt->trackedTime = stringToTime(splitIt->displayTrackedTime);
             splitIt->displayTrackedTime = timeToString(splitIt->trackedTime);
         }
