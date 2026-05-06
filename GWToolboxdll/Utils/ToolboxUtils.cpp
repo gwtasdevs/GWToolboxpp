@@ -302,21 +302,62 @@ namespace GW {
             });
         }
 
+        bool IsPreSearing(const GW::Constants::MapID map_id)
+        {
+            const auto map_info = GW::Map::GetMapInfo(map_id);
+            if (!map_info) return false;
+            constexpr std::array presearing_dungeon_ids = {
+                GW::Constants::MapID::Forsaken_Tunnels_Presearing_Level1,
+                GW::Constants::MapID::Forsaken_Tunnels_Presearing_Level2,
+                GW::Constants::MapID::Forsaken_Tunnels_Presearing_Level3,
+            };
+            return map_info->region == GW::Region::Region_Presearing || std::find(presearing_dungeon_ids.begin(), presearing_dungeon_ids.end(), map_id) != presearing_dungeon_ids.end();
+        }
+
         GW::Array<GW::MapProp*>* GetMapProps()
         {
             const auto m = GetMapContext();
             const auto p = m ? m->props : nullptr;
             return p ? &p->propArray : nullptr;
         }
+        
+        bool IsFestivalOutpost(const GW::Constants::MapID map_id)
+        {
+            using namespace GW::Constants;
+            switch (map_id) {
+                case MapID::Kamadan_Jewel_of_Istan_Halloween_outpost:
+                case MapID::Kamadan_Jewel_of_Istan_Wintersday_outpost:
+                case MapID::Kamadan_Jewel_of_Istan_Canthan_New_Year_outpost:
+                case MapID::Lions_Arch_Halloween_outpost:
+                case MapID::Lions_Arch_Wintersday_outpost:
+                case MapID::Lions_Arch_Canthan_New_Year_outpost:
+                case MapID::Ascalon_City_Wintersday_outpost:
+                case MapID::Droknars_Forge_Halloween_outpost:
+                case MapID::Droknars_Forge_Wintersday_outpost:
+                case MapID::Tomb_of_the_Primeval_Kings_Halloween_outpost:
+                case MapID::Shing_Jea_Monastery_Dragon_Festival_outpost:
+                case MapID::Shing_Jea_Monastery_Canthan_New_Year_outpost:
+                case MapID::Kaineng_Center_Canthan_New_Year_outpost:
+                case MapID::Eye_of_the_North_outpost_Wintersday_outpost:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
     } // namespace Map
     namespace LoginMgr {
         const bool IsCharSelectReady()
         {
-            return GW::UI::GetFrameContext(GetSelectorFrame());
+            uint32_t ui_state = 10;
+            SendUIMessage(GW::UI::UIMessage::kCheckUIState, nullptr, &ui_state);
+            const auto frame = GetSelectorFrame();
+            return ui_state == 2 && frame && frame->IsVisible() && GW::UI::GetFrameContext(frame);
         }
 
         const bool SelectCharacterToPlay(const wchar_t* name, bool play)
         {
+            if (!IsCharSelectReady()) return false;
             struct CharSelectorChar {
                 uint32_t h0000;
                 uint32_t h0004;
@@ -347,6 +388,8 @@ namespace GW {
             uint32_t target_idx = 0xffff;
 
             const auto len = ctx->chars.size();
+
+            if (selected_idx >= len) selected_idx = 0;
 
             bool chosen = false;
             for (size_t i = 0; !chosen && i < len; i++) {
@@ -514,6 +557,15 @@ namespace GW {
             if (!GetPersonalDir(out.capacity(), out.data())) return false;
             out.resize(wcslen(out.data()));
             return !out.empty();
+        }
+        std::filesystem::path GetBuildsDir() {
+            std::wstring builds_folder;
+            GetPersonalDir(builds_folder);
+            if (builds_folder.empty()) return L"";
+            return std::filesystem::path(builds_folder) /
+                   L"Guild Wars" / 
+                   L"Templates" /
+                   L"Skills";
         }
     } // namespace MemoryMgr
 
@@ -1071,6 +1123,31 @@ namespace ToolboxUtils {
                 }
                 return true;
             }
+        }
+        return false;
+    }
+
+    bool IsHeroUnlocked(GW::Constants::HeroID hero_id)
+    {
+        const auto w = GW::GetWorldContext();
+        if (!(w && w->hero_info.size())) {
+            return false;
+        }
+        for (auto& a : w->hero_info) {
+            if (a.hero_id != hero_id)
+                continue;
+            switch (hero_id) {
+                case GW::Constants::HeroID::Merc1:
+                case GW::Constants::HeroID::Merc2:
+                case GW::Constants::HeroID::Merc3:
+                case GW::Constants::HeroID::Merc4:
+                case GW::Constants::HeroID::Merc5:
+                case GW::Constants::HeroID::Merc6:
+                case GW::Constants::HeroID::Merc7:
+                case GW::Constants::HeroID::Merc8:
+                    if (!(a.name && !a.name)) return false; // Unlocked, but not assigned.
+            }
+            return true;
         }
         return false;
     }

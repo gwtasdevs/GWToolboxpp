@@ -39,7 +39,7 @@ bool TBHotkey::hotkeys_changed = false;
 unsigned int TBHotkey::cur_ui_id = 0;
 std::unordered_map<WORD, HotkeyToggle*> HotkeyToggle::toggled;
 
-typedef std::pair<GW::UI::ControlAction, GuiUtils::EncString*> ControlLabelPair;
+typedef std::pair<GW::UI::ControlAction, std::unique_ptr<GuiUtils::EncString>> ControlLabelPair;
 std::vector<ControlLabelPair> HotkeyGWKey::control_labels;
 
 namespace {
@@ -321,7 +321,7 @@ const char* TBHotkey::instance_types[] = {"Any", "Outpost", "Explorable"};
 bool TBHotkey::Draw(Op* op, bool first, bool last)
 {
     bool hotkey_changed = false;
-    const float scale = ImGui::GetIO().FontGlobalScale;
+    const float scale = ImGui::FontScale();
     const auto show_header_buttons = [&] {
         ImGui::PushID(static_cast<int>(ui_id));
         ImGui::PushID("header");

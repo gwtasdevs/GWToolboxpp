@@ -63,6 +63,8 @@ public:
 private:
     static bool ReadTemplateFile(const std::wstring& path, char* buff, size_t buffSize);
 
+    static bool ParseTransmoArgs(int argc, const LPWSTR* argv, int name_arg_index, PendingTransmo& transmo);
+
     static bool IsLuxon();
 
     static void CHAT_CMD_FUNC(CmdEnterMission);
@@ -72,7 +74,6 @@ private:
     static void CHAT_CMD_FUNC(CmdObserverReset);
     static void CHAT_CMD_FUNC(CmdChest);
     static void CHAT_CMD_FUNC(CmdAfk);
-    static void CHAT_CMD_FUNC(CmdTarget);
     static void CHAT_CMD_FUNC(CmdShow);
     static void CHAT_CMD_FUNC(CmdHide);
     static void CHAT_CMD_FUNC(CmdToggle);
@@ -109,23 +110,7 @@ private:
 
     uint32_t default_title_id = std::to_underlying(GW::Constants::TitleID::Lightbringer);
 
-    struct SearchAgent {
-        clock_t started = 0;
-        std::vector<std::pair<uint32_t, GuiUtils::EncString*>> npc_names;
-        std::wstring search;
-        void Init(const wchar_t* _search, const GW::AgentTargetFlags type);
-        void Update();
-        void Terminate() { Reset(); }
-        void Reset()
-        {
-            started = 0;
-            search.clear();
-            for (const auto& name : npc_names | std::views::values) {
-                name->Release();
-            }
-            npc_names.clear();
-        }
-    } npc_to_find;
+
 
 
 

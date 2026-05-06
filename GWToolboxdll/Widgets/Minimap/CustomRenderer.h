@@ -34,13 +34,14 @@ class CustomRenderer : public D3DVertexBuffer {
         Color color_sub{0x00FFFFFF};
 
         void Invalidate();
+        void Terminate();
         void Render(IDirect3DDevice9* device);
         [[nodiscard]] bool IsFilled() const { return shape == Shape::FullCircle; }
 
     private:
         void SyncGeometry();
 
-        D3DFillCircle fill_circle;
+        D3DFillCircle fill_circle{{}, 1.f};
         D3DLineCircle line_circle;
     };
 

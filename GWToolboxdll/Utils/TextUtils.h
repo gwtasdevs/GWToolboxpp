@@ -19,13 +19,86 @@ namespace TextUtils {
     std::wstring Replace(const std::wstring_view subject, const std::wstring& pattern, const std::wstring& replacement);
     std::string Replace(const std::string_view subject, const std::string& pattern, const std::string& replacement);
 
-    std::string Base64Decode(std::string_view str);
+    template<typename CharT>
+    std::basic_string<CharT> Base64Decode(std::string_view encoded)
+    {
+        const std::string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        std::basic_string<CharT> decoded;
+        std::vector<int> T(256, -1);
+
+        for (int i = 0; i < 64; i++)
+            T[chars[i]] = i;
+
+        int bits = sizeof(CharT) * 8;
+        int val = 0, valb = -bits;
+        for (unsigned char c : encoded) {
+            if (T[c] == -1) break;
+            val = (val << 6) + T[c];
+            valb += 6;
+            if (valb >= 0) {
+                decoded.push_back(CharT(val >> valb));
+                valb -= bits;
+            }
+        }
+        return decoded;
+    }
+
+    template<typename CharT>
+    std::string Base64Encode(std::basic_string_view<CharT> decoded)
+    {
+        const std::string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        std::string encoded;
+        std::vector<int> T(64);
+
+        for (int i = 0; i < 64; i++)
+            T[i] = chars[i];
+
+        int bits = sizeof(CharT) * 8;
+        int val = 0, valb = -6;
+        for (CharT c : decoded) {
+            val = (val << bits) + c;
+            valb += bits;
+            while (valb >= 0) {
+                encoded.push_back(char(T[(val >> valb) & 0x3F]));
+                valb -= 6;
+            }
+        }
+        if (valb != -6) {
+            val = (val << 8);
+            valb += 8;
+            encoded.push_back(char(T[(val >> valb) & 0x3F]));
+            valb -= 6;
+        }
+        while (valb != -6) {
+            if (0 > valb && valb > -6) {
+                valb += 8;
+            }
+            encoded.push_back('=');
+            valb -= 6;
+        }
+        return encoded;
+    }
 
     std::string GetFormattedDateTime();
 
     std::wstring StripTags(std::wstring_view str);
 
     std::string GuidToString(const GUID* guid);
+    bool StringToGuid(const std::string& str, GUID* guid);
+    GUID ConvertWStringToGuid(const std::wstring& str);
+
+    std::string parseStringFromJson(const nlohmann::json& j, const char* key, const std::string& default_val);
+    int parseIntFromJson(const nlohmann::json& j, const char* key, const int& default_val);
+    bool parseBoolFromJson(const nlohmann::json& j, const char* key, const bool& default_val);
+    uint64_t parseUint64FromJson(const nlohmann::json& j, const char* key, const uint64_t& default_val);
+    float parseFloatFromJson(const nlohmann::json& j, const char* key, const float& default_val);
+
+
+    std::string VStrPrintf(const char* format, va_list argv);
+    std::wstring VStrPrintfW(const wchar_t* format, va_list argv);
+    std::string StrPrintf(const char* format, ...);
+    std::wstring StrPrintfW(const wchar_t* format, ...);
+
 
     std::string RemovePunctuation(std::string s);
     std::wstring RemovePunctuation(std::wstring s);
@@ -52,9 +125,9 @@ namespace TextUtils {
     enum class RelativeTimeFormat { Narrow, Full };
     std::string RelativeTime(time_t utc_timestamp, RelativeTimeFormat fmt = RelativeTimeFormat::Full);
     std::wstring RelativeTimeW(time_t utc_timestamp, RelativeTimeFormat fmt = RelativeTimeFormat::Full);
-    std::string TimeToString(time_t utc_timestamp = 0, bool include_seconds = false);
-    std::string TimeToString(uint32_t utc_timestamp, bool include_seconds = false);
-    std::string TimeToString(FILETIME utc_timestamp, bool include_seconds = false);
+    std::string TimeToString(time_t utc_timestamp = 0, bool include_seconds = false, int milliseconds = -1);
+    std::string TimeToString(uint32_t utc_timestamp, bool include_seconds = false, int milliseconds = -1);
+    std::string TimeToString(FILETIME utc_timestamp, bool include_seconds = false, int milliseconds = -1);
 
     std::vector<std::string> Split(const std::string& in, const std::string& token);
     std::vector<std::wstring> Split(const std::wstring& in, const std::wstring& token);

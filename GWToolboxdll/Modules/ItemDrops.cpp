@@ -84,20 +84,18 @@ namespace {
     using namespace GW::Constants::ItemID;
 
 
-    std::map<std::wstring, GuiUtils::EncString*> cached_item_names;
+    std::map<std::wstring, std::unique_ptr<GuiUtils::EncString>> cached_item_names;
     GuiUtils::EncString* GetItemName(const wchar_t* enc_string) {
         if (!enc_string) return nullptr;
         if (!cached_item_names.contains(enc_string)) {
-            auto enc_str = (new GuiUtils::EncString(enc_string))->language(GW::Constants::Language::English);
-            cached_item_names[enc_string] = enc_str;
+            auto enc_str = std::make_unique<GuiUtils::EncString>(enc_string);
+            enc_str->language(GW::Constants::Language::English);
+            cached_item_names[enc_string] = std::move(enc_str);
         }
-        return cached_item_names[enc_string];
+        return cached_item_names[enc_string].get();
     }
     void ClearItemNames()
     {
-        for (auto i : cached_item_names) {
-            i.second->Release();
-        }
         cached_item_names.clear();
     }
 
@@ -736,6 +734,7 @@ ItemDrops::PendingDrop::PendingDrop(GW::Item* _item)
     quantity = item->quantity & 0xff;
     type = item->type;
     rarity = GW::Items::GetRarity(item);
+    model_file_id = item->model_file_id;
     player_count = GW::PartyMgr::GetPartyPlayerCount() & 0xf;
     hero_count = GW::PartyMgr::GetPartyHeroCount() & 0xf;
     henchman_count = GW::PartyMgr::GetPartyHenchmanCount() & 0xf;
@@ -786,7 +785,8 @@ const wchar_t* ItemDrops::PendingDrop::GetCSVHeader()
     return L"SystemTime,InstanceTime,Map,ItemName,Quantity,Value,"
            L"ItemType,Rarity,DamageType,MinDamage,MaxDamage,"
            L"RequirementAttribute,RequirementValue,"
-           L"PlayerCount,HeroCount,HenchmanCount,HardMode";
+           L"PlayerCount,HeroCount,HenchmanCount,HardMode,"
+           L"ModelFileID";
 }
 
 GuiUtils::EncString* ItemDrops::PendingDrop::GetItemName()
@@ -818,6 +818,7 @@ const std::wstring ItemDrops::PendingDrop::toCSV()
     ss << player_count << L",";
     ss << hero_count << L",";
     ss << henchman_count << L",";
-    ss << (hard_mode ? L"1" : L"0");
+    ss << (hard_mode ? L"1" : L"0") << L",";
+    ss << model_file_id;
     return ss.str();
 }

@@ -151,7 +151,7 @@ namespace {
 
     bool block_enter_area_message = false;
 
-    EncString* pending_wiki_search_term = nullptr;
+    std::unique_ptr<EncString> pending_wiki_search_term;
 
     bool tick_is_toggle = false;
 
@@ -1286,12 +1286,8 @@ namespace {
         switch (message_id) {
             case GW::UI::UIMessage::kGetPreGameContext_Value0: {
                 hide_store_page_on_char_select && GW::UI::SetFrameVisible(GW::UI::GetFrameByLabel(L"Purchase"), false);
+                OverrideDefaultOnlineStatus();
             } break;
-            case GW::UI::UIMessage::kPreBuildLoginScene: {
-                GW::GameThread::Enqueue([] {
-                    OverrideDefaultOnlineStatus();
-                }, true);
-            }
             break;
             case GW::UI::UIMessage::kPartyShowConfirmDialog: {
                 const auto packet = static_cast<GW::UI::UIPacket::kPartyShowConfirmDialog*>(wParam);
@@ -2323,7 +2319,7 @@ void GameSettings::DrawSettingsInternal()
 
     ImGui::Checkbox("Show warning when earned faction reaches ", &faction_warn_percent);
     ImGui::SameLine();
-    ImGui::PushItemWidth(40.0f * ImGui::GetIO().FontGlobalScale);
+    ImGui::PushItemWidth(40.0f * ImGui::FontScale());
     ImGui::InputInt("##faction_warn_percent_amount", &faction_warn_percent_amount, 0);
     ImGui::PopItemWidth();
     ImGui::SameLine();
@@ -2379,9 +2375,10 @@ void GameSettings::DrawSettingsInternal()
     ImGui::NewLine();
     ImGui::Checkbox("Show 'You have N Lockpicks' on Locked Chest name tags", &show_amount_of_lockpicks_under_locked_chest_nametag);
     ImGui::Text("In-game name tag colors:");
+    ImGui::ShowHelp("These set global name tag colors by category.\nTo set a custom color for a specific agent, see Minimap > Custom Agents > Text Color.");
     ImGui::Indent();
     ImGui::StartSpacedElements(checkbox_w);
-    constexpr uint32_t flags = ImGuiColorEditFlags_AlphaPreview | ImGuiColorEditFlags_NoInputs;
+    constexpr uint32_t flags = ImGuiColorEditFlags_NoInputs;
     ImGui::NextSpacedElement();
     Colors::DrawSettingHueWheel("Myself", &nametag_color_player_self, flags);
     ImGui::NextSpacedElement();
@@ -2495,8 +2492,7 @@ void GameSettings::Update(float)
     // See OnSendChat
     if (pending_wiki_search_term && pending_wiki_search_term->wstring().length()) {
         SearchWiki(pending_wiki_search_term->wstring());
-        delete pending_wiki_search_term;
-        pending_wiki_search_term = nullptr;
+        pending_wiki_search_term.reset();
     }
 
     if (auto_set_away
@@ -2871,7 +2867,7 @@ void GameSettings::OnOpenWiki(GW::HookStatus* status, const GW::UI::UIMessage me
         // Redirect /wiki to /wiki <current map name>
         status->blocked = true;
         const GW::AreaInfo* map = GW::Map::GetCurrentMapInfo();
-        pending_wiki_search_term = new EncString(map->name_id);
+        pending_wiki_search_term = std::make_unique<EncString>(map->name_id);
     }
     else if (strstr(url.c_str(), "?search=quest")) {
         // Redirect /wiki quest to /wiki <current quest name>
@@ -2891,7 +2887,7 @@ void GameSettings::OnOpenWiki(GW::HookStatus* status, const GW::UI::UIMessage me
         status->blocked = true;
         const GW::Agent* a = GW::Agents::GetTarget();
         if (a) {
-            pending_wiki_search_term = new EncString(GW::Agents::GetAgentEncName(a));
+            pending_wiki_search_term = std::make_unique<EncString>(GW::Agents::GetAgentEncName(a));
         }
         else {
             Log::Error("No current target");
@@ -2946,7 +2942,7 @@ void GameSettings::OnAgentNameTag(GW::HookStatus*, const GW::UI::UIMessage msgid
             tag->text_color = nametag_color_item;
             break;
     }
-    if (show_amount_of_lockpicks_under_locked_chest_nametag && tag->name_enc && wcscmp(tag->name_enc, L"\x8101\x6303\xf5ca\x9a4c\x71ff") == 0 && !tag->underline) {
+    if (show_amount_of_lockpicks_under_locked_chest_nametag && tag->name_enc && wcseq(tag->name_enc, GW::EncStrings::LockedChest) && !tag->underline) {
         static wchar_t you_have_n_lockpicks[12];
         const auto count = GW::Items::CountItemByModelId(GW::Constants::ItemID::Lockpick, (int)GW::Constants::Bag::Backpack, (int)GW::Constants::Bag::Bag_2);
         static wchar_t item_count[4];

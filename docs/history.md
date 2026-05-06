@@ -7,6 +7,62 @@ layout: default
 Previous releases are available on Github as dll files. There is no support for older releases. If you are looking for
 the latest version, go to the [Home Page](./) instead.
 
+## Verion 8.17
+
+* [Fix] Fixed disconnect on reroll when gw was started with -character arg
+* [Fix] Fixed crashing on withdrawing/depositing gold, trading players and viewing/saving templates, equipping items
+* [Fix] World map widget showing up again
+* [Fix] Fixed font sizes not working properly with some widgets
+* [Fix] Armory widget colours working properly
+* [Fix] Fixed messed up fonts
+* [Minor] Builds from gwtoolbox are also saved to the Guild Wars / Templates / Builds folder to be able to access them in-game without running tb
+* [Minor] Added performance window to see in real time how shit our code is
+
+## Verion 8.16
+
+* [Fix] Working with 38511
+* [Fix] Fixed bug preventing /useskill working for stances/shouts/pet attacks if you've got a skill queued.
+* [Fix] Removed Wintersday LA from completion window
+* [Fix] Fixed crash in hero builds window related to new heroes
+* [Fix] Fixed bug preventing targetting message from being filtered when checked
+* [Fix] Fixed bug hiding damage percent
+* [Fix] TB remembers last login status on login screen again
+* [Fix] Various other bug fixes and mem leak fixes
+* [Minor] Added support for forsaken tunnels
+* [Minor] Global font scale renders text better
+* [Minor] Re-added reconnect qol fix
+* [Minor] Improvements to vanquish widget improve FPS
+* [Minor] Added Althea to hero list
+* [New] Added Account Inventory window to track items across characters
+
+## Version 8.15
+
+* [Fix] Fixed various features not working since gw 38359 e.g. tick as toggle, /enter command
+* [Fix] Fixed bug causing minimap clicks to read in the wrong place when the minimap isnt square
+* [Fix] Fix hero names not showing up properly in hero builds
+* [Fix] Fix quest markers not showing for all quests after zone change
+* [Fix] Fix minimap cardinal behaviour on pan/zoom.
+* [Fix] Fixed /addhenchman not working if henchmen are out of compass range
+* [Fix] Marked targets on minimap now inherit the custom size/shape that was given
+* [Fix] Fixed bug showing title tracks when the player doesn't have any progress on it in the hero window
+* [Fix] Fixed crashing on machines with non ascii characters in the GWToolbox path
+* [Fix] Fixed a freeze/deadlock issue related to TTS module
+* [Fix] Fixed nearest outpost logic to use campaign; fixes issues when travelling to eotn from proph an vice versa
+* [Fix] Revisited minimap key modifier code to fix bugs related to custom modifier keys
+* [Fix] Keg of age is used correctly in pcons module
+* [Fix] Fixed toolbox colouring rare items yellow
+* [Minor] Added a few more dialog options to /dialog take
+* [Minor] Reduced FPS hit when rendering minimap on-screen
+* [Minor] Added some more NPCs to TTS module
+* [Minor] Fixed bug preventing /useskill to be used as a toggle, and factored behavior to allow /useskill without args to print usage instead
+* [New] Added vanquish monitor to mission map widget
+* [New] Added favor widget to show current favor of the gods on-screen
+* [New] Added option to show healing on the damage monitor widget
+* [New] Added option to set colours for salvage, price checker, nicholas info
+* [New] Added "/camera distance" command and settings to set max camera distance from your character
+* [New] Added "/travel outpost" command to travel to the nearest unlocked outpost to wherever you are
+* [New] Added feature to link toolbox windows or widgets to some GW in-game UI components when "Lock position" is unticked - helps to avoid toolbox ui position getting borked on window resize.
+
 ## Version 8.14
 
 * [Fix] Working with 38219

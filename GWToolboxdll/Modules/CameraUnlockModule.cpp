@@ -19,7 +19,9 @@ namespace {
 
     bool forward_fix_z = true;
     float cam_speed = default_cam_speed;
-    float cam_max_distance = 900.f;
+
+    const float default_max_distance = 900.f;
+    float cam_max_distance = default_max_distance;
 
     GW::HookEntry ChatCmdHookEntry;
     std::vector<GW::Camera*> last_camera_by_mode(10);
@@ -86,6 +88,8 @@ namespace {
         return true;
     }
 
+
+
     bool RotateMovement(float angle)
     {
         if (angle == 0.f) return false;
@@ -108,56 +112,64 @@ namespace {
     }
     void CHAT_CMD_FUNC(CmdCamera)
     {
-        if (argc == 1) {
+        std::wstring arg1;
+        if (argc < 2)
+            goto print_warning;
+        arg1 = TextUtils::ToLower(argv[1]);
+        if (arg1 == L"lock") {
             GW::CameraMgr::UnlockCam(false);
+            return;
         }
-        else {
-            const std::wstring arg1 = TextUtils::ToLower(argv[1]);
-            if (arg1 == L"lock") {
-                GW::CameraMgr::UnlockCam(false);
-            }
-            else if (arg1 == L"unlock") {
-                GW::CameraMgr::UnlockCam(true);
-                Log::Flash("Use Q/E, A/D, W/S, X/Z, R and arrows for camera movement");
-            }
-            else if (arg1 == L"fog") {
-                if (argc == 3) {
-                    const std::wstring arg2 = TextUtils::ToLower(argv[2]);
-                    if (arg2 == L"on") {
-                        GW::CameraMgr::SetFog(true);
-                    }
-                    else if (arg2 == L"off") {
-                        GW::CameraMgr::SetFog(false);
-                    }
-                }
-            }
-            else if (arg1 == L"speed") {
-                if (argc > 2) {
-                    const std::wstring arg2 = TextUtils::ToLower(argv[2]);
-                    if (arg2 == L"default") {
-                        cam_speed = default_cam_speed;
-                    }
-                    float speed = 0.0f;
-                    if (TextUtils::ParseFloat(arg2.c_str(), &speed)) {
-                        cam_speed = speed;
-                    }
-                }
-                Log::Flash("Camera speed is now %f", cam_speed);
-            }
-            else if (arg1 == L"distance") {
-                if (argc > 2) {
-                    float dist = 900.f;
-                    if (TextUtils::ParseFloat(TextUtils::ToLower(argv[2]).c_str(), &dist)) {
-                        GW::CameraMgr::SetMaxDist(dist);
-                        cam_max_distance = dist;
-                    }
-                }
-            }
-            else {
-                Log::Error("Invalid argument.");
-            }
-            
+        if (arg1 == L"unlock") {
+            GW::CameraMgr::UnlockCam(true);
+            Log::Flash("Use Q/E, A/D, W/S, X/Z, R and arrows for camera movement");
+            return;
         }
+        if (arg1 == L"fog") {
+            if (argc == 3) {
+                const std::wstring arg2 = TextUtils::ToLower(argv[2]);
+                if (arg2 == L"on") {
+                    GW::CameraMgr::SetFog(true);
+                    return;
+                }
+                else if (arg2 == L"off") {
+                    GW::CameraMgr::SetFog(false);
+                    return;
+                }
+            }
+            goto print_warning;
+        }
+        if (arg1 == L"speed") {
+            if (argc > 2) {
+                const std::wstring arg2 = TextUtils::ToLower(argv[2]);
+                float speed = 0.0f;
+                if (arg2 == L"default") {
+                    speed = default_cam_speed;
+                }
+                else if (!TextUtils::ParseFloat(TextUtils::ToLower(argv[2]).c_str(), &speed)) {
+                    goto print_warning;
+                }
+                cam_speed = speed;
+            }
+            return Log::Flash("Camera speed is now %f", cam_speed);
+        }
+        else if (arg1 == L"distance") {
+            if (argc > 2) {
+                float dist = 900.f;
+                const std::wstring arg2 = TextUtils::ToLower(argv[2]);
+                if (arg2 == L"default") {
+                    dist = default_max_distance;
+                }
+                else if (!TextUtils::ParseFloat(TextUtils::ToLower(argv[2]).c_str(), &dist)) {
+                    goto print_warning;
+                }
+                GW::CameraMgr::SetMaxDist(dist);
+                cam_max_distance = dist;
+            }
+            return Log::Flash("Camera distance is now %f", cam_max_distance);
+        }
+    print_warning:
+        Log::Warning(CameraUnlockModule::camera_syntax);
     }
 }
 

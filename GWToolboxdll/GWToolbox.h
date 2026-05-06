@@ -65,10 +65,12 @@ public:
 
     static bool ToggleModule(ToolboxModule& m, bool enable = true);
 
+    static void SetProfilingEnabled(bool enabled);
+
 private:
     static void DrawInitialising(IDirect3DDevice9* device);
     static void DrawTerminating(IDirect3DDevice9* device);
     static void UpdateInitialising(float);
-    static void UpdateModulesTerminating(float);
-    static void UpdateTerminating(float);
+    static void UpdateModulesTerminating(float, bool panicking = false);
+    static void UpdateTerminating(float, bool panicking = false);
 };

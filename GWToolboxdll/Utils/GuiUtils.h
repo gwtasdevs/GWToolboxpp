@@ -4,64 +4,10 @@
 #include <ImGuiAddons.h>
 #include <nlohmann/json.hpp>
 #include <ToolboxIni.h>
+#include <RectF.h>
 
-namespace GW::Constants {
-    enum class Language;
-}
-
-struct RectF {
-    ImVec2 top_left;
-    ImVec2 bottom_right;
-
-    constexpr RectF(const RECT& rect)
-        : top_left({static_cast<float>(rect.left), static_cast<float>(rect.top)}),
-          bottom_right({static_cast<float>(rect.right), static_cast<float>(rect.bottom)}) {}
-
-    constexpr RectF(const ImVec2& _top_left, const ImVec2& _bottom_right)
-        : top_left(_top_left), bottom_right(_bottom_right) {}
-
-    ImVec2 size() const
-    {
-        return {width(), height()};
-    }
-
-    float width() const
-    {
-        return bottom_right.x - top_left.x;
-    }
-
-    float height() const
-    {
-        return bottom_right.y - top_left.y;
-    }
-
-    void move_to(const ImVec2& new_top_left)
-    {
-        const auto diff_x = new_top_left.x - top_left.x;
-        const auto diff_y = new_top_left.y - top_left.y;
-        top_left.x += diff_x;
-        top_left.y += diff_y;
-        bottom_right.x += diff_x;
-        bottom_right.y += diff_y;
-    }
-
-    void resize(const ImVec2& new_size)
-    {
-        const auto old_size = size();
-        const auto diff_x = new_size.x - old_size.x;
-        const auto diff_y = new_size.y - old_size.y;
-        bottom_right.x += diff_x;
-        bottom_right.y += diff_y;
-    }
-
-    bool contains(const ImVec2& point) const
-    {
-        return point.x >= top_left.x && point.x <= bottom_right.x &&
-               point.y >= top_left.y && point.y <= bottom_right.y;
-    }
-
-    RectF() = default;
-};
+// ReSharper disable once CppUnusedIncludeDirective
+#include <Utils/EncString.h>
 
 
 namespace GuiUtils {
@@ -82,7 +28,6 @@ namespace GuiUtils {
     void SearchWiki(const std::wstring& term);
     std::string SanitizeWikiUrl(std::string s);
 
-    float GetPartyHealthbarHeight();
     float GetGWScaleMultiplier(bool force = false);
 
     // Reposition a rect within its container to make sure it isn't overflowing it.
@@ -141,57 +86,6 @@ namespace GuiUtils {
     std::string format(const char* msg, ...);
     // Same as std::format, but use printf formatting
     std::wstring format(const wchar_t* msg, ...);
-
-    class EncString {
-    protected:
-        std::wstring encoded_ws;
-        std::wstring decoded_ws;
-        std::string decoded_s;
-        bool decoding = false;
-        bool decoded = false;
-        bool sanitised = false;
-        bool release = false;
-        virtual void sanitise();
-        virtual void decode();
-        GW::Constants::Language language_id = static_cast<GW::Constants::Language>(0xff);
-        static void OnStringDecoded(void* param, const wchar_t* decoded);
-
-    public:
-        // Set the language for decoding this encoded string. If the language has changed, resets the decoded result. Returns this for chaining.
-        EncString* language(GW::Constants::Language l);
-        bool IsDecoding() const { return decoding && decoded_ws.empty(); };
-        // Recycle this EncString by passing a new encoded string id to decode.
-        // Set sanitise to true to automatically remove guild tags etc from the string
-        EncString* reset(uint32_t _enc_string_id = 0, bool sanitise = true);
-        // Recycle this EncString by passing a new string to decode.
-        // Set sanitise to true to automatically remove guild tags etc from the string
-        EncString* reset(const wchar_t* _enc_string = nullptr, bool sanitise = true);
-        std::wstring& wstring();
-        std::string& string();
-
-        // Free memory used by this EncString. 
-        void Release();
-
-        [[nodiscard]] const std::wstring& encoded() const
-        {
-            return encoded_ws;
-        };
-
-        EncString(const wchar_t* _enc_string = nullptr, const bool sanitise = true)
-        {
-            reset(_enc_string, sanitise);
-        }
-
-        EncString(const uint32_t _enc_string, const bool sanitise = true)
-        {
-            reset(_enc_string, sanitise);
-        }
-
-        // Disable object copying; decoded_ws is passed to GW by reference and would be bad to do this. Pass by pointer instead.
-        EncString(const EncString& temp_obj) = delete;
-        EncString& operator=(const EncString& temp_obj) = delete;
-        ~EncString();
-    };
 
     // Create an ImGui representation of the skill bar
     void DrawSkillbar(const char* build_code, bool show_attributes = true);

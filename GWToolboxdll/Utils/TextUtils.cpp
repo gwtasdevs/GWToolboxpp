@@ -71,6 +71,95 @@ namespace {
 }
 
 namespace TextUtils {
+    std::string parseStringFromJson(const nlohmann::json& j, const char* key, const std::string& default_val)
+    {
+        if (!j.is_discarded() && j.contains(key) && j[key].is_string()) {
+            return j[key].get<std::string>();
+        }
+        return default_val;
+    };
+    int parseIntFromJson(const nlohmann::json& j, const char* key, const int& default_val)
+    {
+        if (!j.is_discarded() && j.contains(key) && j[key].is_number_integer()) {
+            return j[key].get<int>();
+        }
+        return default_val;
+    };
+    bool parseBoolFromJson(const nlohmann::json& j, const char* key, const bool& default_val)
+    {
+        if (!j.is_discarded() && j.contains(key) && j[key].is_boolean()) {
+            return j[key].get<bool>();
+        }
+        return default_val;
+    };
+    uint64_t parseUint64FromJson(const nlohmann::json& j, const char* key, const uint64_t& default_val)
+    {
+        if (!j.is_discarded() && j.contains(key) && j[key].is_number_unsigned()) {
+            return j[key].get<uint64_t>();
+        }
+        return default_val;
+    };
+    float parseFloatFromJson(const nlohmann::json& j, const char* key, const float& default_val)
+    {
+        if (!j.is_discarded() && j.contains(key)) {
+            if (j[key].is_number_float()) return j[key].get<float>();
+            if (j[key].is_number_integer()) return (float)j[key].get<int>();
+        }
+        return default_val;
+    };
+
+    std::string VStrPrintf(const char* format, va_list argv)
+    {
+        va_list argv2;
+        va_copy(argv2, argv);
+        const int len = vsnprintf(nullptr, 0, format, argv);
+        va_end(argv2);
+        if (len < 0) return {};
+        std::string result;
+        va_copy(argv2, argv);
+        result.resize_and_overwrite(len, [&](char* buf, size_t) {
+            vsnprintf(buf, len + 1, format, argv2);
+            return len;
+        });
+        va_end(argv2);
+        return result;
+    }
+
+    std::wstring VStrPrintfW(const wchar_t* format, va_list argv)
+    {
+        va_list argv2;
+        va_copy(argv2, argv);
+        const int len = vswprintf(nullptr, 0, format, argv);
+        va_end(argv2);
+        if (len < 0) return {};
+        std::wstring result;
+        va_copy(argv2, argv);
+        result.resize_and_overwrite(len, [&](wchar_t* buf, size_t) {
+            vswprintf(buf, len + 1, format, argv2);
+            return len;
+        });
+        va_end(argv2);
+        return result;
+    }
+
+    std::string StrPrintf(const char* format, ...)
+    {
+        va_list argv;
+        va_start(argv, format);
+        std::string result = VStrPrintf(format, argv);
+        va_end(argv);
+        return result;
+    }
+
+    std::wstring StrPrintfW(const wchar_t* format, ...)
+    {
+        va_list argv;
+        va_start(argv, format);
+        std::wstring result = VStrPrintfW(format, argv);
+        va_end(argv);
+        return result;
+    }
+
     std::string RemovePunctuation(std::string s)
     {
         std::erase_if(s, [](auto c) { return std::ispunct(c, std::locale()); });
@@ -223,6 +312,30 @@ namespace TextUtils {
         return out;
     }
 
+    GUID ConvertWStringToGuid(const std::wstring& str)
+    {
+        uint32_t h1 = 0x6ba7b810, h2 = 0x9dad11d1, h3 = 0x80b400c0, h4 = 0x4fd430c8;
+        for (wchar_t c : str) {
+            h1 = h1 * 31 + c;
+            h2 = h2 * 37 + c;
+            h3 = h3 * 41 + c;
+            h4 = h4 * 43 + c;
+        }
+        GUID guid = {};
+        guid.Data1 = h1;
+        guid.Data2 = (uint16_t)(h2 >> 16);
+        guid.Data3 = (uint16_t)(h3 >> 16) & 0x0FFF | 0x5000;
+        guid.Data4[0] = (h2 & 0xFF) | 0x80;
+        guid.Data4[1] = (h3 & 0xFF);
+        guid.Data4[2] = (h4 >> 24) & 0xFF;
+        guid.Data4[3] = (h4 >> 16) & 0xFF;
+        guid.Data4[4] = (h4 >> 8) & 0xFF;
+        guid.Data4[5] = (h4) & 0xFF;
+        guid.Data4[6] = (h1 >> 8) & 0xFF;
+        guid.Data4[7] = (h1 >> 16) & 0xFF;
+        return guid;
+    }
+
     std::string GuidToString(const GUID* guid)
     {
         ASSERT(guid);
@@ -235,6 +348,14 @@ namespace TextUtils {
             guid->Data4[3], guid->Data4[4], guid->Data4[5],
             guid->Data4[6], guid->Data4[7]);
         return guid_string;
+    }
+    bool StringToGuid(const std::string& str, GUID* guid)
+    {
+        ASSERT(guid);
+        return sscanf(
+                   str.c_str(), "%08x-%04hx-%04hx-%02hhx%02hhx-%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx", &guid->Data1, &guid->Data2, &guid->Data3, &guid->Data4[0], &guid->Data4[1], &guid->Data4[2], &guid->Data4[3], &guid->Data4[4], &guid->Data4[5],
+                   &guid->Data4[6], &guid->Data4[7]
+               ) == 11;
     }
 
     // Convert an UTF8 string to a wide Unicode String
@@ -297,17 +418,25 @@ namespace TextUtils {
     std::string SanitiseFilename(const std::string_view str)
     {
         const auto invalid_chars = "<>:\"/\\|?*";
-        size_t len = 0;
         std::string out;
-        out.resize(str.length());
-        for (const char i : str) {
-            if (strchr(invalid_chars, i)) {
-                continue;
-            }
-            out[len] = i;
-            len++;
+        out.reserve(str.length());
+        for (const char c : str) {
+            if (strchr(invalid_chars, c) || static_cast<unsigned char>(c) <= 0x1F) continue;
+            out += c;
         }
-        out.resize(len);
+
+        // Reserved device names (case-insensitive, with or without extension)
+        static constexpr std::array reserved = {"CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"};
+        for (const auto& name : reserved) {
+            if (_stricmp(out.c_str(), name) == 0) {
+                out += "_";
+                break;
+            }
+        }
+        // Trim trailing spaces and dots (Windows silently strips them)
+        while (!out.empty() && (out.back() == ' ' || out.back() == '.'))
+            out.pop_back();
+
         return out;
     }
 
@@ -368,28 +497,6 @@ namespace TextUtils {
             if (c == L'\\') c = L'/';
         }
         return path;
-    }
-
-    std::string Base64Decode(std::string_view encoded)
-    {
-        const std::string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        std::string decoded;
-        std::vector<int> T(256, -1);
-
-        for (int i = 0; i < 64; i++)
-            T[chars[i]] = i;
-
-        int val = 0, valb = -8;
-        for (unsigned char c : encoded) {
-            if (T[c] == -1) break;
-            val = (val << 6) + T[c];
-            valb += 6;
-            if (valb >= 0) {
-                decoded.push_back(char((val >> valb) & 0xFF));
-                valb -= 8;
-            }
-        }
-        return decoded;
     }
 
     std::wstring RemoveDiacritics(const std::wstring_view s)
@@ -631,40 +738,40 @@ namespace TextUtils {
     {
         return StringToWString(TimeToString(utc_timestamp, include_seconds));
     }
-    std::string TimeToString(time_t utc_timestamp, bool include_seconds)
+    std::string TimeToString(time_t utc_timestamp, bool include_seconds, int milliseconds)
     {
         const time_t now = time(nullptr);
-        if (!utc_timestamp) {
-            utc_timestamp = now;
-        }
-        const tm* timeinfo = localtime(&utc_timestamp);
-        const tm* nowinfo = localtime(&now);
-
-        if (!timeinfo || !nowinfo) return "Invalid time";
+        if (!utc_timestamp) utc_timestamp = now;
+        std::tm timeinfo, nowinfo;
+        localtime_s(&timeinfo, &utc_timestamp);
+        localtime_s(&nowinfo, &now);
 
         std::string out;
-        if (timeinfo->tm_yday != nowinfo->tm_yday || timeinfo->tm_year != nowinfo->tm_year) {
+        out.reserve(32);
+
+        if (timeinfo.tm_yday != nowinfo.tm_yday || timeinfo.tm_year != nowinfo.tm_year) {
             static constexpr const char* months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
-            out += std::format("{} {:02d} ", months[timeinfo->tm_mon], timeinfo->tm_mday);
+            std::format_to(std::back_inserter(out), "{} {:02d} ", months[timeinfo.tm_mon], timeinfo.tm_mday);
         }
-        if (timeinfo->tm_year != nowinfo->tm_year) {
-            out += std::format("{} ", timeinfo->tm_year + 1900);
-        }
-        out += std::format("{:02}:{:02}", timeinfo->tm_hour, timeinfo->tm_min);
-        if (include_seconds) {
-            out += std::format(":{:02}", timeinfo->tm_sec);
-        }
+        if (timeinfo.tm_year != nowinfo.tm_year) std::format_to(std::back_inserter(out), "{} ", timeinfo.tm_year + 1900);
+
+        std::format_to(std::back_inserter(out), "{:02}:{:02}", timeinfo.tm_hour, timeinfo.tm_min);
+
+        if (include_seconds) std::format_to(std::back_inserter(out), ":{:02}", timeinfo.tm_sec);
+
+        if (milliseconds >= 0) std::format_to(std::back_inserter(out), ".{:03}", milliseconds);
+
         return out;
     }
 
-    std::string TimeToString(const uint32_t utc_timestamp, bool include_seconds)
+    std::string TimeToString(const uint32_t utc_timestamp, bool include_seconds, int milliseconds)
     {
-        return TimeToString(static_cast<time_t>(utc_timestamp), include_seconds);
+        return TimeToString(static_cast<time_t>(utc_timestamp), include_seconds, milliseconds);
     }
 
-    std::string TimeToString(const FILETIME utc_timestamp, bool include_seconds)
+    std::string TimeToString(const FILETIME utc_timestamp, bool include_seconds, int milliseconds)
     {
-        return TimeToString(filetime_to_timet(utc_timestamp), include_seconds);
+        return TimeToString(filetime_to_timet(utc_timestamp), include_seconds, milliseconds);
     }
 
     std::vector<std::string> Split(const std::string& in, const std::string& token)

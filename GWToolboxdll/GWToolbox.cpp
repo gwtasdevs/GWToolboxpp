@@ -64,6 +64,13 @@ namespace {
     bool must_self_destruct = false; // is true when toolbox should quit
     GW::HookEntry Update_Entry;
 
+    bool profiling_enabled = false;
+
+    uint64_t QpcToMicroseconds(LONGLONG ticks)
+    {
+        static LARGE_INTEGER freq = [] { LARGE_INTEGER f; QueryPerformanceFrequency(&f); return f; }();
+        return static_cast<uint64_t>(ticks * 1000000 / freq.QuadPart);
+    }
     std::recursive_mutex module_management_mutex;
 
 
@@ -151,14 +158,13 @@ namespace {
         io.IniFilename = imgui_inifile.bytes;
         //io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
         io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
-        io.ConfigFlags |= ImGuiConfigFlags_NavNoCaptureKeyboard;
+        io.ConfigNavCaptureKeyboard = false;
 
         //ImGui_ImplDX9_Init(GW::MemoryMgr().GetGWWindowHandle(), device);
         ImGui_ImplDX9_Init(device);
         ImGui_ImplWin32_Init(GW::MemoryMgr::GetGWWindowHandle());
 
         GW::Render::SetResetCallback([](IDirect3DDevice9*) {
-            FontLoader::ReleaseFontTextures();
             ImGui_ImplDX9_InvalidateDeviceObjects();
         });
 
@@ -556,7 +562,7 @@ namespace {
     {
         __try {
             return WndProc(hWnd, Message, wParam, lParam);
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
+        } __except (EXCEPT_EXPRESSION_ENTRY) {
             return CallWindowProc(OldWndProc, hWnd, Message, wParam, lParam);
         }
     }
@@ -668,6 +674,10 @@ const std::vector<ToolboxWidget*>& GWToolbox::GetWidgets()
     return widgets_enabled;
 }
 
+void GWToolbox::SetProfilingEnabled(bool enabled)
+{
+    profiling_enabled = enabled;
+}
 
 bool GWToolbox::ShouldDisableToolbox(GW::Constants::MapID map_id)
 {
@@ -863,11 +873,7 @@ void GWToolbox::ForceTerminate(bool detach_wndproc_handler)
 
     SignalTerminate();
     DrawTerminating(nullptr);
-    UpdateTerminating(0.f);
-
-    for (const auto m : modules_enabled) {
-        m->Terminate();
-    }
+    UpdateTerminating(0.f,true);
 
     GW::DisableHooks();
 
@@ -945,7 +951,15 @@ void GWToolbox::Update(GW::HookStatus*)
 
     // Update loop
     for (const auto m : modules_enabled) {
-        m->Update(delta_f);
+        if (profiling_enabled) {
+            LARGE_INTEGER t0, t1;
+            QueryPerformanceCounter(&t0);
+            m->Update(delta_f);
+            QueryPerformanceCounter(&t1);
+            m->last_update_time_us_ = QpcToMicroseconds(t1.QuadPart - t0.QuadPart);
+        } else {
+            m->Update(delta_f);
+        }
     }
 
     if (!greeted && GW::Map::GetInstanceType() != GW::Constants::InstanceType::Loading) {
@@ -999,6 +1013,7 @@ void GWToolbox::Draw(IDirect3DDevice9* device)
         Disable();
         return;
     }
+
     // Draw loop
     Resources::DxUpdate(device);
 
@@ -1040,7 +1055,15 @@ void GWToolbox::Draw(IDirect3DDevice9* device)
                 continue;
             }
             uielement->UpdateLocationAgainstSnappedFrame();
-            uielement->Draw(device);
+            if (profiling_enabled) {
+                LARGE_INTEGER t0, t1;
+                QueryPerformanceCounter(&t0);
+                uielement->Draw(device);
+                QueryPerformanceCounter(&t1);
+                uielement->last_draw_time_us_ = QpcToMicroseconds(t1.QuadPart - t0.QuadPart);
+            } else {
+                uielement->Draw(device);
+            }
         }
 
 #ifdef _DEBUG
@@ -1124,11 +1147,11 @@ void GWToolbox::UpdateInitialising(float)
     gwtoolbox_state = GWToolboxState::DrawInitialising;
 }
 
-void GWToolbox::UpdateModulesTerminating(float delta_f)
+void GWToolbox::UpdateModulesTerminating(float delta_f, bool panicking)
 {
 terminate_modules:
     for (const auto m : modules_terminating) {
-        if (m->CanTerminate()) {
+        if (m->CanTerminate() || panicking) {
             m->Terminate();
             const auto found = std::ranges::find(modules_terminating, m);
             ASSERT(found != modules_terminating.end());
@@ -1139,7 +1162,7 @@ terminate_modules:
     }
 }
 
-void GWToolbox::UpdateTerminating(float delta_f)
+void GWToolbox::UpdateTerminating(float delta_f, bool panicking)
 {
     ASSERT(gwtoolbox_state == GWToolboxState::Terminating);
 
@@ -1147,7 +1170,7 @@ void GWToolbox::UpdateTerminating(float delta_f)
         ASSERT(ToggleModule(*modules_enabled[0], false) == false);
     }
     ASSERT(modules_enabled.empty());
-    UpdateModulesTerminating(delta_f);
+    UpdateModulesTerminating(delta_f, panicking);
     if (!modules_terminating.empty())
         return;
 

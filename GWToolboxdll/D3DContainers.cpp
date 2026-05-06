@@ -1,5 +1,6 @@
 #include "D3DContainers.h"
 #include "stdafx.h"
+#include "Defines.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846f
@@ -63,7 +64,7 @@ D3DVelocityArrow::D3DVelocityArrow(const D3DVec2f& pos, const D3DVec2f& velocity
 }
 
 D3DVertexBuffer::~D3DVertexBuffer() {
-    Terminate();
+    DEBUG_ASSERT(!buffer);
 }
 
 // D3DVertexBuffer
@@ -314,4 +315,15 @@ void D3DLineCircle::SetRadius(float r)
     }
     vertices[n] = vertices[0];
     dirty = true;
+}
+
+D3DMATRIX MakeOrthoProjection(float w, float h)
+{
+    D3DMATRIX m = {{
+         2.f/w,   0.f,  0.f, 0.f,
+          0.f,  -2.f/h, 0.f, 0.f,
+          0.f,   0.f,  1.f, 0.f,
+         -1.f,   1.f,  0.f, 1.f
+    }};
+    return m;
 }

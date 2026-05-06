@@ -6,8 +6,10 @@
 #include <enumUtils.h>
 #include <Keys.h>
 
-//#include <BackupManager.h>
+#include <BackupManager.h>
 #include <PluginUtils.h>
+#include <Utils/FontLoader.h>
+#include <io.h>
 
 #include <GWCA/Packets/StoC.h>
 #include <GWCA/Constants/Constants.h>
@@ -22,7 +24,6 @@
 #include <GWCA/Utilities/Hooker.h>
 #include <GWCA/Utilities/Hook.h>
 
-#include <imgui.h>
 #include <ImGuiCppWrapper.h>
 
 DLLAPI ToolboxPlugin* ToolboxPluginInstance()
@@ -37,8 +38,7 @@ namespace {
     GW::HookEntry DisplayDialogue_Entry;
     GW::HookEntry DungeonReward_Entry;
     GW::HookEntry DoACompleteZone_Entry;
-    GW::HookEntry RestoreChatCmd_HookEntry;
-    GW::HookEntry ResetrunChatCmd_HookEntry;
+    GW::HookEntry ChatCmd_HookEntry;
 
     static void onDisplayDialogDecoded(void* instancePtr, const wchar_t* decoded)
     {
@@ -207,7 +207,7 @@ namespace {
     {
         auto posX = (ImGui::GetCursorPosX() + ImGui::GetColumnWidth() - ImGui::CalcTextSize(s.c_str()).x - ImGui::GetScrollX() - 2 * ImGui::GetStyle().ItemSpacing.x);
         if (posX > ImGui::GetCursorPosX()) ImGui::SetCursorPosX(posX);
-        ImGui::Text(s.c_str());
+        ImGui::TextUnformatted(s.c_str()); // Fixed: ImGui::Text treated the string as a format string; '%' in output caused UB.
     }
     auto mix(ImVec4 a, ImVec4 b, float aNess)
     {
@@ -241,9 +241,7 @@ namespace {
         }
         timeDiff = std::min(timeDiff, earlyResultTimeMs);
         const auto redNess = float(timeDiff) / earlyResultTimeMs;
-        const auto result = ImGui::ColorConvertU32ToFloat4(mix(lightRed, red, 1.f - redNess));
-
-        return mix(lightRed, red, 1.f - redNess);
+        return mix(lightRed, red, 1.f - redNess); // Fixed: a dead 'result' variable and a duplicate mix() call were here.
     }
 
     std::string serialize(const Split& split)
@@ -408,7 +406,7 @@ bool GWSplits::drawSplits(std::vector<Split>& splits)
         const auto offset = 126.f + (treeOpen ? 0.f : 21.f);
         ImGui::SameLine(ImGui::GetContentRegionAvail().x - offset);
         ImGui::PushItemWidth(70.f);
-        if (ImGui::InputText("", &splitIt->displayTrackedTime)) {
+        if (ImGui::InputText("##TrackedTime", &splitIt->displayTrackedTime)) {
             splitIt->trackedTime = stringToTime(splitIt->displayTrackedTime);
             splitIt->displayTrackedTime = timeToString(splitIt->trackedTime);
         }
@@ -584,7 +582,8 @@ void GWSplits::Update(float diff)
         bestPossibleTime = runTime;
     }
     
-    if (currentSplitIt == currentSplits.end() || !checkConditions(currentSplitIt->conditions, false)) return;
+    // Fixed: was firing for all trigger types; trigger-based splits must only complete on their packet callback, not here.
+    if (currentSplitIt == currentSplits.end() || currentSplitIt->trigger != Trigger::None || !checkConditions(currentSplitIt->conditions, false)) return;
     completeSplit(currentSplitIt);
 }
 
@@ -594,6 +593,10 @@ void GWSplits::resetRun()
     isCurrentRunTracked = false;
 
     segmentStart = 0;
+    runTime = 0;           // Fixed: these were not reset, so stale values persisted into the next run
+    segmentTime = 0;       // and the sumOfBest lazy-init guard (if sumOfBest == 0) skipped re-initialisation.
+    bestPossibleTime = 0;
+    sumOfBest = 0;
     lastSegmentColor = ImGui::ColorConvertFloat4ToU32(white);
     lastSegmentGain = 0;
 
@@ -690,7 +693,7 @@ void GWSplits::Draw(IDirect3DDevice9* pDevice)
 
     ImGui::SetNextWindowSize(ImVec2(100, 0), ImGuiCond_FirstUseEver);
     if (ImGui::Begin(Name(), GetVisiblePtr(), GetWinFlags())) {
-        ImGui::PushFont(FontLoader::GetFont(FontLoader::font_sizes[fontSizeIndex]));
+        ImGui::PushFont(nullptr, static_cast<float>(FontLoader::font_sizes[fontSizeIndex]));
         if (settingsFolder && !isCurrentRunTracked)
         {
             if (std::ranges::any_of(currentSplits, &Split::isPB)) {
@@ -714,7 +717,7 @@ void GWSplits::Draw(IDirect3DDevice9* pDevice)
 
         if (!currentRun->topText.empty()) {
             ImGui::SetCursorPosX((ImGui::GetWindowSize().x - ImGui::CalcTextSize(currentRun->topText.c_str()).x) * 0.5f);
-            ImGui::Text(currentRun->topText.c_str());
+            ImGui::TextUnformatted(currentRun->topText.c_str()); // Fixed: ImGui::Text with user-controlled string caused format-string UB on '%'.
             ImGui::Separator();
         }
         if (ImGui::BeginTable("tablename", 3, ImGuiTableFlags_RowBg)) {
@@ -736,7 +739,10 @@ void GWSplits::Draw(IDirect3DDevice9* pDevice)
                 displaySplits = displaySplits.subspan(std::max(start, 0), std::min(totalSplits, total));
             }
 
-            int previousSplitTime = 0;
+            // Fixed: was always 0, causing the first visible split's $duration to equal its absolute run time when the window was scrolled.
+            int previousSplitTime = displaySplits.data() > currentSplits.data()
+                ? std::prev(displaySplits.data())->currentTime
+                : 0;
 
             for (const auto& split : displaySplits) {
                 ImGui::TableNextRow();
@@ -764,22 +770,23 @@ void GWSplits::Draw(IDirect3DDevice9* pDevice)
                     }
                 }
 
-                if (&split == &*currentSplitIt) {
+                // Fixed: dereferencing end() when all splits are complete was UB.
+                if (currentSplitIt != currentSplits.end() && &split == &*currentSplitIt) {
                     ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1, ImGui::GetColorU32(currentSplitColor));
                 }
 
                 ImGui::TableSetColumnIndex(0);
                 ImGui::SameLine();
-                ImGui::Text(split.name.c_str());
+                ImGui::TextUnformatted(split.name.c_str()); // Fixed: same format-string UB as topText.
                 ImGui::TableNextColumn();
 
                 if (split.completed) {
                     const auto timeDiff = split.currentTime - split.trackedTime;
                     ImGui::PushStyleColor(ImGuiCol_Text, getTimerColor(timeDiff, split.isPB));
-                    ImGui::Text(timeToString(timeDiff, ToStringStyle::SecondsCentiseconds).c_str());
+                    ImGui::TextUnformatted(timeToString(timeDiff, ToStringStyle::SecondsCentiseconds).c_str());
                     ImGui::PopStyleColor();
                 }
-                else if (isCurrentRunTracked && &split == &*currentSplitIt) {
+                else if (isCurrentRunTracked && currentSplitIt != currentSplits.end() && &split == &*currentSplitIt) { // Fixed: same end() dereference UB.
                     const auto currentTime = getRunTime();
                     const auto timeDiff = currentTime - split.trackedTime;
                     if (timeDiff > -earlyResultTimeMs) {
@@ -790,13 +797,13 @@ void GWSplits::Draw(IDirect3DDevice9* pDevice)
                             lastSegmentColor = getTimerColor(timeDiff, false);
                         }
                         ImGui::PushStyleColor(ImGuiCol_Text, getTimerColor(timeDiff, split.isPB));
-                        ImGui::Text(timeToString(timeDiff, ToStringStyle::SecondsCentiseconds).c_str());
+                        ImGui::TextUnformatted(timeToString(timeDiff, ToStringStyle::SecondsCentiseconds).c_str());
                         ImGui::PopStyleColor();
                     }
                 }
 
                 ImGui::TableNextColumn();
-                ImGui::Text(timeToString(split.trackedTime).c_str());
+                ImGui::TextUnformatted(timeToString(split.trackedTime).c_str());
 
                 if (split.completed) {
                     ImGui::PopID();
@@ -811,7 +818,7 @@ void GWSplits::Draw(IDirect3DDevice9* pDevice)
             ImGui::Separator();
         if (showRunTime)
         {
-            ImGui::PushFont(FontLoader::GetFont(FontLoader::font_sizes[fontSizeIndex + 2]));
+            ImGui::PushFont(nullptr, static_cast<float>(FontLoader::font_sizes[fontSizeIndex + 2]));
             ImGui::PushStyleColor(ImGuiCol_Text, lastSegmentColor);
             rightAlignedText(timeToString(runTime));
             ImGui::PopStyleColor();
@@ -944,13 +951,7 @@ void GWSplits::DrawSettings()
         }
     }
 
-    ImGui::Text("Version 1.3.3. For new releases, feature requests and bug reports check out");
-    ImGui::SameLine();
-    constexpr auto discordInviteLink = "https://discord.gg/ZpKzer4dK9";
-    ImGui::TextColored(ImColor{102, 187, 238, 255}, discordInviteLink);
-    if (ImGui::IsItemClicked()) {
-        ShellExecute(nullptr, "open", discordInviteLink, nullptr, nullptr, SW_SHOWNORMAL);
-    }
+    ImGui::Text("Version 2.0.0");
 }
 
 void GWSplits::loadFromIniFile(const wchar_t* filePath)
@@ -965,7 +966,7 @@ void GWSplits::loadFromIniFile(const wchar_t* filePath)
     showBestPossibleTime = ini.GetBoolValue(Name(), "showBestPossibleTime", true);
     showSumOfBest = ini.GetBoolValue(Name(), "showSumOfBest", true);
     showLastSegment = ini.GetBoolValue(Name(), "showLastSegment", true);
-    fontSizeIndex = ini.GetLongValue(Name(), "fontSize", 2);
+    fontSizeIndex = std::clamp((int)ini.GetLongValue(Name(), "fontSize", 2), 0, 3); // Fixed: unclamped value from a corrupt ini caused out-of-bounds access on font_sizes[fontSizeIndex + 2].
     splitMessage = ini.GetValue(Name(), "splitMessage", "[$name] ~ Time: $time ~ Duration: $duration");
 
     if (std::string read = ini.GetValue(Name(), "runs", ""); !read.empty()) {
@@ -992,15 +993,15 @@ void GWSplits::loadFromIniFile(const wchar_t* filePath)
 void GWSplits::LoadSettings(const wchar_t* folder)
 {
     ToolboxUIPlugin::LoadSettings(folder);
-    //BackupManager::getInstance().initialize(folder);
+    BackupManager::getInstance().initialize(folder);
     settingsFolder = folder;
 
     loadFromIniFile(GetSettingFile(folder).c_str());
 
-    //if (runs.empty() && BackupManager::getInstance().backupCount(PluginUtils::StringToWString(Name())) > 0) 
-    //{
-    //    logMessage("No runs loaded, but automatic backups found. Type \"/restore " + std::string{Name()} + " help\" to see options for restoring backups", Name());
-    //}
+    if (runs.empty() && BackupManager::getInstance().backupCount(PluginUtils::StringToWString(Name())) > 0) 
+    {
+        logMessage("No runs loaded, but automatic backups found. Automatic backups are stored in the settings folder.", Name());
+    }
 }
 
 bool GWSplits::WndProc(const UINT Message, const WPARAM wParam, LPARAM lparam)
@@ -1098,8 +1099,8 @@ void GWSplits::SaveSettings(const wchar_t* folder)
     }
     
     PLUGIN_ASSERT(ini.SaveFile(GetSettingFile(folder).c_str()) == SI_OK);
-    /*if (runs.size())
-        BackupManager::getInstance().save(PluginUtils::StringToWString(Name()), GetSettingFile(folder));*/
+    if (runs.size())
+        BackupManager::getInstance().save(PluginUtils::StringToWString(Name()), GetSettingFile(folder));
 }
 
 void GWSplits::handleTrigger(Trigger triggerType, std::function<bool(const Split&)> extraConditions)
@@ -1112,6 +1113,7 @@ void GWSplits::handleTrigger(Trigger triggerType, std::function<bool(const Split
         if (splitIt->trigger != triggerType || !extraConditions(*splitIt)) return;
 
         completeSplit(splitIt);
+        return; // Fixed: without this, the loop continued and chain-completed all subsequent trigger-type splits in a single packet callback.
     }
 }
 
@@ -1130,7 +1132,8 @@ void GWSplits::Initialize(ImGuiContext* ctx, ImGuiAllocFns fns, HMODULE toolbox_
         isCurrentRunTracked = false;
     });
 
-    GW::StoC::RegisterPacketCallback<GW::Packet::StoC::InstanceTimer>(&InstanceLoadStart_Entry, [this](GW::HookStatus*, GW::Packet::StoC::InstanceTimer* packet) -> void {
+    // Fixed: was &InstanceLoadStart_Entry — sharing one HookEntry across two registrations caused the second call to overwrite the first, silently dropping the InstanceLoadStart subscription.
+    GW::StoC::RegisterPacketCallback<GW::Packet::StoC::InstanceTimer>(&InstanceTimer_Entry, [this](GW::HookStatus*, GW::Packet::StoC::InstanceTimer* packet) -> void {
         if (GW::Map::GetInstanceType() == GW::Constants::InstanceType::Outpost)
         {
             // This is meant to correct slowloading but doesn't really work in outposts since the instance is active for as long as someone is in it
@@ -1160,7 +1163,7 @@ void GWSplits::Initialize(ImGuiContext* ctx, ImGuiAllocFns fns, HMODULE toolbox_
         handleTrigger(Trigger::DoaZoneComplete, [&](const Split& s){ return s.triggerData.doaZone == doaZone; });
     });
 
- /*   GW::Chat::CreateCommand(&RestoreChatCmd_HookEntry, L"restore", [](GW::HookStatus* status, const wchar_t*, const int argc, const LPWSTR* argv) {
+    /*GW::Chat::CreateCommand(L"restore", [](GW::HookStatus* status, const wchar_t*, const int argc, const LPWSTR* argv) {
         const auto instance = static_cast<GWSplits*>(ToolboxPluginInstance());
         if (!instance || argc < 2) {
             status->blocked = false;
@@ -1222,11 +1225,10 @@ void GWSplits::Initialize(ImGuiContext* ctx, ImGuiAllocFns fns, HMODULE toolbox_
         }
     });*/
 
-    GW::Chat::CreateCommand(&ResetrunChatCmd_HookEntry, L"resetrun", [](GW::HookStatus*, const wchar_t*, const int, const LPWSTR*) {
+    GW::Chat::CreateCommand(&ChatCmd_HookEntry, L"resetrun", [](GW::HookStatus*, const wchar_t*, const int, const LPWSTR*) {
         const auto instance = static_cast<GWSplits*>(ToolboxPluginInstance());
         if (!instance) return;
 
-        // TODO this doesn't reset the current split
         instance->resetRun();
         instanceStart = now();
     });
@@ -1238,15 +1240,16 @@ void GWSplits::Initialize(ImGuiContext* ctx, ImGuiAllocFns fns, HMODULE toolbox_
 
 void GWSplits::SignalTerminate()
 {
-    //GW::Chat::DeleteCommand(&RestoreChatCmd_HookEntry);
-    GW::Chat::DeleteCommand(&ResetrunChatCmd_HookEntry);
-
-    GW::StoC::RemovePostCallback<GW::Packet::StoC::InstanceLoadInfo>(&InstanceLoadStart_Entry);
-    GW::StoC::RemovePostCallback<GW::Packet::StoC::InstanceLoadInfo>(&InstanceTimer_Entry);
-    GW::StoC::RemovePostCallback<GW::Packet::StoC::DisplayDialogue>(&DisplayDialogue_Entry);
-    GW::StoC::RemovePostCallback<GW::Packet::StoC::DungeonReward>(&DungeonReward_Entry);
-    GW::StoC::RemovePostCallback<GW::Packet::StoC::DoACompleteZone>(&DoACompleteZone_Entry);
     ToolboxUIPlugin::SignalTerminate();
+
+    // Fixed: was RemovePostCallback<InstanceLoadInfo> for both — wrong removal function and wrong packet type; callbacks were never removed.
+    GW::StoC::RemoveCallback<GW::Packet::StoC::InstanceLoadStart>(&InstanceLoadStart_Entry);
+    GW::StoC::RemoveCallback<GW::Packet::StoC::InstanceTimer>(&InstanceTimer_Entry);
+    GW::StoC::RemovePostCallback<GW::Packet::StoC::DisplayDialogue>(&DisplayDialogue_Entry);
+    // Fixed: was RemovePostCallback — wrong table for callbacks registered with RegisterPacketCallback; callbacks were never removed.
+    GW::StoC::RemoveCallback<GW::Packet::StoC::DungeonReward>(&DungeonReward_Entry);
+    GW::StoC::RemoveCallback<GW::Packet::StoC::DoACompleteZone>(&DoACompleteZone_Entry);
+    GW::Chat::DeleteCommand(&ChatCmd_HookEntry, L"resetrun");
 
     InstanceInfo::getInstance().terminate();
     QuestInfo::getInstance().terminate();

@@ -25,6 +25,7 @@
 #include <Windows/DailyQuestsWindow.h>
 #include <Windows/TravelWindow.h>
 #include <Windows/TravelWindowConstants.h>
+#include <Constants/MapAdjacency.h>
 #include <Utils/TextUtils.h>
 #include <GWCA/Managers/QuestMgr.h>
 #include <Utils/ToolboxUtils.h>
@@ -50,7 +51,7 @@ namespace {
     struct SearchableArea {
     protected:
         char* name = nullptr;
-        GuiUtils::EncString* enc_name = nullptr;
+        std::unique_ptr<GuiUtils::EncString> enc_name;
 
     public:
         GW::Constants::MapID map_id = GW::Constants::MapID::None;
@@ -63,7 +64,7 @@ namespace {
                 name = new char[1];
             }
             else {
-                enc_name = new GuiUtils::EncString(map_info->name_id);
+                enc_name = std::make_unique<GuiUtils::EncString>(map_info->name_id);
                 if (search_in_english)
                     enc_name->language(GW::Constants::Language::English);
                 enc_name->wstring();
@@ -72,7 +73,6 @@ namespace {
 
         ~SearchableArea()
         {
-            delete enc_name;
             delete[] name;
         }
 
@@ -91,8 +91,7 @@ namespace {
             const auto sanitised = SanitiseForSearch(enc_name->wstring());
             name = new char[sanitised.length() + 1];
             strcpy(name, sanitised.c_str());
-            delete enc_name;
-            enc_name = nullptr;
+            enc_name.reset();
             return name;
         }
     };
@@ -121,7 +120,7 @@ namespace {
     bool ImInPresearing() {
         static bool isInPresearing = false;
         if (GW::Map::GetIsMapLoaded()) {
-            isInPresearing = GW::Map::GetCurrentMapInfo()->region == GW::Region::Region_Presearing;
+            isInPresearing = GW::Map::IsPreSearing();
         }
         return isInPresearing;
     }
@@ -147,11 +146,7 @@ namespace {
                && (!_district_number || _district_number == static_cast<uint32_t>(GW::Map::GetDistrict()));
     }
 
-    bool IsPreSearing(GW::Constants::MapID map_id)
-    {
-        const auto map_info = GW::Map::GetMapInfo(map_id);
-        return map_info && map_info->region == GW::Region::Region_Presearing;
-    }
+
 
     bool IsValidOutpost(const GW::Constants::MapID map_id)
     {
@@ -208,6 +203,7 @@ namespace {
     // ==== options ====
     bool close_on_travel = false;
     bool collapse_on_travel = false;
+    bool show_default_destinations = true;
 
     // ==== scroll to outpost ====
     GW::Constants::MapID scroll_to_outpost_id = GW::Constants::MapID::None;   // Which outpost do we want to end up in?
@@ -703,34 +699,36 @@ void TravelWindow::Draw(IDirect3DDevice9*)
             }
             ImGui::PopItemWidth();
 
-            TravelButton(GW::Constants::MapID::Temple_of_the_Ages, 0);
-            TravelButton(GW::Constants::MapID::Domain_of_Anguish, 1);
-            TravelButton(GW::Constants::MapID::Kamadan_Jewel_of_Istan_outpost, 0);
-            TravelButton(GW::Constants::MapID::Embark_Beach, 1);
-            TravelButton(GW::Constants::MapID::Vloxs_Falls, 0);
-            TravelButton(GW::Constants::MapID::Gadds_Encampment_outpost, 1);
-            TravelButton(GW::Constants::MapID::Urgozs_Warren, 0);
-            TravelButton(GW::Constants::MapID::The_Deep, 1);
-            const float w = (ImGui::GetWindowWidth() - ImGui::GetStyle().ItemInnerSpacing.x) / 2 - 2.f * ImGui::GetStyle().WindowPadding.x;
-            if (ImGui::Button("Zaishen Bounty", {w, 0})) {
-                GW::Chat::SendChat('/', "tp zb");
-            }
-            ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
-            if (ImGui::Button("Zaishen Mission", {w, 0})) {
-                GW::Chat::SendChat('/', "tp zm");
-            }
-            if (ImGui::Button("Zaishen Vanquish", {w, 0})) {
-                GW::Chat::SendChat('/', "tp zv");
-            }
-            ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
-            if (ImGui::Button("Zaishen Combat", {w, 0})) {
-                GW::Chat::SendChat('/', "tp zc");
+            if (show_default_destinations) {
+                TravelButton(GW::Constants::MapID::Temple_of_the_Ages, 0);
+                TravelButton(GW::Constants::MapID::Domain_of_Anguish, 1);
+                TravelButton(GW::Constants::MapID::Kamadan_Jewel_of_Istan_outpost, 0);
+                TravelButton(GW::Constants::MapID::Embark_Beach, 1);
+                TravelButton(GW::Constants::MapID::Vloxs_Falls, 0);
+                TravelButton(GW::Constants::MapID::Gadds_Encampment_outpost, 1);
+                TravelButton(GW::Constants::MapID::Urgozs_Warren, 0);
+                TravelButton(GW::Constants::MapID::The_Deep, 1);
+                const float w = (ImGui::GetWindowWidth() - ImGui::GetStyle().ItemInnerSpacing.x) / 2 - 2.f * ImGui::GetStyle().WindowPadding.x;
+                if (ImGui::Button("Zaishen Bounty", {w, 0})) {
+                    GW::Chat::SendChat('/', "tp zb");
+                }
+                ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+                if (ImGui::Button("Zaishen Mission", {w, 0})) {
+                    GW::Chat::SendChat('/', "tp zm");
+                }
+                if (ImGui::Button("Zaishen Vanquish", {w, 0})) {
+                    GW::Chat::SendChat('/', "tp zv");
+                }
+                ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+                if (ImGui::Button("Zaishen Combat", {w, 0})) {
+                    GW::Chat::SendChat('/', "tp zc");
+                }
             }
 
             static int editing = -1;
 #
             const auto spacing = ImGui::GetStyle().ItemSpacing.x;
-            const auto btn_w = (ImGui::GetIO().FontGlobalScale * 30.f);
+            const auto btn_w = (ImGui::FontScale() * 30.f);
             for (size_t i = 0, size = favourites.size(); i < size; i++) {
                 ImGui::PushID(i);
                 const auto map_id = favourites[i];
@@ -803,6 +801,8 @@ void TravelWindow::Draw(IDirect3DDevice9*)
     ImGui::End();
 }
 
+bool GetMapLabelPos(const GW::AreaInfo* map, GW::Vec2f* out);
+
 void TravelWindow::Update(const float)
 {
     if (scroll_to_outpost_id != GW::Constants::MapID::None) {
@@ -830,7 +830,7 @@ void TravelWindow::Update(const float)
     switch (fetched_searchable_outposts) {
         case FetchedMapNames::Pending: {
             BuildSearchableAreas(searchable_outposts, [](const GW::Constants::MapID map_id, const GW::AreaInfo*) {
-                return IsValidOutpost(map_id) && !IsPreSearing(map_id);
+                return IsValidOutpost(map_id) && !GW::Map::IsPreSearing(map_id);
             });
             fetched_searchable_outposts = FetchedMapNames::Decoding;
         }
@@ -894,27 +894,78 @@ GW::Constants::MapID TravelWindow::GetNearestOutpostToPlayer()
 
 GW::Constants::MapID TravelWindow::GetNearestOutpost(const GW::Constants::MapID map_to)
 {
-    static const auto special_cases = std::map<GW::Constants::MapID, GW::Constants::MapID>{
-        {GW::Constants::MapID::Kessex_Peak, GW::Constants::MapID::Temple_of_the_Ages},
-        {GW::Constants::MapID::Cursed_Lands, GW::Constants::MapID::Temple_of_the_Ages},
-        {GW::Constants::MapID::The_Arid_Sea, GW::Constants::MapID::Dunes_of_Despair}, // could also be augury rock
-        {GW::Constants::MapID::Dry_Top, GW::Constants::MapID::Aurora_Glade},
-        {GW::Constants::MapID::Iron_Horse_Mine, GW::Constants::MapID::Yaks_Bend_outpost},
-        {GW::Constants::MapID::Fahranur_The_First_City, GW::Constants::MapID::Blacktide_Den}, // 8 player outpost is better to start with
-        {GW::Constants::MapID::Cliffs_of_Dohjok, GW::Constants::MapID::Blacktide_Den},        // 8 player outpost is better to start with
-    };
+    // BFS over the map adjacency graph to find the nearest unlocked outpost.
+    // When multiple outposts are found at the same BFS depth, use Euclidean
+    // distance on the world map as a tiebreaker.
+    using MapID = GW::Constants::MapID;
+    std::vector<MapID> queue;
+    std::vector<uint32_t> depth(static_cast<size_t>(MapID::Count), UINT32_MAX);
 
-    if (special_cases.contains(map_to)) {
-        const auto nearest_outpost = special_cases.at(map_to);
-        if (GW::Map::GetIsMapUnlocked(nearest_outpost)) return nearest_outpost;
+    queue.push_back(map_to);
+    depth[static_cast<size_t>(map_to)] = 0;
+
+    // Get world map position of the target for tiebreaking
+    const GW::AreaInfo* origin_info = GW::Map::GetMapInfo(map_to);
+    GW::Vec2f origin_pos{};
+    const bool has_origin_pos = origin_info && GetMapLabelPos(origin_info, &origin_pos);
+
+    MapID best = MapID::None;
+    uint32_t best_depth = UINT32_MAX;
+    uint32_t best_party_size = 0;
+    float best_distance = std::numeric_limits<float>::max();
+
+    for (size_t head = 0; head < queue.size(); head++) {
+        const auto current = queue[head];
+        const auto current_depth = depth[static_cast<size_t>(current)];
+
+        // Stop exploring once we've passed the depth of the best outpost found
+        if (best != MapID::None && current_depth > best_depth)
+            break;
+
+        if (current != map_to && IsValidOutpost(current) && GW::Map::GetIsMapUnlocked(current)) {
+            const auto* cur_info = GW::Map::GetMapInfo(current);
+            const uint32_t party_size = cur_info ? cur_info->max_party_size : 0;
+
+            // Tiebreak: prefer larger party size, then Euclidean distance (same-continent),
+            // then adjacency array order when no world map position is available
+            float dist = std::numeric_limits<float>::max();
+            if (has_origin_pos && cur_info && cur_info->continent == origin_info->continent) {
+                GW::Vec2f outpost_pos;
+                if (GetMapLabelPos(cur_info, &outpost_pos))
+                    dist = GetDistance(origin_pos, outpost_pos);
+            }
+
+            const bool is_better = best == MapID::None
+                || (current_depth == best_depth && party_size > best_party_size)
+                || (current_depth == best_depth && party_size == best_party_size && dist < best_distance);
+
+            if (is_better) {
+                best = current;
+                best_depth = current_depth;
+                best_party_size = party_size;
+                best_distance = dist;
+            }
+        }
+
+        for (const auto neighbor : MapAdjacency::GetNeighbors(current)) {
+            const auto idx = static_cast<size_t>(neighbor);
+            if (idx < depth.size() && depth[idx] == UINT32_MAX) {
+                depth[idx] = current_depth + 1;
+                queue.push_back(neighbor);
+            }
+        }
     }
 
+    if (best != MapID::None)
+        return best;
+
+    // Fall back to Euclidean distance on the world map if not reachable via adjacency
     const GW::AreaInfo* this_map = GW::Map::GetMapInfo(map_to);
-    if (!this_map) return GW::Constants::MapID::None;
+    if (!this_map) return MapID::None;
 
     GW::Vec2f world_map_location;
-    if(!GetMapLabelPos(this_map,&world_map_location))
-        return GW::Constants::MapID::None;
+    if (!GetMapLabelPos(this_map, &world_map_location))
+        return MapID::None;
     return GetNearestOutpostToLocation(this_map, world_map_location);
 }
 
@@ -1075,6 +1126,8 @@ void TravelWindow::DrawSettingsInternal()
     ImGui::ShowHelp("Use /tp stop to stop retrying.");
     ImGui::Checkbox("Use English map names", &search_in_english);
     ImGui::ShowHelp("If this is unchecked, the /tp command will use the localized map names based on your current language.");
+    ImGui::Checkbox("Show default destinations", &show_default_destinations);
+    ImGui::ShowHelp("Show the built-in destinations (Temple of the Ages, Domain of Anguish, Kamadan, Embark Beach, etc.) and Zaishen Daily buttons in the Travel window.");
 }
 
 void TravelWindow::LoadSettings(ToolboxIni* ini)
@@ -1096,6 +1149,7 @@ void TravelWindow::LoadSettings(ToolboxIni* ini)
     LOAD_BOOL(collapse_on_travel);
     LOAD_BOOL(retry_map_travel);
     LOAD_BOOL(search_in_english);
+    LOAD_BOOL(show_default_destinations);
 }
 
 void TravelWindow::SaveSettings(ToolboxIni* ini)
@@ -1112,4 +1166,5 @@ void TravelWindow::SaveSettings(ToolboxIni* ini)
     SAVE_BOOL(collapse_on_travel);
     SAVE_BOOL(retry_map_travel);
     SAVE_BOOL(search_in_english);
+    SAVE_BOOL(show_default_destinations);
 }

@@ -1,8 +1,8 @@
 name: CMake
 
 on:
-  # schedule:
-  #   - cron: "*/10 * * * *"
+  schedule:
+    - cron: "*/10 * * * *"
   workflow_dispatch:
 
 concurrency:
@@ -15,11 +15,13 @@ jobs:
     outputs:
       body: ${{ steps.check.outputs.body }}
       dev_commit: ${{ steps.check.outputs.dev_commit }}
+      dev_commit_short: ${{ steps.check.outputs.dev_commit_short }}
       tag: ${{ steps.check.outputs.tag }}
+      beta_tag: ${{ steps.check.outputs.beta_tag }}
       run: ${{ steps.check.outputs.run }}
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0
         fetch-tags: true
@@ -32,6 +34,7 @@ jobs:
         BODY=$(gh api repos/gwdevhub/GWToolboxpp/releases/latest --jq .body)
         TAG=$(gh api repos/gwdevhub/GWToolboxpp/releases/latest --jq .tag_name)
         DEV_COMMIT=$(gh api repos/gwdevhub/GWToolboxpp/commits/dev --jq .sha)
+        DEV_COMMIT_SHORT=${DEV_COMMIT::8}
         echo "Latest upstream release tag: $TAG"
         {
           echo "body<<EOF"
@@ -40,77 +43,66 @@ jobs:
         } >> "$GITHUB_OUTPUT"
         echo "tag=$TAG" >> "$GITHUB_OUTPUT"
         echo "dev_commit=$DEV_COMMIT" >> "$GITHUB_OUTPUT"
+        echo "dev_commit_short=$DEV_COMMIT_SHORT" >> "$GITHUB_OUTPUT"
 
         if git show-ref --tags --quiet --verify "refs/tags/$TAG"; then
-          if git show-ref --tags --quiet --verify "refs/tags/commit-$DEV_COMMIT"; then
+          if [[ -n "$(git tag -l "*_$DEV_COMMIT_SHORT")" ]]; then
             echo "Already processed."
             echo "run=false" >> "$GITHUB_OUTPUT"
           else
             echo "New dev version detected."
             echo "run=dev" >> "$GITHUB_OUTPUT"
+            echo "beta_tag=Beta_$DEV_COMMIT_SHORT" >> "$GITHUB_OUTPUT"
           fi
         else
           echo "New stable version detected."
           echo "run=true" >> "$GITHUB_OUTPUT"
         fi
 
-  merge:
-    runs-on: ubuntu-latest
+  build:
+    runs-on: windows-2025-vs2026
     needs: check
     if: needs.check.outputs.run != 'false'
+    timeout-minutes: 30
     permissions:
+      artifact-metadata: write
+      attestations: write
       contents: write
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-
-    - name: Merge from upstream master
-      if: needs.check.outputs.run == 'true'
-      env:
-        TAG: ${{ needs.check.outputs.tag }}
-      run: |
-        git remote add upstream https://github.com/gwdevhub/GWToolboxpp.git
-        git fetch upstream
-        git checkout master
-        git config --global user.email "bot@github.com"
-        git config --global user.name "GitHub Actions Bot"
-        git merge "refs/tags/${TAG}" --no-edit
-        git push origin master
-
-    - name: Merge from upstream dev
-      if: needs.check.outputs.run == 'dev'
-      env:
-        DEV_COMMIT: ${{ needs.check.outputs.dev_commit }}
-      run: |
-        git remote add upstream https://github.com/gwdevhub/GWToolboxpp.git
-        git fetch upstream
-        git checkout dev
-        git config --global user.email "bot@github.com"
-        git config --global user.name "GitHub Actions Bot"
-        git merge $DEV_COMMIT --no-edit
-        git push origin dev
-
-  build:
-    runs-on: windows-latest
-    needs: [check, merge]
-    if: needs.check.outputs.run != 'false'
-    timeout-minutes: 20
-    permissions:
-      contents: write
+      id-token: write
+    env:
+      BRANCH: ${{ needs.check.outputs.run == 'dev' && 'dev' || 'master' }}
 
     steps:
-    - name: Setup Windows 10 SDK Action
-      uses: GuillaumeFalourd/setup-windows10-sdk-action@v2
-      with:
-        sdk-version: 22621
-
     - name: Checkout repository
       uses: actions/checkout@v6
       with:
         fetch-depth: 0
-        ref: ${{ needs.check.outputs.run == 'dev' && 'dev' || 'master' }}
+        ssh-key: ${{ secrets.ACTIONS_BOT_DEPLOY_KEY }}
+        ref: ${{ env.BRANCH }}
+
+    - name: Setup git
+      run: |
+        git remote add upstream https://github.com/gwdevhub/GWToolboxpp.git
+        git fetch upstream
+        git config --global user.email "bot@github.com"
+        git config --global user.name "GitHub Actions Bot"
+
+    - name: Merge from upstream
+      shell: bash
+      env:
+        MERGE_FROM: ${{ needs.check.outputs.run == 'dev' && needs.check.outputs.dev_commit || format('refs/tags/{0}', needs.check.outputs.tag) }}
+      run: |
+        git checkout $BRANCH
+        git merge "${MERGE_FROM}" --no-edit
+        if [ "$BRANCH" = "master" ]; then
+          echo "New release on master, merging in origin/dev"
+          git merge origin/dev --no-edit
+        fi
+
+    - name: Setup Windows 10 SDK Action
+      uses: GuillaumeFalourd/setup-windows10-sdk-action@v2
+      with:
+        sdk-version: 22621
 
     - name: Checkout submodules
       shell: bash
@@ -145,6 +137,14 @@ jobs:
           core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
           core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
+    - name: Write Beta version to CMake
+      shell: bash
+      if: needs.check.outputs.run == 'dev'
+      env:
+        BETA_TAG: ${{ needs.check.outputs.beta_tag }}
+      run: |
+        sed -i "s/.*set(GWTOOLBOXDLL_VERSION_BETA \"[^\"]*\").*/set(GWTOOLBOXDLL_VERSION_BETA \"$BETA_TAG\")/" ./CMakeLists.txt
+
     - name: Create Build Environment
       # Some projects don't allow in-source building, so create a separate build directory
       # We'll use this as our working directory for all subsequent commands
@@ -171,12 +171,54 @@ jobs:
       with:
         path: ${{runner.workspace}}/GWToolboxpp/bin/RelWithDebInfo/
 
+    - name: Generate app token to access private plugins
+      id: private-plugins-app-token
+      continue-on-error: true
+      uses: actions/create-github-app-token@v3
+      with:
+        client-id: ${{ vars.PRIVATE_PLUGINS_CLIENT_ID }}
+        private-key: ${{ secrets.PRIVATE_PLUGINS_KEY }}
+        owner: gwtasdevs
+        repositories: DialogsPlugins
+
+    - name: Download private plugin assets
+      id: private-plugins-download
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.private-plugins-app-token.outputs.token }}
+        IS_DEV_BUILD: ${{ needs.check.outputs.run == 'dev' }}
+      run: |
+        if [ "$IS_DEV_BUILD" = "true" ]; then
+          TAG=$(gh api repos/gwtasdevs/DialogsPlugins/releases --jq '[.[] | select(.prerelease)][0].tag_name')
+        else
+          TAG=""
+        fi
+
+        mkdir -p ./output-artifacts
+        gh release download $TAG --repo gwtasdevs/DialogsPlugins --pattern "*.dll" --pattern "*.sigstore.json" --dir ./output-artifacts
+
+    - name: Install Cosign
+      uses: sigstore/cosign-installer@v4.1.1
+
+    - name: Attest private plugins
+      shell: bash
+      run: |
+        for file in ./output-artifacts/*.dll; do
+          cosign verify-blob \
+            --bundle "${file}.sigstore.json" \
+            --certificate-identity-regexp "https://github.com/gwtasdevs/DialogsPlugins" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$file"
+        done
+        rm -rf ./output-artifacts/*.sigstore.json
+
     - name: Check version and create release
       shell: bash
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         RELEASE_NOTES: ${{ needs.check.outputs.body }}
-        DEV_COMMIT: ${{ needs.check.outputs.run == 'dev' && needs.check.outputs.dev_commit || '' }}
+        DEV_COMMIT_SHORT: ${{ needs.check.outputs.run == 'dev' && needs.check.outputs.dev_commit_short || '' }}
+        BETA_TAG: ${{ needs.check.outputs.beta_tag }}
       run: |
         VERSION=$(sed -n 's/.*set(GWTOOLBOXDLL_VERSION "\(.*\)").*/\1/p' CMakeLists.txt | tr -d '\r')
         BETA=$(sed -n 's/.*set(GWTOOLBOXDLL_VERSION_BETA "\(.*\)").*/\1/p' CMakeLists.txt | tr -d '\r')
@@ -186,8 +228,8 @@ jobs:
           exit 1
         fi
 
-        if [ -n "$DEV_COMMIT" ]; then
-          TAG_NAME="commit-$DEV_COMMIT"
+        if [ -n "$DEV_COMMIT_SHORT" ]; then
+          TAG_NAME="${VERSION}_${BETA_TAG}"
         else
           if [ -z "$BETA" ]; then
             TAG_NAME="${VERSION}_Release"
@@ -198,15 +240,28 @@ jobs:
 
         echo "Detected version: $VERSION"
         echo "Detected beta: $BETA"
+        echo "Detected dev commit: $DEV_COMMIT_SHORT"
         echo "Target tag: $TAG_NAME"
 
         # Check if tag exists
         if git show-ref --tags --quiet --verify "refs/tags/$TAG_NAME"; then
-          echo "Tag $TAG_NAME already exists. Skipping release."
-          exit 0
+          if [ -n "$DEV_COMMIT_SHORT" ]; then
+            echo "Tag for dev release $TAG_NAME already exists. Skipping release."
+            exit 0
+          fi
+
+          echo "Tag $TAG_NAME already exists, deleting it..."
+          git tag -d $TAG_NAME
         fi
 
-        echo "Tag $TAG_NAME does not exist. Creating release."
+        if [ "$(git rev-parse $BRANCH)" != "$(git rev-parse origin/$BRANCH)" ]; then
+          echo "Pushing merge commit to $BRANCH ..."
+          git push origin $BRANCH
+        else
+          echo "Already up to date, no need to push $BRANCH"
+        fi
+
+        echo "Creating tag $TAG_NAME ..."
 
         # Create tag
         git config user.name "GitHub Actions"
@@ -214,27 +269,32 @@ jobs:
         git tag "$TAG_NAME"
         git push origin "$TAG_NAME"
 
+        echo "Tag $TAG_NAME pushed. Creating release..."
+
         # Prepare artifacts
-        BIN_DIR="${{runner.workspace}}/GWToolboxpp/bin/RelWithDebInfo"
-        cp "$BIN_DIR/GWToolboxdll.dll" .
-        cp "$BIN_DIR/DialogsWindow.dll" .
-        cp "$BIN_DIR/RawDialogs.dll" .
-        cp "$BIN_DIR/SpeedrunScriptingTools.dll" .
-        cp "${{runner.workspace}}/GWToolboxpp/Dependencies/GWCA/bin/gwca.dll" .
-        gzip -c "$BIN_DIR/GWToolboxdll.pdb" > GWToolboxdll.pdb.gz
+        mkdir -p ./output-artifacts
+        cp ./bin/RelWithDebInfo/*.dll ./output-artifacts
+        rm -f ./output-artifacts/ExamplePlugin.dll
+        cp ./Dependencies/GWCA/bin/gwca.dll ./output-artifacts
+        gzip -c "./bin/RelWithDebInfo/GWToolboxdll.pdb" > ./output-artifacts/GWToolboxdll.pdb.gz
 
         # Create release
-        if [ -n "$DEV_COMMIT" ]; then
-          DEV_COMMIT_SHORT=${DEV_COMMIT::7}
-
+        if [ -n "$DEV_COMMIT_SHORT" ]; then
           gh release create "$TAG_NAME" \
-            --title "commit-$DEV_COMMIT_SHORT" \
-            --notes "[$DEV_COMMIT_SHORT](https://github.com/gwdevhub/GWToolboxpp/commit/$DEV_COMMIT)" \
+            --repo gwtasdevs/GWToolboxpp \
+            --title "$TAG_NAME" \
+            --notes "[$DEV_COMMIT_SHORT](https://github.com/gwdevhub/GWToolboxpp/commit/$DEV_COMMIT_SHORT)" \
             --prerelease \
-            GWToolboxdll.dll DialogsWindow.dll RawDialogs.dll SpeedrunScriptingTools.dll GWToolboxdll.pdb.gz gwca.dll
+            ./output-artifacts/*
         else
           gh release create "$TAG_NAME" \
+            --repo gwtasdevs/GWToolboxpp \
             --title "$TAG_NAME" \
             --notes "$RELEASE_NOTES" \
-            GWToolboxdll.dll DialogsWindow.dll RawDialogs.dll SpeedrunScriptingTools.dll GWToolboxdll.pdb.gz gwca.dll
+            ./output-artifacts/*
         fi
+
+    - name: Attest
+      uses: actions/attest@v4
+      with:
+        subject-path: ./output-artifacts/*

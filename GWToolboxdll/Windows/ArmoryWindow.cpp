@@ -642,7 +642,7 @@ namespace GWArmory {
         bool value_changed = false;
         const char* label_display_end = ImGui::FindRenderedTextEnd(label);
 
-        if (ImGui::ColorButton("##ColorButton", current_color, *color == GW::DyeColor::None ? ImGuiColorEditFlags_AlphaPreview : 0)) {
+        if (ImGui::ColorButton("##ColorButton", current_color, 0)) {
             ImGui::OpenPopup("picker");
         }
 
@@ -652,7 +652,7 @@ namespace GWArmory {
                 ImGui::Separator();
             }
             size_t palette_index;
-            if (ImGui::ColorPalette("##picker", &palette_index, palette, _countof(palette), 7, ImGuiColorEditFlags_AlphaPreview)) {
+            if (ImGui::ColorPalette("##picker", &palette_index, palette, _countof(palette), 7, ImGuiColorEditFlags_NoAlpha)) {
                 if (palette_index < _countof(palette)) {
                     *color = DyeColorFromInt(palette_index + static_cast<size_t>(GW::DyeColor::Blue));
                 }
@@ -707,7 +707,7 @@ namespace GWArmory {
         const auto armor_item = (Armor*)wparam;
         ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0, 0));
         ImGui::PushStyleColor(ImGuiCol_Button, ImColor(0, 0, 0, 0).Value);
-        const auto size = ImVec2(250.0f * ImGui::GetIO().FontGlobalScale, 0);
+        const auto size = ImVec2(250.0f * ImGui::FontScale(), 0);
         ImGui::TextUnformatted(armor_item->label);
         const auto chat_cmd = GetChatCommand(armor_item, &context_menu_piece);
         ImGui::TextDisabled(chat_cmd.c_str());
@@ -750,7 +750,7 @@ namespace GWArmory {
         const auto player_piece = &imgui_armor_pieces[slot];
         bool value_changed = false;
 
-        const float scale = ImGui::GetIO().FontGlobalScale;
+        const float scale = ImGui::FontScale();
 
         ImGui::Separator();
         ImGui::TextUnformatted(GetSlotName(slot));
@@ -892,7 +892,7 @@ namespace GWArmory {
 
     enum SnapshotState { Idle, Pending, WaitingForDecode };
     SnapshotState state = SnapshotState::Idle;
-    std::map<uint32_t, GuiUtils::EncString*> pending_decodes;
+    std::map<uint32_t, std::unique_ptr<GuiUtils::EncString>> pending_decodes;
     std::map<uint32_t, GW::Item*> pending_items;
 
     void SnapshotToFile()
@@ -901,9 +901,6 @@ namespace GWArmory {
             case SnapshotState::Idle:
                 return;
             case SnapshotState::Pending: {
-                for (auto& it : pending_decodes) {
-                    delete it.second;
-                }
                 pending_decodes.clear();
                 pending_items.clear();
                 for (uint8_t i = (uint8_t)GW::Constants::Bag::Backpack; i < (uint8_t)GW::Constants::Bag::Max; i++) {
@@ -912,7 +909,7 @@ namespace GWArmory {
                     for (auto item : bag->items) {
                         if (!(item && IsWeapon(item->type))) continue;
                         if (pending_items.contains(item->model_file_id)) continue;
-                        pending_decodes[item->model_file_id] = new GuiUtils::EncString(item->name_enc);
+                        pending_decodes[item->model_file_id] = std::make_unique<GuiUtils::EncString>(item->name_enc);
                         pending_decodes[item->model_file_id]->string(); // Trigger decode
                         pending_items[item->model_file_id] = item;
                     }
@@ -955,9 +952,6 @@ namespace GWArmory {
                 }
 
                 // Cleanup
-                for (auto& it : pending_decodes) {
-                    delete it.second;
-                }
                 pending_decodes.clear();
                 pending_items.clear();
                 state = SnapshotState::Idle;

@@ -120,35 +120,28 @@ namespace {
         uint32_t uses = 0;
         uint32_t quantity = 0;
         bool set(const InventoryManager::Item* item = nullptr);
-        GuiUtils::EncString* name = nullptr;
-        GuiUtils::EncString* desc = nullptr;
-        GuiUtils::EncString* wiki_name = nullptr;
-        GuiUtils::EncString* single_item_name = nullptr;
+        std::unique_ptr<GuiUtils::EncString> name;
+        std::unique_ptr<GuiUtils::EncString> desc;
+        std::unique_ptr<GuiUtils::EncString> wiki_name;
+        std::unique_ptr<GuiUtils::EncString> single_item_name;
 
-        class PluralEncString : public GuiUtils::EncString {
-        protected:
-            void sanitise() override;
-        };
-
-        PluralEncString* plural_item_name = nullptr;
+        std::unique_ptr<GuiUtils::EncString> plural_item_name;
 
         InventoryManager::Item* item() const;
         PendingItem()
         {
-            single_item_name = new GuiUtils::EncString{};
-            plural_item_name = new PluralEncString{};
-            name = new GuiUtils::EncString{};
-            desc = new GuiUtils::EncString{};
-            wiki_name = new GuiUtils::EncString{};
+            single_item_name = std::make_unique<GuiUtils::EncString>();
+            plural_item_name = std::make_unique<GuiUtils::EncString>();
+            plural_item_name->SetSanitiseCallback([](std::wstring s) {
+                s = TextUtils::StripTags(TextUtils::Replace(s, L"<brx>", L"\n"));
+                if (s.size() > 2) s = s.substr(2);
+                return s;
+            });
+            name = std::make_unique<GuiUtils::EncString>();
+            desc = std::make_unique<GuiUtils::EncString>();
+            wiki_name = std::make_unique<GuiUtils::EncString>();
         }
-        ~PendingItem()
-        {
-            single_item_name->Release();
-            plural_item_name->Release();
-            name->Release();
-            desc->Release();
-            wiki_name->Release();
-        }
+        ~PendingItem() = default;
     };
     struct PotentialItem : PendingItem {
         bool proceed = true;
@@ -631,37 +624,6 @@ namespace {
             return true;
         }
         return true;
-    }
-
-    // Move a whole stack into/out of storage
-    uint16_t move_item(const InventoryManager::Item* item, const uint16_t quantity = 1000u)
-    {
-        // Expected behaviors
-        //  When clicking on item in inventory
-        //   case storage close (or move_item_to_current_storage_pane = false):
-        //    - If the item is a material, it look if it can move it to the material page.
-        //    - If the item is stackable, search in all the storage if there is already similar items and completes the stack
-        //    - If not everything was moved, move the remaining in the first empty slot of the storage.
-        //   case storage open:
-        //    - If the item is a material, it look if it can move it to the material page.
-        //    - If the item is stackable, search for incomplete stacks in the current storage page and completes them
-        //    - If not everything was moved, move the remaining in the first empty slot of the current page.
-
-        // @Cleanup: Bad
-        if (item->model_file_id == 0x0002f301) {
-            Log::Error("Ctrl+click doesn't work with birthday presents yet");
-            return 0;
-        }
-        const bool is_inventory_item = item->IsInventoryItem();
-        uint16_t remaining = std::min<uint16_t>(item->quantity, quantity);
-        if (is_inventory_item) {
-            remaining -= move_item_to_storage(item, remaining);
-        }
-        else {
-            remaining -= move_item_to_inventory(item, remaining);
-        }
-        pending_moves.clear();
-        return remaining;
     }
 
     GW::Merchant::TransactionType requesting_quote_type = (GW::Merchant::TransactionType)0;
@@ -1221,7 +1183,7 @@ namespace {
                 }
                 stack_prompt_item_id = 0;
                 status->blocked = true;
-                move_item((InventoryManager::Item*)GW::Items::GetItemById(packet->item_id), static_cast<uint16_t>(packet->quantity));
+                InventoryManager::MoveItem((InventoryManager::Item*)GW::Items::GetItemById(packet->item_id), static_cast<uint16_t>(packet->quantity));
             } break;
             // Quote for item has been received
             case GW::UI::UIMessage::kVendorQuote: {
@@ -1550,7 +1512,7 @@ namespace {
                 pending_salvage_at = TIMER_INIT();
             }
             // Auto accept "you can only salvage materials with a lesser salvage kit"
-            GW::UI::ButtonClick(GW::UI::GetChildFrame(GW::UI::GetFrameByLabel(L"Game"), 0x6, 0x6d, 0x6));
+            GW::UI::ButtonClick(GW::UI::GetChildFrame(GW::UI::GetFrameByLabel(L"Game"), 0x6, 0x6e, 0x6));
             return;
         }
         is_salvaging = false;
@@ -1593,7 +1555,7 @@ namespace {
             } break;
             case PendingTransaction::State::Quoting:
                 // Check for timeout having asked for a quote.
-                if (TIMER_DIFF(pending_transaction.state_timestamp) > 1000) {
+                if (TIMER_DIFF(pending_transaction.state_timestamp) > 3000) {
                     if (pending_transaction.retries > 0) {
                         Log::ErrorW(L"Timeout waiting for item quote");
                         CancelTransaction();
@@ -1620,7 +1582,7 @@ namespace {
             } break;
             case PendingTransaction::State::Transacting:
                 // Check for timeout having agreed to buy or sell
-                if (TIMER_DIFF(pending_transaction.state_timestamp) > 1000) {
+                if (TIMER_DIFF(pending_transaction.state_timestamp) > 3000) {
                     if (pending_transaction.retries > 0) {
                         Log::ErrorW(L"Timeout waiting for item sell/buy");
                         CancelTransaction();
@@ -2077,9 +2039,9 @@ void InventoryManager::DrawSettingsInternal()
     ImGui::Checkbox("Identify All with Control+Click", &identify_all_on_ctrl_click);
     ImGui::ShowHelp("Control+Click an identification kit to identify all items with it");
     ImGui::Checkbox("Auto re-use salvage kit", &auto_reuse_salvage_kit);
-    ImGui::ShowHelp("When a salvage kit is used up immediately by salvaging without a popup,\ncheck this box to 're-use' the kit ready for the next item.");
+    ImGui::ShowHelp("When a salvage kit is used without right-clicking,\nthe kit will immediately be readied for 're-use' after each item has been salvaged.");
     ImGui::Checkbox("Auto re-use identification kit", &auto_reuse_id_kit);
-    ImGui::ShowHelp("When a identification kit is used up immediately by identifying an item,\ncheck this box to 're-use' the kit ready for the next item.");
+    ImGui::ShowHelp("When an identification kit is used without right-clicking,\nthe kit will immediately be readied for 're-use' after each item has been identified.");
     DrawMerchantHiddenItemsSettings();
 }
 
@@ -2226,7 +2188,7 @@ void InventoryManager::Draw(IDirect3DDevice9*)
             // Are you sure prompt; at this point we've already got the list of items via FetchPotentialItems()
             ImGui::Text("You're about to salvage %d item%s:", potential_salvage_all_items.size(), potential_salvage_all_items.size() == 1 ? "" : "s");
             ImGui::TextDisabled("Untick an item to skip salvaging");
-            const float& font_scale = ImGui::GetIO().FontGlobalScale;
+            const float& font_scale = ImGui::FontScale();
             const float wiki_btn_width = 50.0f * font_scale;
             static float longest_item_name_length = 280.0f * font_scale;
             const GW::Bag* bag = nullptr;
@@ -2345,7 +2307,7 @@ bool InventoryManager::DrawItemContextMenu(const bool open)
     }
     ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0, 0));
     ImGui::PushStyleColor(ImGuiCol_Button, ImColor(0, 0, 0, 0).Value);
-    const auto size = ImVec2(250.0f * ImGui::GetIO().FontGlobalScale, 0);
+    const auto size = ImVec2(250.0f * ImGui::FontScale(), 0);
     /*IDirect3DTexture9** tex = Resources::GetItemImage(context_item.wiki_name.wstring());
     if (tex && *tex) {
         const float text_height = ImGui::CalcTextSize(" ").y;
@@ -2360,7 +2322,7 @@ bool InventoryManager::DrawItemContextMenu(const bool open)
     if (GW::Map::GetInstanceType() == GW::Constants::InstanceType::Outpost) {
         if (bag && can_use_storage && ImGui::Button(context_item_actual->IsInventoryItem() ? "Store Item" : "Withdraw Item", size)) {
             ImGui::CloseCurrentPopup();
-            move_item(context_item_actual);
+            MoveItem(context_item_actual);
             goto end_popup;
         }
         char c_all_label[128];
@@ -2581,6 +2543,37 @@ bool InventoryManager::DrawItemContextMenu(const bool open)
     return true;
 }
 
+// Move a whole stack into/out of storage
+uint16_t InventoryManager::MoveItem(const Item* item, const uint16_t quantity)
+{
+    // Expected behaviors
+    //  When clicking on item in inventory
+    //   case storage close (or move_item_to_current_storage_pane = false):
+    //    - If the item is a material, it look if it can move it to the material page.
+    //    - If the item is stackable, search in all the storage if there is already similar items and completes the stack
+    //    - If not everything was moved, move the remaining in the first empty slot of the storage.
+    //   case storage open:
+    //    - If the item is a material, it look if it can move it to the material page.
+    //    - If the item is stackable, search for incomplete stacks in the current storage page and completes them
+    //    - If not everything was moved, move the remaining in the first empty slot of the current page.
+
+    // @Cleanup: Bad
+    if (item->model_file_id == 0x0002f301) {
+        Log::Error("Ctrl+click doesn't work with birthday presents yet");
+        return 0;
+    }
+    const bool is_inventory_item = item->IsInventoryItem();
+    uint16_t remaining = std::min<uint16_t>(item->quantity, quantity);
+    if (is_inventory_item) {
+        remaining -= move_item_to_storage(item, remaining);
+    }
+    else {
+        remaining -= move_item_to_inventory(item, remaining);
+    }
+    pending_moves.clear();
+    return remaining;
+}
+
 void InventoryManager::ItemClickCallback(GW::HookStatus* status, GW::UI::UIPacket::kMouseAction* action, GW::Item* gw_item)
 {
 #pragma warning(push)
@@ -2624,7 +2617,7 @@ void InventoryManager::ItemClickCallback(GW::HookStatus* status, GW::UI::UIPacke
                         prompt_split_stack(item);
                     }
                     else {
-                        move_item(item);
+                        MoveItem(item);
                     }
                     return;
                 }
@@ -2948,13 +2941,3 @@ bool PendingTransaction::selling()
     return type == GW::Merchant::TransactionType::MerchantSell || type == GW::Merchant::TransactionType::TraderSell;
 }
 
-void PendingItem::PluralEncString::sanitise()
-{
-    if (sanitised) {
-        return;
-    }
-    EncString::sanitise();
-    if (sanitised) {
-        decoded_ws = decoded_ws.substr(2);
-    }
-}

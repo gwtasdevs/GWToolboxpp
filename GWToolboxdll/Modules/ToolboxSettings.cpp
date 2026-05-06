@@ -39,7 +39,10 @@
 #include <Modules/FpsFix.h>
 #include <Modules/GamepadModule.h>
 #include <Modules/CameraUnlockModule.h>
+#include <Modules/LoginModule.h>
+#include <Widgets/VanquishMapOverlayWidget.h>
 
+#include <Windows/AccountInventoryWindow.h>
 #include <Windows/PconsWindow.h>
 #include <Windows/HotkeysWindow.h>
 #include <Windows/BuildsWindow.h>
@@ -74,6 +77,7 @@
 #include <Windows/TargetInfoWindow.h>
 #include <Windows/GWMarketWindow.h>
 #include <Windows/InventorySorting.h>
+#include <Windows/PerformanceWindow.h>
 
 #include <Widgets/TimerWidget.h>
 #include <Widgets/HealthWidget.h>
@@ -98,7 +102,7 @@
 #include "ToolboxSettings.h"
 
 
-#define USE_OBFUSCATOR _DEBUG
+#define USE_OBFUSCATOR 1
 #if USE_OBFUSCATOR
 #include <Modules/Obfuscator.h>
 #endif
@@ -160,6 +164,7 @@ namespace {
         ItemTooltipModule::Instance(),
         ResignLogModule::Instance(),
         QuestModule::Instance(),
+        VanquishMapOverlayWidget::Instance(),
         PartyBroadcast::Instance(),
         CodeOptimiserModule::Instance(),
 #if 0
@@ -217,7 +222,10 @@ namespace {
         DropTrackerWindow::Instance(),
         GWMarketWindow::Instance(),
         InventorySorting::Instance(),
-        FavorTracker::Instance()
+        FavorTracker::Instance(),
+        LoginModule::Instance(),
+        {AccountInventoryWindow::Instance(), false},
+        {PerformanceWindow::Instance(), false}
     };
 
     bool modules_sorted = false;
@@ -264,7 +272,7 @@ void ToolboxSettings::DrawSettingsInternal()
 
     ImGui::Checkbox("Save Location Data", &save_location_data);
     ImGui::ShowHelp("Toolbox will save your location every second in a file in Settings Folder.");
-    const auto cols = static_cast<size_t>(floor(ImGui::GetWindowWidth() / (170.0f * ImGui::GetIO().FontGlobalScale)));
+    const auto cols = static_cast<size_t>(floor(ImGui::GetWindowWidth() / (170.0f * ImGui::FontScale())));
 
     ImGui::Separator();
     ImGui::PushID("global_enable");

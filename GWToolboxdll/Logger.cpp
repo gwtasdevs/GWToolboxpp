@@ -44,13 +44,12 @@ namespace {
                 color = GWTOOLBOX_INFO_COL;
                 break;
         }
-        const size_t len = 5 + wcslen(GWTOOLBOX_SENDER) + 4 + 13 + wcslen(message) + 4 + 1;
-        auto to_send = new wchar_t[len];
-        ASSERT(swprintf(to_send, len, L"<a=1>%s</a><c=#%6X>: %s</c>", GWTOOLBOX_SENDER, color, message) != -1);
+        auto to_send = new std::wstring();
+        to_send->assign(std::format(L"<a=1>{}</a><c=#{:X}>: {}</c>", GWTOOLBOX_SENDER, color, message));
 
         GW::GameThread::Enqueue([to_send, add_to_log = log_transient] {
-            WriteChat(GWTOOLBOX_CHAN, to_send, nullptr, add_to_log);
-            delete[] to_send;
+            WriteChat(GWTOOLBOX_CHAN, to_send->c_str(), nullptr, add_to_log);
+            delete to_send;
         });
 
         const wchar_t* c = [](const LogType log_type) -> const wchar_t* {
@@ -70,31 +69,21 @@ namespace {
 
     void _vchatlogW(const LogType log_type, const wchar_t* format, const va_list argv)
     {
-        wchar_t buf1[512];
-        vswprintf(buf1, 512, format, argv);
-        _chatlog(log_type, buf1);
+        const std::wstring buf = TextUtils::VStrPrintfW(format, argv);
+        if (!buf.empty()) _chatlog(log_type, buf.c_str());
     }
 
     void _vchatlog(const LogType log_type, const char* format, const va_list argv)
     {
-        const size_t len = vsnprintf(nullptr, 0, format, argv);
-        const auto buf = new char[len + 1];
-        vsnprintf(buf, len + 1, format, argv);
-        const std::wstring sbuf2 = TextUtils::StringToWString(buf);
-        delete[] buf;
-        _chatlog(log_type, sbuf2.c_str());
+        const std::string buf = TextUtils::VStrPrintf(format, argv);
+        if (!buf.empty()) _chatlog(log_type, TextUtils::StringToWString(buf).c_str());
     }
-
     void PrintTimestamp()
     {
-        // note - why not just use current_zone()->to_local(now()) ?
-        // this has a small but non trivial perf cost - since the time zone conversion can depend on the time point (think daylight saving time starting or ending),
-        // to_local has to do some logic to figure out how to convert every single time point independently
-        // for logging purposes, we don't really care about accurate time zone conversions - in fact, monotonicity of timestamps is more convenient than having an accurate wall-clock time
-        // consider that if DST changes mid session, we'd rather have some timestamps off by an hour than have gaps or non-monotonicity in timestamps
-        // so just cache the timezone offset at first call and use it forever
-        static const auto tzoffset = std::chrono::current_zone()->get_info(std::chrono::system_clock::now()).offset;
-        std::print(logfile, "[{:%T}] ", std::chrono::time_point_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() + tzoffset));
+        if (!logfile) return;
+        const auto now = std::chrono::floor<std::chrono::milliseconds>(std::chrono::system_clock::now());
+        const auto ms = now.time_since_epoch().count() % 1000;
+        fprintf(logfile, "[%s] ", TextUtils::TimeToString(std::chrono::system_clock::to_time_t(now), true, static_cast<int>(ms)).c_str());
     }
 
 

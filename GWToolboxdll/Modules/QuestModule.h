@@ -1,4 +1,5 @@
 #pragma once
+#include <memory>
 #include <IconsFontAwesome5.h>
 
 #include <ToolboxModule.h>
@@ -15,29 +16,17 @@ namespace GuiUtils {
 
 struct QuestObjective {
     QuestObjective(GW::Constants::QuestID quest_id, const wchar_t* objective_enc, bool is_completed);
-    ~QuestObjective();
+    ~QuestObjective() = default;
     // copy not allowed
     QuestObjective(const QuestObjective& other) = delete;
-    QuestObjective(QuestObjective&& other) noexcept {
-        quest_id = other.quest_id;
-        is_completed = other.is_completed;
-        objective_enc = other.objective_enc;
-        other.objective_enc = nullptr;
-    }
+    QuestObjective(QuestObjective&& other) noexcept = default;
 
     // copy not allowed
     QuestObjective& operator=(const QuestObjective& other) = delete;
-    QuestObjective& operator=(QuestObjective&& other) noexcept
-    {
-        quest_id = other.quest_id;
-        is_completed = other.is_completed;
-        objective_enc = other.objective_enc;
-        other.objective_enc = nullptr;
-        return *this;
-    }
+    QuestObjective& operator=(QuestObjective&& other) noexcept = default;
 
     GW::Constants::QuestID quest_id = (GW::Constants::QuestID)0;
-    GuiUtils::EncString* objective_enc = nullptr;
+    std::unique_ptr<GuiUtils::EncString> objective_enc;
     bool is_completed = false;
 };
 
@@ -66,6 +55,12 @@ public:
     static const GW::Quest* GetCustomQuestMarker();
 
     static void SetCustomQuestMarker(const GW::Vec2f& world_pos, bool set_active = false);
+    static void ClearCustomQuestMarker();
+
+    // Callback fired when the custom quest marker is set or cleared.
+    using CustomMarkerChangedCallback = void(*)();
+    static void AddCustomMarkerChangedCallback(CustomMarkerChangedCallback cb);
+    static void RemoveCustomMarkerChangedCallback(CustomMarkerChangedCallback cb);
     // Fake an action of the user selecting an active quest, without making any server request.
     static bool SetActiveQuestId(GW::Constants::QuestID quest_id, bool notify_server = true);
 

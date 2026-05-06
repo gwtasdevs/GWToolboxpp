@@ -22,7 +22,6 @@ constexpr const wchar_t* INI_FILENAME = L"healthlog.ini";
 constexpr const char* IniSection = "health";
 
 namespace {
-
     GW::HookEntry ChatCmd_HookEntry;
 
     // damage values
@@ -32,7 +31,7 @@ namespace {
     uint32_t total_healing = 0;
 
     std::map<DWORD, uint32_t> hp_map{};
-    
+
 
     // main routine variables
     bool in_explorable = false;
@@ -52,28 +51,38 @@ namespace {
     bool print_by_click = false;
     bool overlay_party_window = false;
 
+    bool show_damage = true;
+    bool show_healing = false;
+
     // Distance away from the party window on the x axis; used with snap to party window
     int user_offset = 0;
 
     GW::HookEntry GenericModifier_Entry;
     GW::HookEntry MapLoaded_Entry;
 
-    float GetPartOfTotal(uint32_t dmg) {
+    float GetPartOfTotal(uint32_t dmg)
+    {
         if (total == 0) {
             return 0;
         }
         return static_cast<float>(dmg) / total;
     }
-    float GetPercentageOfTotal(const uint32_t dmg) {
+
+    float GetPercentageOfTotal(const uint32_t dmg)
+    {
         return GetPartOfTotal(dmg) * 100.0f;
     }
-    float GetPartOfTotalHealing(uint32_t heal) {
+
+    float GetPartOfTotalHealing(uint32_t heal)
+    {
         if (total_healing == 0) {
             return 0;
         }
         return static_cast<float>(heal) / total_healing;
     }
-    float GetPercentageOfTotalHealing(const uint32_t heal) {
+
+    float GetPercentageOfTotalHealing(const uint32_t heal)
+    {
         return GetPartOfTotalHealing(heal) * 100.0f;
     }
 }
@@ -104,8 +113,94 @@ struct PartyDamage::PlayerDamage {
 };
 
 std::vector<PartyDamage::PlayerDamage> PartyDamage::damage;
+std::vector<PartyDamage::PlayerDamage> PartyDamage::departed_damage;
+std::vector<uint32_t> PartyDamage::prev_party_agent_ids;
 
-void PartyDamage::WriteDamageOf(size_t index, uint32_t rank) {
+void PartyDamage::ReconcileDamageIndices()
+{
+    if (party_agent_ids_by_index == prev_party_agent_ids)
+        return;
+    prev_party_agent_ids = party_agent_ids_by_index;
+
+    // Map old agent_id -> index in current damage array
+    std::unordered_map<uint32_t, uint32_t> old_agent_to_idx;
+    for (uint32_t i = 0; i < damage.size(); i++) {
+        if (damage[i].agent_id != 0)
+            old_agent_to_idx[damage[i].agent_id] = i;
+    }
+
+    // Also index departed entries by name for map-transition recovery
+    std::unordered_map<std::wstring, size_t> departed_by_name;
+    for (size_t i = 0; i < departed_damage.size(); i++) {
+        if (!departed_damage[i].name.empty())
+            departed_by_name[departed_damage[i].name] = i;
+    }
+
+    std::vector<PlayerDamage> new_damage(party_agent_ids_by_index.size());
+    std::unordered_set<uint32_t> claimed_old_indices;
+
+    for (const auto& [agent_id, new_idx] : party_indeces_by_agent_id) {
+        if (new_idx >= new_damage.size()) continue;
+        if (new_idx >= pets_start_idx) continue;
+
+        // Try matching by agent_id first
+        auto it = old_agent_to_idx.find(agent_id);
+        if (it != old_agent_to_idx.end()) {
+            new_damage[new_idx] = damage[it->second];
+            new_damage[new_idx].agent_id = agent_id;
+            claimed_old_indices.insert(it->second);
+            continue;
+        }
+
+        // Agent_id not found (map transition gives new IDs). Try by name.
+        if (new_idx < party_names_by_index.size()) {
+            const auto& name = party_names_by_index[new_idx]->wstring();
+            if (!name.empty()) {
+                // Check departed entries
+                auto dit = departed_by_name.find(name);
+                if (dit != departed_by_name.end()) {
+                    new_damage[new_idx] = departed_damage[dit->second];
+                    new_damage[new_idx].agent_id = agent_id;
+                    departed_damage[dit->second].Reset();
+                    continue;
+                }
+                // Check old damage entries by name
+                for (uint32_t i = 0; i < damage.size(); i++) {
+                    if (!claimed_old_indices.contains(i) && damage[i].name == name && !damage[i].name.empty()) {
+                        new_damage[new_idx] = damage[i];
+                        new_damage[new_idx].agent_id = agent_id;
+                        claimed_old_indices.insert(i);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // Move unclaimed entries with data to departed
+    for (uint32_t i = 0; i < damage.size(); i++) {
+        if (claimed_old_indices.contains(i)) continue;
+        if (damage[i].damage > 0 || damage[i].healing > 0)
+            departed_damage.push_back(std::move(damage[i]));
+    }
+
+    damage = std::move(new_damage);
+
+    // Recompute totals
+    total = 0;
+    total_healing = 0;
+    for (const auto& entry : damage) {
+        total += entry.damage;
+        total_healing += entry.healing;
+    }
+    for (const auto& entry : departed_damage) {
+        total += entry.damage;
+        total_healing += entry.healing;
+    }
+}
+
+void PartyDamage::WriteDamageOf(size_t index, uint32_t rank)
+{
     if (index >= damage.size()) {
         return;
     }
@@ -135,36 +230,36 @@ void PartyDamage::WriteDamageOf(size_t index, uint32_t rank) {
     wchar_t buffer[buffer_size];
 
     const bool has_damage = damage[index].damage > 0;
-    const bool has_healing = damage[index].healing > 0;
+    const bool has_healing = show_healing && damage[index].healing > 0;
 
     if (has_damage && has_healing) {
         swprintf_s(buffer, buffer_size, L"#%2d ~ %ls/%ls %ls ~ Dmg: %3.2f%% (%d) ~ Heal: %3.2f%% (%d)",
-            rank,
-            GetWProfessionAcronym(damage[index].primary),
-            GetWProfessionAcronym(damage[index].secondary),
-            damage[index].name.c_str(),
-            GetPercentageOfTotal(damage[index].damage),
-            damage[index].damage,
-            GetPercentageOfTotalHealing(damage[index].healing),
-            damage[index].healing);
+                   rank,
+                   GetWProfessionAcronym(damage[index].primary),
+                   GetWProfessionAcronym(damage[index].secondary),
+                   damage[index].name.c_str(),
+                   GetPercentageOfTotal(damage[index].damage),
+                   damage[index].damage,
+                   GetPercentageOfTotalHealing(damage[index].healing),
+                   damage[index].healing);
     }
     else if (has_damage) {
         swprintf_s(buffer, buffer_size, L"#%2d ~ %ls/%ls %ls ~ Dmg: %3.2f%% (%d)",
-            rank,
-            GetWProfessionAcronym(damage[index].primary),
-            GetWProfessionAcronym(damage[index].secondary),
-            damage[index].name.c_str(),
-            GetPercentageOfTotal(damage[index].damage),
-            damage[index].damage);
+                   rank,
+                   GetWProfessionAcronym(damage[index].primary),
+                   GetWProfessionAcronym(damage[index].secondary),
+                   damage[index].name.c_str(),
+                   GetPercentageOfTotal(damage[index].damage),
+                   damage[index].damage);
     }
     else if (has_healing) {
         swprintf_s(buffer, buffer_size, L"#%2d ~ %ls/%ls %ls ~ Heal: %3.2f%% (%d)",
-            rank,
-            GetWProfessionAcronym(damage[index].primary),
-            GetWProfessionAcronym(damage[index].secondary),
-            damage[index].name.c_str(),
-            GetPercentageOfTotalHealing(damage[index].healing),
-            damage[index].healing);
+                   rank,
+                   GetWProfessionAcronym(damage[index].primary),
+                   GetWProfessionAcronym(damage[index].secondary),
+                   damage[index].name.c_str(),
+                   GetPercentageOfTotalHealing(damage[index].healing),
+                   damage[index].healing);
     }
     else {
         return; // Nothing to report
@@ -172,36 +267,48 @@ void PartyDamage::WriteDamageOf(size_t index, uint32_t rank) {
 
     send_queue.push(buffer);
 }
-void PartyDamage::WritePartyDamage() {
+
+void PartyDamage::WritePartyDamage()
+{
+    // Temporarily append departed members so WriteDamageOf can index them
+    const size_t base = damage.size();
+    for (const auto& entry : departed_damage) {
+        if (entry.damage > 0 || entry.healing > 0)
+            damage.push_back(entry);
+    }
+
     std::vector<size_t> idx(damage.size());
     for (size_t i = 0; i < damage.size(); ++i) {
         idx[i] = i;
     }
     sort(idx.begin(), idx.end(), [](const size_t i1, const size_t i2) {
         return damage[i1].damage > damage[i2].damage;
-        });
+    });
 
     for (size_t i = 0; i < idx.size(); ++i) {
         WriteDamageOf(idx[i], i + 1);
     }
     send_queue.push(L"Total ~ Dmg: " + std::to_wstring(total) + L" ~ Heal: " + std::to_wstring(total_healing));
+
+    // Remove the temporarily appended entries
+    damage.resize(base);
 }
 
 void PartyDamage::MapLoadedCallback(GW::HookStatus*, const GW::Packet::StoC::MapLoaded*)
 {
     switch (GW::Map::GetInstanceType()) {
-    case GW::Constants::InstanceType::Outpost:
-        in_explorable = false;
-        break;
-    case GW::Constants::InstanceType::Explorable:
-        if (!in_explorable) {
-            in_explorable = true;
-            ResetDamage();
-        }
-        break;
-    case GW::Constants::InstanceType::Loading:
-    default:
-        break;
+        case GW::Constants::InstanceType::Outpost:
+            in_explorable = false;
+            break;
+        case GW::Constants::InstanceType::Explorable:
+            if (!in_explorable) {
+                in_explorable = true;
+                ResetDamage();
+            }
+            break;
+        case GW::Constants::InstanceType::Loading:
+        default:
+            break;
     }
 }
 
@@ -209,12 +316,12 @@ void PartyDamage::DamagePacketCallback(GW::HookStatus*, const GW::Packet::StoC::
 {
     // ignore non-damage/heal packets
     switch (packet->type) {
-    case GW::Packet::StoC::P156_Type::damage:
-    case GW::Packet::StoC::P156_Type::critical:
-    case GW::Packet::StoC::P156_Type::armorignoring:
-        break;
-    default:
-        return;
+        case GW::Packet::StoC::P156_Type::damage:
+        case GW::Packet::StoC::P156_Type::critical:
+        case GW::Packet::StoC::P156_Type::armorignoring:
+            break;
+        default:
+            return;
     }
 
     const bool is_heal = packet->value > 0;
@@ -242,21 +349,21 @@ void PartyDamage::DamagePacketCallback(GW::HookStatus*, const GW::Packet::StoC::
         if (target->login_number != 0)
             return; // Ignore damage inflicted on other players such as Life bond or sacrifice
         switch (target->allegiance) {
-        case GW::Constants::Allegiance::Ally_NonAttackable:
-        case GW::Constants::Allegiance::Spirit_Pet:
-        case GW::Constants::Allegiance::Minion:
-            return; // ignore damage inflicted to allies in general
+            case GW::Constants::Allegiance::Ally_NonAttackable:
+            case GW::Constants::Allegiance::Spirit_Pet:
+            case GW::Constants::Allegiance::Minion:
+                return; // ignore damage inflicted to allies in general
         }
     }
     else {
         // For healing: target must be ally
         switch (target->allegiance) {
-        case GW::Constants::Allegiance::Ally_NonAttackable:
-        case GW::Constants::Allegiance::Spirit_Pet:
-        case GW::Constants::Allegiance::Minion:
-            break; // allow healing to allies
-        default:
-            return; // ignore healing to enemies
+            case GW::Constants::Allegiance::Ally_NonAttackable:
+            case GW::Constants::Allegiance::Spirit_Pet:
+            case GW::Constants::Allegiance::Minion:
+                break; // allow healing to allies
+            default:
+                return; // ignore healing to enemies
         }
     }
 
@@ -312,8 +419,12 @@ void PartyDamage::ResetDamage()
     for (auto& entry : damage) {
         entry.Reset();
     }
+    departed_damage.clear();
+    prev_party_agent_ids.clear();
 }
-void PartyDamage::WriteOwnDamage() {
+
+void PartyDamage::WriteOwnDamage()
+{
     uint32_t my_index = 0;
     const auto entry = GetDamageByAgentId(GW::Agents::GetControlledCharacterId(), &my_index);
     if (entry)
@@ -345,7 +456,8 @@ void CHAT_CMD_FUNC(PartyDamage::CmdDamage)
     }
 }
 
-PartyDamage::PlayerDamage* PartyDamage::GetDamageByAgentId(uint32_t agent_id, uint32_t* party_index_out) {
+PartyDamage::PlayerDamage* PartyDamage::GetDamageByAgentId(uint32_t agent_id, uint32_t* party_index_out)
+{
     const auto found = party_indeces_by_agent_id.find(agent_id);
     if (found == party_indeces_by_agent_id.end())
         return nullptr;
@@ -366,7 +478,7 @@ void PartyDamage::Initialize()
     total = 0;
     send_timer = TIMER_INIT();
 
-    GW::StoC::RegisterPacketCallback<GW::Packet::StoC::GenericModifier>(&GenericModifier_Entry, DamagePacketCallback,0x8000);
+    GW::StoC::RegisterPacketCallback<GW::Packet::StoC::GenericModifier>(&GenericModifier_Entry, DamagePacketCallback, 0x8000);
     GW::StoC::RegisterPacketCallback<GW::Packet::StoC::MapLoaded>(&MapLoaded_Entry, MapLoadedCallback, 0x8000);
 
     GW::Chat::CreateCommand(&ChatCmd_HookEntry, L"dmg", CmdDamage);
@@ -381,9 +493,6 @@ void PartyDamage::Terminate()
     GW::StoC::RemoveCallbacks(&MapLoaded_Entry);
     GW::Chat::DeleteCommand(&ChatCmd_HookEntry);
 
-    for (auto str : party_names_by_index) {
-        str->Release();
-    }
     party_names_by_index.clear();
 
     if (inifile) {
@@ -414,21 +523,46 @@ void PartyDamage::Update(const float)
         }
     }
     FetchPartyInfo();
+    ReconcileDamageIndices();
 
-    // Update names for damage entries whose names weren't decoded yet
+    // Update names for damage entries whose names weren't decoded yet,
+    // and restore departed entries when names become available
     for (const auto& [agent_id, party_idx] : party_indeces_by_agent_id) {
         if (party_idx >= damage.size() || party_idx >= party_names_by_index.size())
             continue;
-        if (damage[party_idx].agent_id == 0 || !damage[party_idx].name.empty())
-            continue;
         const auto& decoded = party_names_by_index[party_idx]->wstring();
-        if (!decoded.empty()) {
+        if (decoded.empty()) continue;
+
+        if (damage[party_idx].name.empty() && damage[party_idx].agent_id != 0) {
             damage[party_idx].name = decoded;
+        }
+
+        // Restore departed entry if this slot is empty but a departed member matches by name
+        if (damage[party_idx].damage == 0 && damage[party_idx].healing == 0) {
+            for (auto& dep : departed_damage) {
+                if (dep.name == decoded && (dep.damage > 0 || dep.healing > 0)) {
+                    damage[party_idx] = dep;
+                    damage[party_idx].agent_id = agent_id;
+                    dep.Reset();
+                    // Recompute totals
+                    total = 0;
+                    total_healing = 0;
+                    for (const auto& e : damage) {
+                        total += e.damage;
+                        total_healing += e.healing;
+                    }
+                    for (const auto& e : departed_damage) {
+                        total += e.damage;
+                        total_healing += e.healing;
+                    }
+                    break;
+                }
+            }
         }
     }
 }
 
-void PartyDamage::Draw(IDirect3DDevice9* )
+void PartyDamage::Draw(IDirect3DDevice9*)
 {
     if (!visible) {
         return;
@@ -481,7 +615,6 @@ void PartyDamage::Draw(IDirect3DDevice9* )
         if (user_offset < 0) {
             window_x = party_health_bars_position.bottom_right.x - user_offset_x - width;
         }
-
     }
     else {
         window_x = party_health_bars_position.top_left.x - user_offset_x - width;
@@ -492,8 +625,8 @@ void PartyDamage::Draw(IDirect3DDevice9* )
     }
 
     // Add a window to capture mouse clicks.
-    ImGui::SetNextWindowPos({ window_x, party_health_bars_position.top_left.y });
-    ImGui::SetNextWindowSize({ width, party_health_bars_position.bottom_right.y - party_health_bars_position.top_left.y });
+    ImGui::SetNextWindowPos({window_x, party_health_bars_position.top_left.y});
+    ImGui::SetNextWindowSize({width, party_health_bars_position.bottom_right.y - party_health_bars_position.top_left.y});
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowMinSize, ImVec2(10.0f, 10.0f));
@@ -513,8 +646,8 @@ void PartyDamage::Draw(IDirect3DDevice9* )
             if (!health_bar_pos)
                 continue;
 
-            const ImVec2 damage_top_left = { window_x, health_bar_pos->top_left.y };
-            const ImVec2 damage_bottom_right = { damage_top_left.x + width, health_bar_pos->bottom_right.y };
+            const ImVec2 damage_top_left = {window_x, health_bar_pos->top_left.y};
+            const ImVec2 damage_bottom_right = {damage_top_left.x + width, health_bar_pos->bottom_right.y};
             draw_list->AddRectFilled(damage_top_left, damage_bottom_right, color_background);
 
             const auto x = damage_top_left.x;
@@ -534,7 +667,7 @@ void PartyDamage::Draw(IDirect3DDevice9* )
             }
 
             // Recent damage as percent of total team's recent damage (bottom bar)
-            if (entry->recent_damage) {
+            if (show_damage && entry->recent_damage) {
                 const float part_of_recent = max_recent > 0 ? static_cast<float>(entry->recent_damage) / max_recent : 0;
                 const float recent_left = bars_left ? x + width * (1.0f - part_of_recent) : x;
                 const float recent_right = bars_left ? x + width : x + width * part_of_recent;
@@ -548,7 +681,7 @@ void PartyDamage::Draw(IDirect3DDevice9* )
             }
 
             // Recent healing as percent of total team's recent healing (top bar)
-            if (entry->recent_healing) {
+            if (show_healing && entry->recent_healing) {
                 const float part_of_recent_heal = max_recent_healing > 0 ? static_cast<float>(entry->recent_healing) / max_recent_healing : 0;
                 const float heal_left = bars_left ? x + width * (1.0f - part_of_recent_heal) : x;
                 const float heal_right = bars_left ? x + width : x + width * part_of_recent_heal;
@@ -565,43 +698,58 @@ void PartyDamage::Draw(IDirect3DDevice9* )
             const auto text_height = ImGui::GetTextLineHeight();
             const auto text_y = damage_top_left.y + (row_height - text_height) / 2;
 
-            // Damage text
-            if (damage_float < 1000.f) {
-                snprintf(buffer, buffer_size, "%.0f", damage_float);
-            }
-            else if (damage_float < 1000.f * 10) {
-                snprintf(buffer, buffer_size, "%.2f k", damage_float / 1000.f);
-            }
-            else if (damage_float < 1000.f * 1000.f) {
-                snprintf(buffer, buffer_size, "%.1f k", damage_float / 1000.f);
-            }
-            else {
-                snprintf(buffer, buffer_size, "%.2f m", damage_float / (1000.f * 1000.f));
+            if (show_damage) {
+                // Damage text
+                if (damage_float < 1000.f) {
+                    snprintf(buffer, buffer_size, "%.0f", damage_float);
+                }
+                else if (damage_float < 1000.f * 10) {
+                    snprintf(buffer, buffer_size, "%.2f k", damage_float / 1000.f);
+                }
+                else if (damage_float < 1000.f * 1000.f) {
+                    snprintf(buffer, buffer_size, "%.1f k", damage_float / 1000.f);
+                }
+                else {
+                    snprintf(buffer, buffer_size, "%.2f m", damage_float / (1000.f * 1000.f));
+                }
+
+                draw_list->AddText(ImVec2(x + ImGui::GetStyle().ItemSpacing.x, text_y), IM_COL32(255, 255, 255, 255), buffer);
+
+                // Damage percentage
+                if (!show_healing) {
+                    const float perc_of_total = GetPercentageOfTotal(entry->damage);
+                    snprintf(buffer, buffer_size, "%.1f %%", perc_of_total);
+                    draw_list->AddText(ImVec2(x + width / 2, text_y), IM_COL32(255, 255, 255, 255), buffer);
+                }
             }
 
-            draw_list->AddText(
-                ImVec2(x + ImGui::GetStyle().ItemSpacing.x, text_y),
-                IM_COL32(255, 255, 255, 255), buffer);
+            if (show_healing) {
+                // Healing text
+                const float healing_float = static_cast<float>(entry->healing);
+                if (healing_float < 1000.f) {
+                    snprintf(buffer, buffer_size, "%.0f", healing_float);
+                }
+                else if (healing_float < 1000.f * 10) {
+                    snprintf(buffer, buffer_size, "%.2f k", healing_float / 1000.f);
+                }
+                else if (healing_float < 1000.f * 1000.f) {
+                    snprintf(buffer, buffer_size, "%.1f k", healing_float / 1000.f);
+                }
+                else {
+                    snprintf(buffer, buffer_size, "%.2f m", healing_float / (1000.f * 1000.f));
+                }
 
-            // Healing text
-            const float healing_float = static_cast<float>(entry->healing);
-            if (healing_float < 1000.f) {
-                snprintf(buffer, buffer_size, "%.0f", healing_float);
-            }
-            else if (healing_float < 1000.f * 10) {
-                snprintf(buffer, buffer_size, "%.2f k", healing_float / 1000.f);
-            }
-            else if (healing_float < 1000.f * 1000.f) {
-                snprintf(buffer, buffer_size, "%.1f k", healing_float / 1000.f);
-            }
-            else {
-                snprintf(buffer, buffer_size, "%.2f m", healing_float / (1000.f * 1000.f));
+                const float heal_text_x = show_damage ? x + width / 2 : x + ImGui::GetStyle().ItemSpacing.x;
+                draw_list->AddText(ImVec2(heal_text_x, text_y), color_healing, buffer);
+
+                // Healing percentage
+                if (!show_damage) {
+                    const float perc_of_total_heal = GetPercentageOfTotalHealing(entry->healing);
+                    snprintf(buffer, buffer_size, "%.1f %%", perc_of_total_heal);
+                    draw_list->AddText(ImVec2(x + width / 2, text_y), color_healing, buffer);
+                }
             }
 
-            draw_list->AddText(
-                ImVec2(x + width / 2, text_y),
-                color_healing, buffer
-            );
 
             if (print_by_click
                 && ImGui::IsMouseClicked(ImGuiMouseButton_Left)
@@ -614,8 +762,6 @@ void PartyDamage::Draw(IDirect3DDevice9* )
     ImGui::End();
     ImGui::PopStyleColor(1);
     ImGui::PopStyleVar(3);
-
-    
 }
 
 void PartyDamage::LoadSettings(ToolboxIni* ini)
@@ -632,6 +778,8 @@ void PartyDamage::LoadSettings(ToolboxIni* ini)
     LOAD_BOOL(print_by_click);
     LOAD_UINT(user_offset);
     LOAD_BOOL(overlay_party_window);
+    LOAD_BOOL(show_damage);
+    LOAD_BOOL(show_healing);
 
 
     if (inifile == nullptr) {
@@ -670,6 +818,8 @@ void PartyDamage::SaveSettings(ToolboxIni* ini)
     SAVE_BOOL(print_by_click);
     SAVE_UINT(user_offset);
     SAVE_BOOL(overlay_party_window);
+    SAVE_BOOL(show_damage);
+    SAVE_BOOL(show_healing);
 
     for (const auto& [player_number, hp] : hp_map) {
         std::string key = std::to_string(player_number);
@@ -689,6 +839,10 @@ void PartyDamage::DrawSettingsInternal()
     ImGui::NextSpacedElement();
     ImGui::Checkbox("Bars towards the left", &bars_left);
     ImGui::ShowHelp("If unchecked, they will expand to the right");
+    ImGui::NextSpacedElement();
+    ImGui::Checkbox("Show damage", &show_damage);
+    ImGui::NextSpacedElement();
+    ImGui::Checkbox("Show healing", &show_healing);
 
     ImGui::StartSpacedElements(292.f);
     ImGui::NextSpacedElement();

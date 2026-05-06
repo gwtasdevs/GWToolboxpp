@@ -9,7 +9,9 @@ target_sources(plugin_base INTERFACE
     "plugins/Base/PluginUtils.h"
     "plugins/Base/PluginUtils.cpp"
     "plugins/Base/ToolboxUIPlugin.h"
-    "plugins/Base/ToolboxUIPlugin.cpp")
+    "plugins/Base/ToolboxUIPlugin.cpp"
+    "GWToolboxdll/RectF.h"
+    "GWToolboxdll/MinimapPlugin.h")
 target_include_directories(plugin_base INTERFACE
     "plugins/Base"
     "GWToolboxdll" # careful here, we only get access to exported and header functions!
@@ -93,6 +95,27 @@ macro(add_tb_plugin PLUGIN)
     set_target_properties(${PLUGIN} PROPERTIES FOLDER "plugins/")
 endmacro()
 
-add_tb_plugin(DialogsWindow)
-add_tb_plugin(RawDialogs)
+add_tb_plugin(AgentPopTimer)
+target_link_libraries(AgentPopTimer PRIVATE directxtexloader)
+
+add_tb_plugin(DeathPenaltyTimer)
+target_link_libraries(DeathPenaltyTimer PRIVATE directxtexloader)
+
+add_tb_plugin(DhuumCalculator)
+add_tb_plugin(ExamplePlugin)
+add_tb_plugin(Follow)
+add_tb_plugin(GWSplits)
+add_tb_plugin(PitsSoulsWindow)
+add_tb_plugin(ProjectileIndicator)
+target_sources(ProjectileIndicator PRIVATE
+    "plugins/Base/Rendering.h"
+    "plugins/Base/Rendering.cpp")
+
+add_tb_plugin(ShadowstepPredictor)
+target_sources(ShadowstepPredictor PRIVATE
+    "plugins/Base/Pathing.h"
+    "plugins/Base/Pathing.cpp")
+
+add_tb_plugin(Slowload)
 add_tb_plugin(SpeedrunScriptingTools)
+add_tb_plugin(SkinChanger)
