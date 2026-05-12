@@ -17,8 +17,56 @@
 #include <Widgets/Minimap/Minimap.h>
 #include <GWCA/Managers/PlayerMgr.h>
 
+#include <GWCA/GameEntities/Pathing.h>
+#include <GWCA/Utilities/Scanner.h>
+#include <GWCA/Managers/MapMgr.h>
+
 namespace {
     bool is_minimap_compass_draw = false;
+
+    struct PathPoint {
+        GW::GamePos pos = {};
+        const GW::PathingTrapezoid* t = nullptr;
+    };
+    typedef void(__cdecl* FindPath_pt)(PathPoint* start, PathPoint* goal, float range, uint32_t maxCount, uint32_t* count, PathPoint* pathArray);
+    static FindPath_pt FindPath_Func = nullptr;
+
+    float Cross(const GW::Vec2f& lhs, const GW::Vec2f& rhs)
+    {
+        return (lhs.x * rhs.y) - (lhs.y * rhs.x);
+    }
+
+    bool pointOnTrapezoid(const GW::GamePos& p, const GW::PathingTrapezoid& trap)
+    {
+        //  a----d
+        //   \    \
+        //    b____c
+        const auto a = GW::Vec2f{trap.XTL, trap.YT};
+        const auto b = GW::Vec2f{trap.XBL, trap.YB};
+        const auto c = GW::Vec2f{trap.XBR, trap.YB};
+        const auto d = GW::Vec2f{trap.XTR, trap.YT};
+
+        // See GWCA pathing.cpp:IsOnPathingTrapezoid
+        constexpr float tolerance = 2.0f;
+        if (a.y < p.y || b.y > p.y) return false;
+        if (b.x > p.x && a.x > p.x) return false;
+        if (c.x < p.x && d.x < p.x) return false;
+        const auto ab = b - a, cd = d - c, pa = a - p, pc = c - p;
+        if (Cross(ab, pa) > tolerance) return false;
+        if (Cross(cd, pc) > tolerance) return false;
+        return true;
+    }
+    const GW::PathingTrapezoid* findTrapezoid(const GW::GamePos& pos)
+    {
+        for (const auto& map : *GW::Map::GetPathingMap()) {
+            for (uint32_t i = 0u; i < map.trapezoid_count; ++i) {
+                if (pointOnTrapezoid(pos, map.trapezoids[i])) {
+                    return &map.trapezoids[i];
+                }
+            }
+        }
+        return nullptr;
+    }
 }
 
 void PingsLinesRenderer::LoadSettings(const ToolboxIni* ini, const char* section)
@@ -31,6 +79,7 @@ void PingsLinesRenderer::LoadSettings(const ToolboxIni* ini, const char* section
     maxrange_interp_begin = static_cast<float>(ini->GetDoubleValue(section, VAR_NAME(maxrange_interp_begin), maxrange_interp_begin));
     maxrange_interp_end = static_cast<float>(ini->GetDoubleValue(section, VAR_NAME(maxrange_interp_end), maxrange_interp_end));
     reduce_ping_spam = ini->GetBoolValue(section, VAR_NAME(reduce_ping_spam), reduce_ping_spam);
+    show_pathing_steps = ini->GetBoolValue(section, VAR_NAME(show_pathing_steps), show_pathing_steps);
     Invalidate();
 }
 
@@ -44,6 +93,7 @@ void PingsLinesRenderer::SaveSettings(ToolboxIni* ini, const char* section) cons
     ini->SetDoubleValue(section, "maxrange_interp_begin", maxrange_interp_begin);
     ini->SetDoubleValue(section, "maxrange_interp_end", maxrange_interp_end);
     ini->SetBoolValue(section, VAR_NAME(reduce_ping_spam), reduce_ping_spam);
+    ini->SetBoolValue(section, VAR_NAME(show_pathing_steps), show_pathing_steps);
 }
 
 void PingsLinesRenderer::DrawSettings()
@@ -189,6 +239,8 @@ void PingsLinesRenderer::Initialize(IDirect3DDevice9* device)
     if (FAILED(hr)) {
         printf("Error setting up PingsLinesRenderer vertex buffer: HRESULT: 0x%lX\n", hr);
     }
+
+    FindPath_Func = (FindPath_pt)GW::Scanner::Find("\x8b\x5d\x0c\x8b\x7d\x08\x8b\x70\x14", "xxxxxxxxx", -0xe);
 }
 
 void PingsLinesRenderer::Render(IDirect3DDevice9* device)
@@ -342,8 +394,28 @@ void PingsLinesRenderer::DrawShadowstepLine(IDirect3DDevice9*)
         return;
     }
 
-    EnqueueVertex(shadowstep_location.x, shadowstep_location.y, color_shadowstep_line);
-    EnqueueVertex(player->pos.x, player->pos.y, color_shadowstep_line);
+    if (!show_pathing_steps || !FindPath_Func) {
+        EnqueueVertex(shadowstep_location.x, shadowstep_location.y, color_shadowstep_line);
+        EnqueueVertex(player->pos.x, player->pos.y, color_shadowstep_line);
+        return;
+    }
+
+    auto start = PathPoint{player->pos, findTrapezoid(player->pos)};
+    auto end = PathPoint{shadowstep_location, findTrapezoid(shadowstep_location)};
+    std::array<PathPoint, 10> pathArray;
+    uint32_t cnt = pathArray.size();
+    FindPath_Func(&start, &end, 10'000.f, cnt, &cnt, &pathArray[0]);
+    if (cnt == 0) return;
+
+    constexpr std::array<ImU32, 10> colors = {Colors::Red(), Colors::Green(), Colors::Blue(), Colors::Yellow(), Colors::Pink(), Colors::Orange(), Colors::Lime(), Colors::Gold(), Colors::Amber(), Colors::Cyan()};
+    EnqueueVertex(player->pos.x, player->pos.y, Colors::Magenta());
+    EnqueueVertex(pathArray[0].pos.x, pathArray[0].pos.y, Colors::Magenta());
+
+    for (auto i = 0u; i < cnt - 1; ++i) {
+        int index = ((int)cnt - (int)i + 1) % colors.size();
+        EnqueueVertex(pathArray[i + 0].pos.x, pathArray[i + 0].pos.y, colors[index]);
+        EnqueueVertex(pathArray[i + 1].pos.x, pathArray[i + 1].pos.y, colors[index]);
+    }
 }
 
 void PingsLinesRenderer::DrawRecallLine(IDirect3DDevice9*)
