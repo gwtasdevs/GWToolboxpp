@@ -10,7 +10,7 @@ public:
     ~ChestOpener() override = default;
 
     const char* Name() const override { return "ChestOpener"; }
-    const char* Icon() const override { return ICON_FA_RING; }
+    const char* Icon() const override { return ICON_FA_LOCK_OPEN; }
 
     void Initialize(ImGuiContext* ctx, ImGuiAllocFns allocator_fns, HMODULE toolbox_dll) override;
     void SignalTerminate() override;
