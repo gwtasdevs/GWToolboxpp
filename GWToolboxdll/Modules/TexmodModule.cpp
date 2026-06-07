@@ -3,12 +3,15 @@
 
 #include <ToolboxIni.h>
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <d3d9.h>
 #include <filesystem>
 #include <fstream>
 #include <imgui.h>
+#include <memory>
+#include <mutex>
 #include <span>
 #include <string>
 #include <vector>
@@ -35,6 +38,12 @@ namespace {
     tGModGetFiles pfnGetFiles = nullptr;
     tGModSetDevice pfnSetDevice = nullptr;
 
+    // gMod return codes we care about (see gMod's Error.h). AddFile returns
+    // EXISTS - a negative value - when the pack is already loaded, which for our
+    // purposes is success, not an error.
+    constexpr int GMOD_RETURN_OK = 0;
+    constexpr int GMOD_RETURN_EXISTS = -70;
+
     std::filesystem::path gmodDllLocation;
 
     struct TexturePackEntry {
@@ -59,6 +68,7 @@ namespace {
     constexpr const char* INI_SECTION = "TexmodModule";
     constexpr const char* INI_PACK_COUNT = "PackCount";
     constexpr const char* INI_PACK_PATH = "Pack";
+    constexpr const char* INI_PACK_ENABLED = "PackEnabled";
 
     // =========================================================================
     // gMod TextureClient helpers
@@ -70,15 +80,45 @@ namespace {
         pfnRemoveFile = reinterpret_cast<tGModRemoveFile>(GetProcAddress(gmodDll, "RemoveFile"));
         pfnGetFiles = reinterpret_cast<tGModGetFiles>(GetProcAddress(gmodDll, "GetFiles"));
         pfnSetDevice = reinterpret_cast<tGModSetDevice>(GetProcAddress(gmodDll, "SetDevice"));
-        if (!pfnAddFile || !pfnRemoveFile || !pfnSetDevice) {
-            statusMessage = "Error: gMod.dll is missing AddFile/RemoveFile/SetDevice exports. "
+        // GetFiles is required: we reconcile against the load order it reports, so
+        // a build whose GetFiles is missing (or doesn't report load order) can't be
+        // driven correctly.
+        if (!pfnAddFile || !pfnRemoveFile || !pfnGetFiles || !pfnSetDevice) {
+            statusMessage = "Error: gMod.dll is missing AddFile/RemoveFile/GetFiles/SetDevice exports. "
                             "Please use a gMod build that includes these functions.";
             return false;
         }
         return true;
     }
 
-    void SyncExternalPacks()
+    // Read gMod's currently-loaded files, in load order (== priority): gMod hands
+    // them back in the order it loaded them, so this is what we diff against to
+    // reconcile. Best-effort - empty if GetFiles is absent or errors.
+    std::vector<std::filesystem::path> QueryGmodFiles()
+    {
+        std::vector<std::filesystem::path> result;
+        if (!pfnGetFiles) return result;
+        const int count = pfnGetFiles(nullptr, 0);
+        if (count <= 0) return result;
+        const int bufLen = count * MAX_PATH;
+        std::vector<wchar_t> buf(bufLen, L'\0');
+        const int written = pfnGetFiles(buf.data(), bufLen);
+        const wchar_t* ptr = buf.data();
+        const wchar_t* const end = buf.data() + written;
+        while (ptr < end && *ptr) {
+            result.emplace_back(ptr);
+            ptr += wcslen(ptr) + 1;
+        }
+        return result;
+    }
+
+    // Reconcile our pack list with what gMod actually has loaded (via GetFiles):
+    // mark known packs loaded and adopt any gMod loaded on its own (e.g. from
+    // modlist.txt) as external entries. When clear_missing is true, packs gMod
+    // is not currently serving are marked unloaded - the right behaviour after an
+    // operation. Pass false on startup, before the restored enabled state has
+    // been pushed to gMod, so it is not wiped by gMod's still-empty set.
+    void SyncExternalPacks(bool clear_missing = true)
     {
         if (!pfnGetFiles) return;
 
@@ -106,10 +146,16 @@ namespace {
             }
             packs.push_back({p, p.stem().string(), /*loaded=*/true, /*external=*/true});
         }
-        for (auto& pack : packs) {
-            if (std::ranges::find(packs_loaded, pack.path) == packs_loaded.end()) pack.loaded = false;
+        if (clear_missing) {
+            for (auto& pack : packs) {
+                if (std::ranges::find(packs_loaded, pack.path) == packs_loaded.end()) pack.loaded = false;
+            }
         }
     }
+
+    // Push the saved enabled state to gMod once it becomes ready. Defined below,
+    // after ApplyLoadOrder; forward-declared here for InitGMod.
+    void RestoreLoadedPacks();
 
     // Translate an image RVA to a raw file offset via the section table (0 = not found).
     uint32_t RvaToFileOffset(const IMAGE_SECTION_HEADER* sec, unsigned n, uint32_t rva)
@@ -181,9 +227,9 @@ namespace {
         return names;
     }
 
-    // Mandatory gMod exports. GetFiles is intentionally absent: older gMod builds
-    // lack it and ResolveTextureClientFunctions already treats it as optional.
-    constexpr const char* kRequiredExports[] = {"AddFile", "RemoveFile", "SetDevice"};
+    // Mandatory gMod exports. GetFiles is required because reconciliation reads the
+    // current load order from it.
+    constexpr const char* kRequiredExports[] = {"AddFile", "RemoveFile", "GetFiles", "SetDevice"};
 
     std::filesystem::path DirOfModule(HMODULE h)
     {
@@ -250,7 +296,7 @@ namespace {
             }
             pfnSetDevice(GuildWars_IDirect3DDevice9_Instance);
             gmodReady = true;
-            SyncExternalPacks();
+            RestoreLoadedPacks();
             statusMessage = "gMod was already active (pre-loaded). Texture pack loading enabled.";
             return true;
         }
@@ -281,41 +327,138 @@ namespace {
         }
         pfnSetDevice(GuildWars_IDirect3DDevice9_Instance);
         gmodReady = true;
-        SyncExternalPacks();
+        RestoreLoadedPacks();
         return true;
     }
     TexturePackEntry* FindPack(const std::filesystem::path& path, bool create_if_not_found = false);
-    bool UnloadTexturePack(const std::filesystem::path& path, bool sync = true)
+
+    // gMod's AddFile decodes and DDS-compresses textures, which is slow enough to
+    // hitch the game if run on the render/main thread. So snapshot the desired set
+    // here (reading packs on the calling thread, where it is valid) and hand the
+    // heavy add/remove work to a worker thread; reconcile back on the main thread.
+    //
+    // apply_mutex serialises the worker-side reconciles, and apply_generation -
+    // bumped per request - lets a stale request (superseded while queued) skip its
+    // work, so rapid toggles can't apply out of order with 20 worker threads.
+    std::mutex apply_mutex;
+    std::atomic<uint64_t> apply_generation = 0;
+
+    // Build the desired load order: every pack flagged loaded, in list order.
+    std::vector<std::filesystem::path> BuildDesiredList()
     {
-        if (!gmodReady) {
+        std::vector<std::filesystem::path> desired;
+        for (const auto& pack : packs) {
+            if (pack.loaded) desired.push_back(pack.path);
+        }
+        return desired;
+    }
+
+    // Reconcile gMod's loaded set to `desired` with AddFile/RemoveFile. We read
+    // gMod's current load order straight from GetFiles (it reports files in load
+    // order). gMod gives the first-loaded pack priority on a texture conflict, so
+    // to honour the requested order we keep the longest matching prefix, remove
+    // everything after it, and re-add the desired tail in order. Returns the last
+    // gMod error (or 0). Caller must hold apply_mutex.
+    int ReconcileLocked(const std::vector<std::filesystem::path>& desired)
+    {
+        const auto current = QueryGmodFiles();
+        size_t prefix = 0;
+        while (prefix < current.size() && prefix < desired.size()
+               && current[prefix] == desired[prefix]) {
+            ++prefix;
+        }
+        // Remove the diverging tail, deepest first, leaving the kept prefix intact.
+        for (size_t i = current.size(); i-- > prefix;) {
+            if (pfnRemoveFile) pfnRemoveFile(current[i].wstring().c_str());
+        }
+        // Re-add the desired tail in order; earlier adds win conflicts.
+        int error = GMOD_RETURN_OK;
+        for (size_t i = prefix; i < desired.size(); ++i) {
+            const int ret = pfnAddFile ? pfnAddFile(desired[i].wstring().c_str()) : GMOD_RETURN_OK;
+            if (ret < 0 && ret != GMOD_RETURN_EXISTS) error = ret;
+        }
+        return error;
+    }
+
+    // The single point that changes what gMod has loaded; load, unload and reorder
+    // all funnel through here.
+    void ApplyLoadOrder()
+    {
+        if (!gmodReady || !pfnAddFile || !pfnRemoveFile) {
             statusMessage = "gMod is not initialised.";
-            return false;
+            return;
         }
-        if (!std::filesystem::exists(path)) {
-            statusMessage = "File not found: " + path.string();
-            return false;
-        }
-        auto pack = FindPack(path, true);
-        if (!(pfnRemoveFile && (pfnRemoveFile(pack->path.wstring().c_str()), true))) {
-            statusMessage = "gMod failed to unload: " + pack->path.filename().string();
-            return false;
-        }
-        if (sync) SyncExternalPacks();
-        return std::ranges::find(packs, pack->path, &TexturePackEntry::path) != packs.end();
+        auto desired = std::make_shared<std::vector<std::filesystem::path>>(BuildDesiredList());
+        const uint64_t my_generation = ++apply_generation;
+
+        Resources::EnqueueWorkerTask([desired, my_generation] {
+            // Hold apply_mutex across the whole reconcile so add/remove sequences
+            // are serialised and only the newest request actually runs.
+            std::lock_guard lk(apply_mutex);
+            if (my_generation != apply_generation.load()) return; // superseded while queued
+            if (!gmodReady) return;
+            const int error = ReconcileLocked(*desired);
+            Resources::EnqueueMainTask([error, my_generation] {
+                if (my_generation != apply_generation.load()) return; // a newer apply is in flight
+                if (error < 0)
+                    statusMessage = "gMod failed to load a pack (error " + std::to_string(error) + ").";
+                SyncExternalPacks();
+            });
+        });
+    }
+
+    bool UnloadTexturePack(const std::filesystem::path& path)
+    {
+        auto pack = FindPack(path, false);
+        if (!pack) return false;
+        pack->loaded = false;
+        ApplyLoadOrder();
+        return true;
     }
 
     void UnloadAllTexturePacks()
     {
-        for (auto& pack : packs)
-            UnloadTexturePack(pack.path, false);
-        SyncExternalPacks();
+        for (auto& pack : packs) pack.loaded = false;
+        ApplyLoadOrder();
+    }
+
+    // Move the pack at `index` one slot up (direction -1) or down (+1) in the
+    // list, changing its priority, then re-apply the order to gMod.
+    bool MovePack(int index, int direction)
+    {
+        const int other = index + direction;
+        if (index < 0 || index >= static_cast<int>(packs.size())) return false;
+        if (other < 0 || other >= static_cast<int>(packs.size())) return false;
+        std::swap(packs[index], packs[other]);
+        if (gmodReady) ApplyLoadOrder();
+        return true;
+    }
+
+    // Called once gMod is ready: adopt anything it already loaded (modlist.txt
+    // etc.) without disturbing the enabled flags restored from settings, then push
+    // the combined set so the packs the user had enabled are loaded again.
+    void RestoreLoadedPacks()
+    {
+        SyncExternalPacks(/*clear_missing=*/false);
+        ApplyLoadOrder();
     }
 
     void ShutdownGMod()
     {
         if (!gmodReady) return;
 
-        UnloadAllTexturePacks();
+        // Unload synchronously: on teardown the worker threads are stopping, so a
+        // queued ApplyLoadOrder might never run. Holding apply_mutex waits out any
+        // in-flight worker reconcile; bumping the generation makes queued/running
+        // ones skip; then we remove everything here, last, so nothing reloads after.
+        {
+            std::lock_guard lk(apply_mutex);
+            ++apply_generation;
+            for (auto& pack : packs) pack.loaded = false;
+            if (pfnRemoveFile) {
+                for (const auto& path : QueryGmodFiles()) pfnRemoveFile(path.wstring().c_str());
+            }
+        }
 
         gmodReady = false;
     }
@@ -339,7 +482,7 @@ namespace {
         return &(*it);
     }
 
-    bool LoadTexturePack(const std::filesystem::path& path, bool sync = true)
+    bool LoadTexturePack(const std::filesystem::path& path)
     {
         if (!gmodReady) {
             statusMessage = "gMod is not initialised.";
@@ -350,12 +493,12 @@ namespace {
             return false;
         }
         auto pack = FindPack(path, true);
-        if (!(pfnAddFile && pfnAddFile(pack->path.wstring().c_str()) == 0)) {
-            statusMessage = "gMod failed to load: " + path.filename().string();
-            return false;
-        }
-        statusMessage = "Loaded: " + pack->path.filename().string();
-        if (sync) SyncExternalPacks();
+        const auto filename = pack->path.filename().string();
+        pack->loaded = true;
+        // The actual load runs on a worker thread; the result (and any failure)
+        // is reported when it reconciles. Show an optimistic status meanwhile.
+        statusMessage = "Loading: " + filename;
+        ApplyLoadOrder();
         return true;
     }
 
@@ -424,10 +567,17 @@ namespace {
         if (!ImGui::BeginTable("##packs", 4, tableFlags)) return;
 
         const auto font_size = ImGui::CalcTextSize(" ");
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const auto btn_width = [&](const char* label) {
+            return ImGui::CalcTextSize(label).x + style.FramePadding.x * 2.f;
+        };
+        // Actions column holds the move-up / move-down / delete buttons.
+        const float actions_width = btn_width(ICON_FA_ARROW_UP) + btn_width(ICON_FA_ARROW_DOWN)
+            + btn_width(ICON_FA_TRASH) + style.ItemSpacing.x * 2.f;
         ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, font_size.y * 2.f);
         ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn("Path", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, font_size.y * 2.f);
+        ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, actions_width);
         ImGui::TableHeadersRow();
 
         for (int i = 0; i < static_cast<int>(packs.size()); i++) {
@@ -462,7 +612,33 @@ namespace {
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", pathStr.c_str());
 
             ImGui::TableSetColumnIndex(3);
-            ImGui::PushID(i * 100 + 1);
+            ImGui::PushID(i);
+
+            const bool is_first = (i == 0);
+            const bool is_last = (i == static_cast<int>(packs.size()) - 1);
+
+            ImGui::BeginDisabled(is_first);
+            const bool move_up = ImGui::Button(ICON_FA_ARROW_UP);
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Move up (higher priority on texture conflicts)");
+            if (move_up) {
+                MovePack(i, -1);
+                ImGui::PopID();
+                break;
+            }
+
+            ImGui::SameLine();
+            ImGui::BeginDisabled(is_last);
+            const bool move_down = ImGui::Button(ICON_FA_ARROW_DOWN);
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Move down (lower priority on texture conflicts)");
+            if (move_down) {
+                MovePack(i, 1);
+                ImGui::PopID();
+                break;
+            }
+
+            ImGui::SameLine();
             bool del_bool = false;
             if (ImGui::ConfirmButton(ICON_FA_TRASH, &del_bool)) {
                 if (pack.loaded) UnloadTexturePack(pack.path);
@@ -489,8 +665,7 @@ void TexmodModule::Update(float)
 
 void TexmodModule::Terminate()
 {
-    UnloadAllTexturePacks();
-    ShutdownGMod();
+    ShutdownGMod(); // synchronously unloads every pack from gMod
     ToolboxModule::Terminate();
 }
 
@@ -515,8 +690,12 @@ void TexmodModule::LoadSettings(ToolboxIni* ini)
         const char* val = ini->GetValue(INI_SECTION, key.c_str(), nullptr);
         if (!val || !*val) continue;
         std::filesystem::path p = val;
-        packs.push_back({p, p.stem().string(), false});
+        const std::string enabled_key = std::string(INI_PACK_ENABLED) + std::to_string(i);
+        const bool enabled = ini->GetBoolValue(INI_SECTION, enabled_key.c_str(), false);
+        packs.push_back({p, p.stem().string(), /*loaded=*/enabled});
     }
+    // gMod is not ready yet (no device); the restored enabled flags are pushed to
+    // it later by RestoreLoadedPacks(). This call is a no-op until then.
     SyncExternalPacks();
 }
 
@@ -528,5 +707,7 @@ void TexmodModule::SaveSettings(ToolboxIni* ini)
     for (size_t i = 0; i < packs.size(); i++) {
         const std::string key = std::string(INI_PACK_PATH) + std::to_string(i);
         ini->SetValue(INI_SECTION, key.c_str(), packs[i].path.string().c_str());
+        const std::string enabled_key = std::string(INI_PACK_ENABLED) + std::to_string(i);
+        ini->SetBoolValue(INI_SECTION, enabled_key.c_str(), packs[i].loaded);
     }
 }
