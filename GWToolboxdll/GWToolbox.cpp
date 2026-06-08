@@ -909,6 +909,12 @@ std::filesystem::path GWToolbox::SaveSettings()
     }
     ToolboxSettings::LoadModules(ini);
     ASSERT(Resources::SaveIniToFile(ini->location_on_disk, ini) == 0);
+    if (ImGui::GetCurrentContext()) {
+        auto& io = ImGui::GetIO();
+        if (io.IniFilename) {
+            ImGui::SaveIniSettingsToDisk(io.IniFilename);
+        }
+    }
     const auto dir = ini->location_on_disk.parent_path();
     const auto dirstr = dir.wstring();
     const auto printable = TextUtils::str_replace_all(dirstr, LR"(\\)", L"/");
@@ -1120,6 +1126,12 @@ void GWToolbox::Draw(IDirect3DDevice9* device)
             } else {
                 uielement->Draw(device);
             }
+        }
+
+        // Non-UI modules have no window of their own but may still paint an overlay
+        // this frame (e.g. Texmod's recording banner).
+        for (size_t i = 0; i < other_modules_enabled.size(); i++) {
+            other_modules_enabled[i]->Draw(device);
         }
 
 #ifdef _DEBUG
