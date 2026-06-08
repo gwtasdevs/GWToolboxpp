@@ -8,8 +8,10 @@
 #include <cstring>
 #include <d3d9.h>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <imgui.h>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <span>
@@ -17,10 +19,27 @@
 #include <vector>
 
 #include <GWCA/Managers/RenderMgr.h>
+#include <GWCA/Utilities/Hooker.h>
 
 #include <GWToolbox.h>
 #include <ImGuiAddons.h>
 #include <Modules/Resources.h>
+#include <Utils/FontLoader.h>
+#include <Utils/TextUtils.h>
+
+// gMod GitHub release shape, parsed from the releases API. Kept at namespace scope
+// (external linkage) because glaze reflection can't bind types from an anonymous
+// namespace - mirrors Updater's github_api structs.
+namespace gmod_github {
+    struct ReleaseAsset {
+        std::string name;
+        std::string browser_download_url;
+    };
+    struct Release {
+        std::string tag_name;
+        std::vector<ReleaseAsset> assets;
+    };
+}
 
 namespace {
 
@@ -44,7 +63,19 @@ namespace {
     constexpr int GMOD_RETURN_OK = 0;
     constexpr int GMOD_RETURN_EXISTS = -70;
 
-    std::filesystem::path gmodDllLocation;
+    // gMod version check / download (mirrors Updater's GitHub-release logic). gMod is
+    // managed automatically: on startup we fetch the latest release and, if it is
+    // newer than the copy kept in the GWToolbox folder (or none is present), download
+    // it there and load it.
+    constexpr glz::opts gmod_json_opts{.error_on_unknown_keys = false};
+
+    enum class GmodUpdateStep { Idle, Checking, Downloading };
+    GmodUpdateStep gmodUpdateStep = GmodUpdateStep::Idle;
+
+    std::string gmodLatestVersion;        // latest release tag, 'v' stripped (e.g. "1.8.0.2")
+    std::string gmodLocalVersion;         // file version of the managed gMod.dll
+    bool gmodLocalVersionChecked = false; // recompute gmodLocalVersion when false
+    std::string gmodUpdateStatus;         // one-line status for the version row
 
     struct TexturePackEntry {
         std::filesystem::path path;
@@ -58,12 +89,19 @@ namespace {
     // =========================================================================
 
     HMODULE gmodDll = nullptr;
+    // True only when this module called LoadLibrary on gmodDll, i.e. we own the
+    // reference and must FreeLibrary it on teardown. False when gMod was already
+    // present (e.g. injected as the d3d9.dll proxy) - that copy belongs to the game.
+    bool gmodLoadedByUs = false;
 
     std::vector<TexturePackEntry> packs;
 
     bool gmodReady = false;
     std::string statusMessage;
     bool gmodLoadAttempted = false;
+    // Set when gMod is no longer needed (last pack removed); the unload is performed
+    // from Update() rather than the draw pass.
+    bool gmodUnloadRequested = false;
 
     constexpr const char* INI_SECTION = "TexmodModule";
     constexpr const char* INI_PACK_COUNT = "PackCount";
@@ -157,6 +195,10 @@ namespace {
     // after ApplyLoadOrder; forward-declared here for InitGMod.
     void RestoreLoadedPacks();
 
+    // Check GitHub and download a newer gMod if needed. Forward-declared so adding a
+    // pack can trigger the download when gMod isn't loaded yet. Defined further down.
+    void CheckAndUpdateGmod();
+
     // Translate an image RVA to a raw file offset via the section table (0 = not found).
     uint32_t RvaToFileOffset(const IMAGE_SECTION_HEADER* sec, unsigned n, uint32_t rva)
     {
@@ -240,14 +282,13 @@ namespace {
 
     std::filesystem::path FindGmodDll()
     {
-        // Explicit user override (Browse...) wins if it still exists.
-        if (!gmodDllLocation.empty() && std::filesystem::exists(gmodDllLocation)) return gmodDllLocation;
-
-        // Search next to the running exe (Gw.exe) and next to GWToolbox.dll.
+        // Prefer the toolbox-managed copy (auto-downloaded into the GWToolbox folder),
+        // then fall back to one sitting next to the running exe or GWToolbox.dll.
         std::vector<std::filesystem::path> dirs;
         const auto add_dir = [&](std::filesystem::path d) {
             if (!d.empty() && std::ranges::find(dirs, d) == dirs.end()) dirs.push_back(std::move(d));
         };
+        add_dir(Resources::GetPath("gmod"));             // toolbox-managed copy
         add_dir(DirOfModule(nullptr));                   // running exe
         add_dir(DirOfModule(GWToolbox::GetDLLModule())); // toolbox dll
 
@@ -290,6 +331,7 @@ namespace {
             HMODULE h = GetModuleHandleW(name);
             if (!h) continue;
             gmodDll = h;
+            gmodLoadedByUs = false; // already in the process; we don't own this reference
             if (!ResolveTextureClientFunctions()) {
                 gmodDll = nullptr;
                 continue;
@@ -301,6 +343,12 @@ namespace {
             return true;
         }
 
+        // Only load our own copy of gMod when there is a pack to serve. With no packs
+        // there is nothing to mod, so we leave gMod unloaded rather than have it hook
+        // the device for nothing. (A gMod already injected as the d3d9 proxy was
+        // adopted above regardless of this.)
+        if (packs.empty()) return false;
+
         if (gmodLoadAttempted) {
             // statusMessage = "Error: gMod initialization already attempted and failed. Please fix the issue and click Retry.";
             return false;
@@ -309,7 +357,7 @@ namespace {
         // 2. Find and load gMod.dll.
         const auto found = FindGmodDll();
         if (found.empty()) {
-            statusMessage = "Error: Could not find gMod.dll. Place it next to GWToolbox.dll or use Browse.";
+            statusMessage = "gMod.dll not found yet - it is downloaded automatically. Check your internet connection.";
             return false;
         }
 
@@ -318,11 +366,13 @@ namespace {
             statusMessage = "Error: Could not load gMod.dll. Make sure it is next to GWToolbox.dll.";
             return false;
         }
+        gmodLoadedByUs = true; // we own this reference and must FreeLibrary it on teardown
 
         // 3. Resolve TextureClient shim exports.
         if (!ResolveTextureClientFunctions()) {
             FreeLibrary(gmodDll);
             gmodDll = nullptr;
+            gmodLoadedByUs = false;
             return false;
         }
         pfnSetDevice(GuildWars_IDirect3DDevice9_Instance);
@@ -363,8 +413,7 @@ namespace {
     {
         const auto current = QueryGmodFiles();
         size_t prefix = 0;
-        while (prefix < current.size() && prefix < desired.size()
-               && current[prefix] == desired[prefix]) {
+        while (prefix < current.size() && prefix < desired.size() && current[prefix] == desired[prefix]) {
             ++prefix;
         }
         // Remove the diverging tail, deepest first, leaving the kept prefix intact.
@@ -400,8 +449,7 @@ namespace {
             const int error = ReconcileLocked(*desired);
             Resources::EnqueueMainTask([error, my_generation] {
                 if (my_generation != apply_generation.load()) return; // a newer apply is in flight
-                if (error < 0)
-                    statusMessage = "gMod failed to load a pack (error " + std::to_string(error) + ").";
+                if (error < 0) statusMessage = "gMod failed to load a pack (error " + std::to_string(error) + ").";
                 SyncExternalPacks();
             });
         });
@@ -418,7 +466,8 @@ namespace {
 
     void UnloadAllTexturePacks()
     {
-        for (auto& pack : packs) pack.loaded = false;
+        for (auto& pack : packs)
+            pack.loaded = false;
         ApplyLoadOrder();
     }
 
@@ -439,28 +488,44 @@ namespace {
     // the combined set so the packs the user had enabled are loaded again.
     void RestoreLoadedPacks()
     {
+        gmodLocalVersionChecked = false; // gMod is now loaded; refresh the displayed version
         SyncExternalPacks(/*clear_missing=*/false);
         ApplyLoadOrder();
     }
 
     void ShutdownGMod()
     {
-        if (!gmodReady) return;
-
-        // Unload synchronously: on teardown the worker threads are stopping, so a
-        // queued ApplyLoadOrder might never run. Holding apply_mutex waits out any
-        // in-flight worker reconcile; bumping the generation makes queued/running
-        // ones skip; then we remove everything here, last, so nothing reloads after.
-        {
+        if (gmodReady) {
+            // Unload synchronously: on teardown the worker threads are stopping, so a
+            // queued ApplyLoadOrder might never run. Holding apply_mutex waits out any
+            // in-flight worker reconcile; bumping the generation makes queued/running
+            // ones skip; then we remove everything here, last, so nothing reloads after.
             std::lock_guard lk(apply_mutex);
             ++apply_generation;
-            for (auto& pack : packs) pack.loaded = false;
+            for (auto& pack : packs)
+                pack.loaded = false;
             if (pfnRemoveFile) {
-                for (const auto& path : QueryGmodFiles()) pfnRemoveFile(path.wstring().c_str());
+                for (const auto& path : QueryGmodFiles())
+                    pfnRemoveFile(path.wstring().c_str());
             }
         }
 
         gmodReady = false;
+        pfnAddFile = nullptr;
+        pfnRemoveFile = nullptr;
+        pfnGetFiles = nullptr;
+        pfnSetDevice = nullptr;
+
+        // Free the dll only if we loaded it. gMod's DllMain(DLL_PROCESS_DETACH) reverts
+        // all its D3D9 vtable hooks (RemoveAllD3D9Hooks), so this is its clean shutdown
+        // path. A gMod injected as the d3d9 proxy is owned by the game - never free it.
+        if (gmodLoadedByUs && gmodDll) {
+            FreeLibrary(gmodDll);
+        }
+        gmodDll = nullptr;
+        gmodLoadedByUs = false;
+        gmodLoadAttempted = false; // allow a fresh load later (e.g. when a pack is added)
+        gmodLocalVersionChecked = false;
     }
 
     // =========================================================================
@@ -484,10 +549,6 @@ namespace {
 
     bool LoadTexturePack(const std::filesystem::path& path)
     {
-        if (!gmodReady) {
-            statusMessage = "gMod is not initialised.";
-            return false;
-        }
         if (!std::filesystem::exists(path)) {
             statusMessage = "File not found: " + path.string();
             return false;
@@ -495,6 +556,13 @@ namespace {
         auto pack = FindPack(path, true);
         const auto filename = pack->path.filename().string();
         pack->loaded = true;
+        if (!gmodReady) {
+            // First pack configured but gMod isn't loaded yet: fetch/download it now.
+            // The pack stays flagged loaded and is applied once gMod becomes ready.
+            statusMessage = "Preparing gMod for: " + filename;
+            CheckAndUpdateGmod();
+            return true;
+        }
         // The actual load runs on a worker thread; the result (and any failure)
         // is reported when it reconciles. Show an optimistic status meanwhile.
         statusMessage = "Loading: " + filename;
@@ -503,6 +571,165 @@ namespace {
     }
 
 
+
+    // =========================================================================
+    // gMod version check / download
+    // =========================================================================
+
+    // Read a DLL's file-version resource as "major.minor.patch.build". Empty if the
+    // file has no version info; gMod.dll's matches its GitHub release tag.
+    std::string GetDllFileVersion(const std::filesystem::path& path)
+    {
+        if (path.empty()) return {};
+        const auto wp = path.wstring();
+        DWORD handle = 0;
+        const DWORD size = GetFileVersionInfoSizeW(wp.c_str(), &handle);
+        if (!size) return {};
+        std::vector<BYTE> data(size);
+        if (!GetFileVersionInfoW(wp.c_str(), handle, size, data.data())) return {};
+        VS_FIXEDFILEINFO* fi = nullptr;
+        UINT len = 0;
+        if (!VerQueryValueW(data.data(), L"\\", reinterpret_cast<LPVOID*>(&fi), &len) || !fi) return {};
+        return std::format("{}.{}.{}.{}", HIWORD(fi->dwFileVersionMS), LOWORD(fi->dwFileVersionMS), HIWORD(fi->dwFileVersionLS), LOWORD(fi->dwFileVersionLS));
+    }
+
+    // Full path of the gMod.dll currently in use: the loaded module if gMod is
+    // active, otherwise wherever FindGmodDll would load it from.
+    std::filesystem::path CurrentGmodDllPath()
+    {
+        if (gmodReady && gmodDll) {
+            wchar_t buf[MAX_PATH] = {};
+            if (GetModuleFileNameW(gmodDll, buf, MAX_PATH)) return buf;
+        }
+        return FindGmodDll();
+    }
+
+    void RefreshLocalGmodVersion()
+    {
+        gmodLocalVersion = GetDllFileVersion(CurrentGmodDllPath());
+        gmodLocalVersionChecked = true;
+    }
+
+    // Where the toolbox keeps its managed gMod.dll.
+    std::filesystem::path ManagedGmodDllPath()
+    {
+        return Resources::GetPath("gmod") / "gMod.dll";
+    }
+
+    // Compare dotted version strings ("1.8.0.2"): >0 if a is newer, <0 if older, 0 if
+    // equal. Missing trailing components count as 0, so "1.8" == "1.8.0.0".
+    int CompareVersions(const std::string& a, const std::string& b)
+    {
+        const auto parse = [](const std::string& v) {
+            std::vector<int> out;
+            for (size_t i = 0; i < v.size();) {
+                if (v[i] < '0' || v[i] > '9') {
+                    ++i;
+                    continue;
+                }
+                int n = 0;
+                while (i < v.size() && v[i] >= '0' && v[i] <= '9')
+                    n = n * 10 + (v[i++] - '0');
+                out.push_back(n);
+            }
+            return out;
+        };
+        const auto va = parse(a), vb = parse(b);
+        for (size_t i = 0; i < std::max(va.size(), vb.size()); ++i) {
+            const int x = i < va.size() ? va[i] : 0;
+            const int y = i < vb.size() ? vb[i] : 0;
+            if (x != y) return x < y ? -1 : 1;
+        }
+        return 0;
+    }
+
+    // Re-initialise after the managed gMod.dll changes. gMod loads as a process-wide
+    // d3d9 proxy and can't be hot-swapped once active, so if it is already loaded we
+    // just ask the user to restart.
+    void ReloadGmod()
+    {
+        gmodLocalVersionChecked = false;
+        if (gmodReady) {
+            statusMessage = "gMod updated. Restart Guild Wars to load the new version.";
+            return;
+        }
+        gmodLoadAttempted = false;
+        InitGMod();
+    }
+
+    // Fetch the latest gMod release and, if it is newer than the managed copy (or none
+    // exists), download it into the GWToolbox folder and load it. All network/disk work
+    // runs on a worker thread; state changes are posted back to the main thread.
+    void CheckAndUpdateGmod()
+    {
+        if (gmodUpdateStep != GmodUpdateStep::Idle) return;
+        gmodUpdateStep = GmodUpdateStep::Checking;
+        gmodUpdateStatus.clear();
+        Resources::EnqueueWorkerTask([] {
+            std::string response;
+            unsigned int tries = 0;
+            const auto url = "https://api.github.com/repos/gwdevhub/gMod/releases/latest";
+            bool success = false;
+            do {
+                success = Resources::Download(url, response);
+                tries++;
+            } while (!success && tries < 5);
+
+            gmod_github::Release release;
+            const bool parsed = success && !glz::read<gmod_json_opts>(release, response);
+
+            std::string version, dll_url;
+            if (parsed) {
+                version = release.tag_name;
+                if (!version.empty() && (version[0] == 'v' || version[0] == 'V')) version.erase(0, 1);
+                for (const auto& asset : release.assets) {
+                    if (asset.name == "gMod.dll") dll_url = asset.browser_download_url;
+                }
+            }
+
+            if (!parsed || dll_url.empty()) {
+                Resources::EnqueueMainTask([] {
+                    gmodUpdateStep = GmodUpdateStep::Idle;
+                    gmodUpdateStatus = "Could not check for gMod updates.";
+                });
+                return;
+            }
+
+            const auto managed = ManagedGmodDllPath();
+            const std::string local = GetDllFileVersion(managed);
+            if (!local.empty() && CompareVersions(version, local) <= 0) {
+                // Already have the latest (or newer).
+                Resources::EnqueueMainTask([version, local] {
+                    gmodUpdateStep = GmodUpdateStep::Idle;
+                    gmodLatestVersion = version;
+                    gmodLocalVersion = local;
+                    gmodUpdateStatus = "gMod is up to date (" + version + ").";
+                });
+                return;
+            }
+
+            Resources::EnqueueMainTask([version] {
+                gmodUpdateStep = GmodUpdateStep::Downloading;
+                gmodLatestVersion = version;
+                gmodUpdateStatus = "Downloading gMod " + version + "...";
+            });
+
+            Resources::EnsureFolderExists(managed.parent_path());
+            std::wstring error;
+            const bool ok = Resources::Download(managed, dll_url, error);
+
+            Resources::EnqueueMainTask([ok, version, error] {
+                gmodUpdateStep = GmodUpdateStep::Idle;
+                if (!ok) {
+                    gmodUpdateStatus = "gMod download failed: " + TextUtils::WStringToString(error);
+                    return;
+                }
+                gmodLocalVersion = version;
+                gmodUpdateStatus = "Updated gMod to " + version + ".";
+                ReloadGmod();
+            });
+        });
+    }
 
     // =========================================================================
     // UI helpers
@@ -514,17 +741,6 @@ namespace {
         std::filesystem::path p = path;
         if (!std::filesystem::exists(p)) return;
         LoadTexturePack(p);
-    }
-
-    void OnGmodDllFileChosen(const char* path)
-    {
-        if (!path) return;
-        std::filesystem::path p = path;
-        if (!std::filesystem::exists(p)) return;
-        gmodDllLocation = p;
-        statusMessage = "gMod DLL set to: " + gmodDllLocation.string();
-        gmodLoadAttempted = false;
-        InitGMod();
     }
 
     void DrawStatusBar()
@@ -539,13 +755,40 @@ namespace {
                 gmodLoadAttempted = false;
                 InitGMod();
             }
-            ImGui::SameLine();
-            if (ImGui::SmallButton("Browse")) Resources::OpenFileDialog(OnGmodDllFileChosen, "dll", Resources::GetSettingsFolderPath().string().c_str());
         }
         if (!statusMessage.empty()) {
             ImGui::SameLine();
             ImGui::TextDisabled("  %s", statusMessage.c_str());
         }
+    }
+
+    // gMod.dll status: gMod is downloaded and kept up to date automatically; show the
+    // installed version against the latest release and offer a manual re-check.
+    void DrawGmodSource()
+    {
+        if (!gmodLocalVersionChecked) RefreshLocalGmodVersion();
+
+        if (!gmodLocalVersion.empty())
+            ImGui::Text("Installed gMod version: %s", gmodLocalVersion.c_str());
+        else
+            ImGui::TextDisabled("No gMod.dll installed yet.");
+
+        if (!gmodLatestVersion.empty()) {
+            ImGui::SameLine();
+            if (!gmodLocalVersion.empty() && CompareVersions(gmodLatestVersion, gmodLocalVersion) <= 0)
+                ImGui::TextColored({0.4f, 1.0f, 0.4f, 1.0f}, ICON_FA_CHECK " up to date");
+            else
+                ImGui::TextColored({1.0f, 0.85f, 0.4f, 1.0f}, "(latest: %s)", gmodLatestVersion.c_str());
+        }
+
+        const bool busy = gmodUpdateStep != GmodUpdateStep::Idle;
+        ImGui::BeginDisabled(busy);
+        const char* label = gmodUpdateStep == GmodUpdateStep::Downloading ? "Downloading..." : gmodUpdateStep == GmodUpdateStep::Checking ? "Checking..." : "Check for gMod updates";
+        if (ImGui::Button(label)) CheckAndUpdateGmod();
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("gMod is downloaded automatically and kept in your GWToolbox folder.\nClick to check for a newer version now.");
+
+        if (!gmodUpdateStatus.empty()) ImGui::TextDisabled("%s", gmodUpdateStatus.c_str());
     }
 
     void DrawPackList()
@@ -572,8 +815,7 @@ namespace {
             return ImGui::CalcTextSize(label).x + style.FramePadding.x * 2.f;
         };
         // Actions column holds the move-up / move-down / delete buttons.
-        const float actions_width = btn_width(ICON_FA_ARROW_UP) + btn_width(ICON_FA_ARROW_DOWN)
-            + btn_width(ICON_FA_TRASH) + style.ItemSpacing.x * 2.f;
+        const float actions_width = btn_width(ICON_FA_ARROW_UP) + btn_width(ICON_FA_ARROW_DOWN) + btn_width(ICON_FA_TRASH) + style.ItemSpacing.x * 2.f;
         ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, font_size.y * 2.f);
         ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn("Path", ImGuiTableColumnFlags_WidthStretch);
@@ -643,6 +885,8 @@ namespace {
             if (ImGui::ConfirmButton(ICON_FA_TRASH, &del_bool)) {
                 if (pack.loaded) UnloadTexturePack(pack.path);
                 packs.erase(packs.begin() + i);
+                // No packs left to serve: drop gMod so it stops hooking the device.
+                if (packs.empty()) gmodUnloadRequested = true;
                 ImGui::PopID();
                 break;
             }
@@ -655,17 +899,301 @@ namespace {
         }
     }
 
+    // =========================================================================
+    // DirectX9 texture capture
+    //
+    // Hook D3D9 CreateTexture to gather every texture the game makes, keyed by
+    // gMod/uMod/Texmod hash, for export as DDS/PNG. Capturing is opt-in (`recording`)
+    // because hashing every created texture costs framerate. The cheap Release hook,
+    // once installed, stays in place so the map never keeps a freed texture pointer.
+    // =========================================================================
+
+    std::map<uint32_t, IDirect3DTexture9*> dx9_textures_created_by_hash;
+    bool recording = false;
+
+    typedef HRESULT(WINAPI* CreateDx9Texture_pt)(IDirect3DDevice9*, UINT, UINT, UINT, DWORD, D3DFORMAT, D3DPOOL, IDirect3DTexture9**, HANDLE*);
+    CreateDx9Texture_pt CreateDx9Texture_Func = 0, CreateDx9Texture_Ret = 0;
+
+    using TextureRelease_pt = ULONG(WINAPI*)(IDirect3DTexture9*);
+    TextureRelease_pt TextureRelease_Func = nullptr;
+    TextureRelease_pt TextureRelease_Ret = nullptr;
+
+    IDirect3DTexture9* LastCreatedTexture = nullptr;
+
+    // Hook Release to clean up tracking
+    ULONG WINAPI OnD3D9TextureRelease(IDirect3DTexture9* texture)
+    {
+        GW::Hook::EnterHook();
+        ULONG ref = TextureRelease_Ret(texture);
+        if (ref == 0) {
+            if (texture == LastCreatedTexture) LastCreatedTexture = 0;
+            // Remove from hash map if present
+            for (auto it = dx9_textures_created_by_hash.begin(); it != dx9_textures_created_by_hash.end();) {
+                if (it->second == texture) {
+                    it = dx9_textures_created_by_hash.erase(it);
+                }
+                else {
+                    ++it;
+                }
+            }
+        }
+        GW::Hook::LeaveHook();
+
+        return ref;
+    }
+
+    HRESULT WINAPI OnD3D9CreateTexture(IDirect3DDevice9* device, UINT Width, UINT Height, UINT Levels, DWORD Usage, D3DFORMAT Format, D3DPOOL Pool, IDirect3DTexture9** ppTexture, HANDLE* pSharedHandle)
+    {
+        GW::Hook::EnterHook();
+        HRESULT result = CreateDx9Texture_Ret(device, Width, Height, Levels, Usage, Format, Pool, ppTexture, pSharedHandle);
+
+        // Hash the texture from the *previous* call (deferred so the game has had a
+        // chance to fill it). Our reference (taken below) keeps it alive across the
+        // gap, so it can't be freed before we hash it.
+        if (auto tex = LastCreatedTexture) {
+            LastCreatedTexture = nullptr; // clear before Release so the re-entrant release hook is a no-op
+            const auto hash = Resources::GetTexmodHash(tex);
+            if (hash && !dx9_textures_created_by_hash.contains(hash)) {
+                dx9_textures_created_by_hash[hash] = tex;
+            }
+            tex->Release(); // drop our deferred-hash reference
+        }
+
+        // Only track managed/system-mem content textures (lockable, survive a device
+        // reset). Skip D3DPOOL_DEFAULT (render targets/dynamic): unsafe to lock,
+        // recreated on reset, and a held reference would block that reset.
+        if (SUCCEEDED(result) && *ppTexture && Pool != D3DPOOL_DEFAULT) {
+            // Hook Release on first texture creation
+            if (!TextureRelease_Func) {
+                uintptr_t* texture_vtable = *reinterpret_cast<uintptr_t**>(*ppTexture);
+                constexpr int RELEASE_INDEX = 2;
+                TextureRelease_Func = (TextureRelease_pt)texture_vtable[RELEASE_INDEX];
+                GW::Hook::CreateHook((void**)&TextureRelease_Func, OnD3D9TextureRelease, (void**)&TextureRelease_Ret);
+                GW::Hook::EnableHooks(TextureRelease_Func);
+            }
+            LastCreatedTexture = *ppTexture;
+            LastCreatedTexture->AddRef(); // keep alive until we hash it next call
+        }
+
+        GW::Hook::LeaveHook();
+        return result;
+    }
+
+    // Toggle the CreateTexture capture hook to match `record`. The Release hook is
+    // installed alongside it on first start and left in place after stopping.
+    void SetTextureCapture(bool record)
+    {
+        if (record) {
+            if (!CreateDx9Texture_Func) {
+                IDirect3DDevice9* device = GW::Render::GetDevice();
+                if (!device) return;
+                // Get vtable pointer
+                uintptr_t* vtable = *reinterpret_cast<uintptr_t**>(device);
+                // CreateTexture is at index 23 in IDirect3DDevice9 vtable
+                constexpr int CREATE_TEXTURE_INDEX = 23;
+                CreateDx9Texture_Func = (CreateDx9Texture_pt)vtable[CREATE_TEXTURE_INDEX];
+                GW::Hook::CreateHook((void**)&CreateDx9Texture_Func, OnD3D9CreateTexture, (void**)&CreateDx9Texture_Ret);
+                GW::Hook::EnableHooks(CreateDx9Texture_Func);
+            }
+
+            // Hook texture Release to track when textures are destroyed
+            if (!TextureRelease_Func) {
+                // We need any texture to get its vtable
+                // Create a temporary dummy texture to get the vtable
+                IDirect3DTexture9* temp_texture = nullptr;
+                IDirect3DDevice9* device = GW::Render::GetDevice();
+                if (device && SUCCEEDED(device->CreateTexture(1, 1, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &temp_texture, nullptr))) {
+                    uintptr_t* texture_vtable = *reinterpret_cast<uintptr_t**>(temp_texture);
+                    // Release is at index 2 in IUnknown (inherited by IDirect3DTexture9)
+                    constexpr int RELEASE_INDEX = 2;
+                    TextureRelease_Func = (TextureRelease_pt)texture_vtable[RELEASE_INDEX];
+                    GW::Hook::CreateHook((void**)&TextureRelease_Func, OnD3D9TextureRelease, (void**)&TextureRelease_Ret);
+                    GW::Hook::EnableHooks(TextureRelease_Func);
+                    temp_texture->Release(); // Clean up temp texture
+                }
+            }
+            return;
+        }
+        // Stop capturing, but keep the Release hook and map so the gallery stays valid.
+        if (CreateDx9Texture_Func) {
+            GW::Hook::DisableHooks(CreateDx9Texture_Func);
+            GW::Hook::RemoveHook(CreateDx9Texture_Func);
+            CreateDx9Texture_Func = nullptr;
+        }
+        if (auto tex = LastCreatedTexture) {
+            LastCreatedTexture = nullptr;
+            tex->Release(); // drop our deferred-hash reference
+        }
+    }
+
+    // Full teardown for module shutdown: remove both hooks and forget every capture.
+    void TeardownTextureCapture()
+    {
+        recording = false;
+        if (CreateDx9Texture_Func) {
+            GW::Hook::DisableHooks(CreateDx9Texture_Func);
+            GW::Hook::RemoveHook(CreateDx9Texture_Func);
+            CreateDx9Texture_Func = nullptr;
+        }
+        if (TextureRelease_Func) {
+            GW::Hook::DisableHooks(TextureRelease_Func);
+            GW::Hook::RemoveHook(TextureRelease_Func);
+            TextureRelease_Func = nullptr;
+        }
+        dx9_textures_created_by_hash.clear();
+        if (LastCreatedTexture) {
+            LastCreatedTexture->Release(); // drop our deferred-hash reference
+            LastCreatedTexture = nullptr;
+        }
+    }
+
+    // While recording, show an on-screen reminder (top-centre) with a button to stop.
+    void DrawRecordingOverlay()
+    {
+        if (!recording) return;
+
+        const ImGuiViewport* viewport = ImGui::GetMainViewport();
+        const float center_x = viewport->Pos.x + viewport->Size.x * 0.5f;
+        const float top_y = viewport->Pos.y + viewport->Size.y * 0.04f;
+
+        // Big title on the background draw list (over the game, behind toolbox windows).
+        ImDrawList* draw_list = ImGui::GetBackgroundDrawList();
+        ImFont* font = FontLoader::GetFont();
+        const char* title = ICON_FA_CIRCLE " Recording textures";
+        constexpr float title_size = static_cast<float>(FontLoader::FontSize::widget_small);
+        const ImVec2 title_dim = font->CalcTextSizeA(title_size, FLT_MAX, 0.f, title);
+        const ImVec2 title_pos(center_x - title_dim.x * 0.5f, top_y);
+        ImGui::PushFont(font, draw_list, title_size);
+        draw_list->AddText({title_pos.x + 2.f, title_pos.y + 2.f}, IM_COL32(0, 0, 0, 200), title);
+        draw_list->AddText(title_pos, IM_COL32(255, 80, 80, 255), title);
+        ImGui::PopFont(draw_list);
+
+        // Stop button in a transparent window below (a button needs a real window).
+        const float below_y = title_pos.y + title_dim.y + ImGui::GetStyle().ItemSpacing.y;
+        ImGui::SetNextWindowPos({center_x, below_y}, ImGuiCond_Always, {0.5f, 0.f});
+        ImGui::SetNextWindowBgAlpha(0.f);
+        constexpr ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav;
+        if (ImGui::Begin("##texmod_recording_overlay", nullptr, flags)) {
+            ImGui::TextUnformatted("Capturing every texture as you play is expensive and lowers your framerate.");
+            const char* btn = ICON_FA_STOP " Stop recording textures";
+            const float btn_w = ImGui::CalcTextSize(btn).x + ImGui::GetStyle().FramePadding.x * 2.f;
+            ImGui::SetCursorPosX((ImGui::GetWindowWidth() - btn_w) * 0.5f);
+            if (ImGui::Button(btn)) {
+                recording = false;
+            }
+        }
+        ImGui::End();
+    }
+
+    void DrawTextureGallery()
+    {
+        if (!ImGui::CollapsingHeader("Loaded DirectX9 Textures")) return;
+        constexpr ImVec2 scaled_size = {64.f, 64.f};
+        constexpr ImVec4 tint(1, 1, 1, 1);
+        const auto normal_bg = ImColor(IM_COL32(0, 0, 0, 0));
+        constexpr auto uv0 = ImVec2(0, 0);
+
+        if (recording) {
+            if (ImGui::Button(ICON_FA_STOP " Stop recording")) recording = false;
+        }
+        else {
+            static bool confirm_record = false;
+            if (ImGui::ConfirmButton(
+                    ICON_FA_CIRCLE " Record textures", &confirm_record,
+                    "Recording captures every texture the game creates as you play.\n"
+                    "Doing this continuously is expensive and will lower your framerate\n"
+                    "while it is active.\n\nStart recording textures?"
+                )) {
+                recording = true;
+                confirm_record = false;
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Reset")) {
+            dx9_textures_created_by_hash.clear();
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled("%d captured", static_cast<int>(dx9_textures_created_by_hash.size()));
+
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.f, 0.5f));
+
+        ImGui::StartSpacedElements(scaled_size.x);
+
+        size_t i = 0;
+        for (const auto& it : dx9_textures_created_by_hash) {
+            const auto texture = it.second;
+            const auto hash = it.first;
+            if (!texture) continue;
+            ImGui::PushID(i++);
+
+            const auto uv1 = ImGui::CalculateUvCrop(texture, scaled_size);
+            ImGui::NextSpacedElement();
+            const auto clicked = ImGui::ImageButton(texture, scaled_size, uv0, uv1, -1, normal_bg, tint);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("gMod/uMod/Texmod Hash: 0x%08x (Click to download)", hash);
+            }
+            if (clicked) {
+                ImGui::SetContextMenu([hash](void*) {
+                    ImGui::Text("gMod/uMod/Texmod Hash: 0x%08x", hash);
+                    ImGui::Separator();
+                    const char* ext = 0;
+                    if (ImGui::Button("Download as DDS (for gMod/uMod/Texmod)")) {
+                        ext = "dds";
+                    }
+                    if (ImGui::Button("Download as PNG")) {
+                        ext = "png";
+                    }
+                    if (ext) {
+                        const auto filename = std::format("GW.EXE_0x{:08X}.{}", hash, ext);
+                        const auto write_to = Resources::GetPath("extracted_textures", filename);
+                        Resources::EnsureFolderExists(Resources::GetPath("extracted_textures"));
+                        const auto found = dx9_textures_created_by_hash.find(hash);
+                        if (found != dx9_textures_created_by_hash.end()) {
+                            Resources::SaveTextureToFile(found->second, write_to);
+                        }
+                        return false;
+                    }
+                    return true;
+                });
+            }
+            ImGui::PopID();
+        }
+
+        ImGui::PopStyleColor();
+        ImGui::PopStyleVar();
+        ImGui::PopStyleVar();
+    }
+
 } // namespace
 
 void TexmodModule::Update(float)
 {
+    // Keep the D3D9 CreateTexture capture hook matched to the recording toggle.
+    SetTextureCapture(recording);
+
+    // Unload gMod once nothing needs it (requested when the last pack was removed).
+    if (gmodUnloadRequested) {
+        gmodUnloadRequested = false;
+        // Only unload what we own; an injected proxy is left to the game. ShutdownGMod
+        // already no-ops the FreeLibrary in that case, but skip the pack teardown too.
+        if (gmodLoadedByUs) ShutdownGMod();
+    }
+
     if (gmodReady) return;
     InitGMod();
 }
 
+void TexmodModule::Draw(IDirect3DDevice9*)
+{
+    DrawRecordingOverlay();
+}
+
 void TexmodModule::Terminate()
 {
-    ShutdownGMod(); // synchronously unloads every pack from gMod
+    TeardownTextureCapture();
+    ShutdownGMod(); // unloads every pack and frees gMod.dll if we loaded it
     ToolboxModule::Terminate();
 }
 
@@ -673,16 +1201,19 @@ void TexmodModule::DrawSettingsInternal()
 {
     DrawStatusBar();
     ImGui::Separator();
+    DrawGmodSource();
+    ImGui::Separator();
     DrawPackList();
     ImGui::Separator();
     if (ImGui::Button("Add texture pack")) Resources::OpenFileDialog(OnTexmodFileChosen, "tpf,zip,dds", Resources::GetSettingsFolderPath().string().c_str());
     ImGui::TextDisabled("Supported: .tpf, .zip (texmod format), .dds");
+    ImGui::Separator();
+    DrawTextureGallery();
 }
 
 void TexmodModule::LoadSettings(ToolboxIni* ini)
 {
     ToolboxModule::LoadSettings(ini);
-    gmodDllLocation = ini->GetValue(INI_SECTION, "gmod_dll_location", "");
     const int count = ini->GetLongValue(INI_SECTION, INI_PACK_COUNT, 0);
     packs.clear();
     for (int i = 0; i < count; i++) {
@@ -697,12 +1228,17 @@ void TexmodModule::LoadSettings(ToolboxIni* ini)
     // gMod is not ready yet (no device); the restored enabled flags are pushed to
     // it later by RestoreLoadedPacks(). This call is a no-op until then.
     SyncExternalPacks();
+
+    // Only fetch gMod for users who actually use texture packs: if any are configured,
+    // check GitHub and download a newer gMod automatically. Loading (Update ->
+    // InitGMod) then picks up whatever copy is in the GWToolbox folder. Users with no
+    // packs get the download lazily the moment they add their first one.
+    if (!packs.empty()) CheckAndUpdateGmod();
 }
 
 void TexmodModule::SaveSettings(ToolboxIni* ini)
 {
     ToolboxModule::SaveSettings(ini);
-    ini->SetValue(INI_SECTION, "gmod_dll_location", gmodDllLocation.string().c_str());
     ini->SetLongValue(INI_SECTION, INI_PACK_COUNT, static_cast<long>(packs.size()));
     for (size_t i = 0; i < packs.size(); i++) {
         const std::string key = std::string(INI_PACK_PATH) + std::to_string(i);

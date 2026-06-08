@@ -9,6 +9,9 @@
 // replacement packs (TPF/ZIP/DDS) through AddFile/RemoveFile. The list order is
 // priority: when two packs replace the same texture, the one higher in the list
 // wins, so reordering re-adds packs in the desired order.
+//
+// Draw() (a plain-module render hook) is used only to paint the texture-recording
+// overlay; the module has no window of its own.
 // ---------------------------------------------------------------------------
 class TexmodModule final : public ToolboxModule {
 public:
@@ -27,6 +30,7 @@ public:
 
     void Update(float dt) override;
     void Terminate() override;
+    void Draw(IDirect3DDevice9* device) override;
     void DrawSettingsInternal() override;
     void LoadSettings(ToolboxIni* ini) override;
     void SaveSettings(ToolboxIni* ini) override;
