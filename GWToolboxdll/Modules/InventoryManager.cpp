@@ -1342,8 +1342,9 @@ namespace {
             ImGui::BeginChild("block_from_being_salvaged", ImVec2(0.0F, list_height));
 
             const float wrap_width2 = ImGui::GetContentRegionAvail().x;
+            int salvage_block_idx = 0;
             for (const auto& it : block_from_being_salvaged) {
-                ImGui::PushID(it.second.c_str());
+                ImGui::PushID(salvage_block_idx++);
 
                 const auto button_label = std::format("{} | X", it.second);
 
@@ -2272,7 +2273,7 @@ void InventoryManager::Draw(IDirect3DDevice9*)
                         ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_Text));
                         break;
                 }
-                ImGui::PushID(static_cast<int>(pi->item_id));
+                ImGui::PushID(i);
                 ImGui::Checkbox(pi->name->string().c_str(), &pi->proceed);
                 const float item_name_length = ImGui::CalcTextSize(pi->name->string().c_str(), nullptr, true).x;
                 longest_item_name_length = item_name_length > longest_item_name_length ? item_name_length : longest_item_name_length;
