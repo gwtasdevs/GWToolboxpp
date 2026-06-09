@@ -262,6 +262,7 @@ namespace {
 
     bool hide_unlocked_achievements = false;
     bool hide_unlocked_skills = false;
+    bool hide_account_unlocked_skills = false;
     bool hide_completed_vanquishes = false;
     bool hide_completed_missions = false;
     bool hide_collected_hats = false;
@@ -1219,6 +1220,7 @@ bool PvESkill::Draw(IDirect3DDevice9* device)
 void PvESkill::CheckProgress(const std::wstring& player_name)
 {
     is_completed = false;
+    is_account_unlocked = GW::SkillbarMgr::GetIsSkillUnlocked(skill_id);
     const auto& skills = character_completion;
     if (!skills.contains(player_name)) {
         return;
@@ -2372,21 +2374,24 @@ void CompletionWindow::Draw(IDirect3DDevice9* device)
         }
     }
 
-    auto skills_title = [&, checkbox_offset](const char* title) {
+    auto skills_title = [&](const char* title) {
         ImGui::PushID(title);
         ImGui::Text(title);
         ImGui::ShowHelp("Guild Wars only shows skills learned for the current primary/secondary profession.\n\n"
             "GWToolbox remembers skills learned for other professions,\nbut is only able to update this info when you switch to that profession.");
-        ImGui::SameLine(checkbox_offset - 100.f);
+        const float skills_checkbox_offset = ImGui::GetContentRegionAvail().x - 280.f * ImGui::FontScale();
+        ImGui::SameLine(skills_checkbox_offset - 100.f * ImGui::FontScale());
         if (ImGui::Button("Check Now")) {
             GW::GameThread::Enqueue(CheckAllSkills);
         }
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Will cycle through your available secondary professions to detect all unlocked skills");
         }
-        ImGui::SameLine(checkbox_offset);
+        ImGui::SameLine(skills_checkbox_offset);
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, {0, 0});
-        ImGui::Checkbox("Hide learned skills", &hide_unlocked_skills);
+        ImGui::Checkbox("Hide learnt skills", &hide_unlocked_skills);
+        ImGui::SameLine();
+        ImGui::Checkbox("Hide unlocked skills", &hide_account_unlocked_skills);
         ImGui::PopStyleVar();
         ImGui::PopID();
     };
@@ -2402,9 +2407,12 @@ void CompletionWindow::Draw(IDirect3DDevice9* device)
                     continue;
                 }
             }
+            if (hide_account_unlocked_skills && camp_missions[i]->is_account_unlocked) {
+                continue;
+            }
             filtered.push_back(camp_missions[i]);
         }
-        if (hide_unlocked_skills && filtered.empty()) {
+        if ((hide_unlocked_skills || hide_account_unlocked_skills) && filtered.empty()) {
             continue;
         }
         char label[128];
@@ -2425,9 +2433,12 @@ void CompletionWindow::Draw(IDirect3DDevice9* device)
                     continue;
                 }
             }
+            if (hide_account_unlocked_skills && camp_missions[i]->is_account_unlocked) {
+                continue;
+            }
             filtered.push_back(camp_missions[i]);
         }
-        if (hide_unlocked_skills && filtered.empty()) {
+        if ((hide_unlocked_skills || hide_account_unlocked_skills) && filtered.empty()) {
             continue;
         }
         char label[128];
@@ -2830,6 +2841,7 @@ void CompletionWindow::LoadSettings(ToolboxIni* ini)
 
     LOAD_BOOL(show_as_list);
     LOAD_BOOL(hide_unlocked_skills);
+    LOAD_BOOL(hide_account_unlocked_skills);
     LOAD_BOOL(hide_completed_vanquishes);
     LOAD_BOOL(hide_completed_missions);
     LOAD_BOOL(hide_unlocked_achievements);
@@ -2961,6 +2973,7 @@ void CompletionWindow::SaveSettings(ToolboxIni* ini)
 
     SAVE_BOOL(show_as_list);
     SAVE_BOOL(hide_unlocked_skills);
+    SAVE_BOOL(hide_account_unlocked_skills);
     SAVE_BOOL(hide_completed_vanquishes);
     SAVE_BOOL(hide_completed_missions);
     SAVE_BOOL(hide_unlocked_achievements);
