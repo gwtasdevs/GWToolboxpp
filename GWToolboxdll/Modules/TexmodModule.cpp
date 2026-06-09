@@ -4,6 +4,7 @@
 #include <ToolboxIni.h>
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <cstdint>
 #include <cstring>
 #include <d3d9.h>
@@ -25,9 +26,7 @@
 #include <Utils/FontLoader.h>
 #include <Utils/TextUtils.h>
 
-// gMod GitHub release shape, parsed from the releases API. Kept at namespace scope
-// (external linkage) because glaze reflection can't bind types from an anonymous
-// namespace - mirrors Updater's github_api structs.
+// gMod GitHub release shape; at namespace scope as glaze reflection can't bind anonymous-namespace types.
 namespace gmod_github {
     struct ReleaseAsset {
         std::string name;
@@ -55,16 +54,11 @@ namespace {
     tGModGetFiles pfnGetFiles = nullptr;
     tGModSetDevice pfnSetDevice = nullptr;
 
-    // gMod return codes we care about (see gMod's Error.h). AddFile returns
-    // EXISTS - a negative value - when the pack is already loaded, which for our
-    // purposes is success, not an error.
+    // gMod return codes (see gMod's Error.h); AddFile returns EXISTS when a pack is already loaded, which we treat as success.
     constexpr int GMOD_RETURN_OK = 0;
     constexpr int GMOD_RETURN_EXISTS = -70;
 
-    // gMod version check / download (mirrors Updater's GitHub-release logic). gMod is
-    // managed automatically: on startup we fetch the latest release and, if it is
-    // newer than the copy kept in the GWToolbox folder (or none is present), download
-    // it there and load it.
+    // gMod version check / download (mirrors Updater): fetch the latest release and download it into the GWToolbox folder if newer.
     constexpr glz::opts gmod_json_opts{.error_on_unknown_keys = false};
 
     enum class GmodUpdateStep { Idle, Checking, Downloading };
@@ -93,19 +87,26 @@ namespace {
     bool gmodReady = false;
     std::string statusMessage;
     bool gmodLoadAttempted = false;
-    // Set when gMod is no longer needed (last pack removed); the unload is performed
-    // from Update() rather than the draw pass.
+    // Set when gMod is no longer needed (last pack removed); the unload runs from Update() not the draw pass.
     bool gmodUnloadRequested = false;
+    // True only when toolbox loaded gMod itself; false for one injected by a launcher.
+    bool gmodLoadedByToolbox = false;
+
+    // A launcher pre-loaded a gMod lacking our exports; we won't load our own on top (two swappers corrupt our originals). Cleared only by a restart.
+    bool gmodIncompatible = false;
+    std::filesystem::path gmodIncompatiblePath;
+
+    // Cached pre-loaded-gMod probe (a launcher injects before toolbox starts, so the state is fixed; probe once to avoid per-frame work).
+    bool preloadProbed = false;
+    HMODULE preloadGmod = nullptr;      // a gMod injected by something other than us, if any
+    bool preloadGmodCompatible = false; // ...and it exposes the API we can drive
 
     constexpr const char* INI_SECTION = "TexmodModule";
     constexpr const char* INI_PACK_COUNT = "PackCount";
     constexpr const char* INI_PACK_PATH = "Pack";
     constexpr const char* INI_PACK_ENABLED = "PackEnabled";
 
-    // path::string() would narrow to the ANSI codepage and lose non-ASCII characters
-    // (e.g. a "µ" in a pack name). Encode as UTF-8 instead, which round-trips through
-    // the INI and renders correctly in ImGui. Pair with TextUtils::StringToWString to
-    // decode back to a path.
+    // Encode a path as UTF-8 (path::string() would narrow to ANSI and lose non-ASCII); pair with StringToWString to decode.
     std::string PathToUtf8(const std::filesystem::path& p)
     {
         return TextUtils::WStringToString(p.wstring());
@@ -121,9 +122,7 @@ namespace {
         pfnRemoveFile = reinterpret_cast<tGModRemoveFile>(GetProcAddress(gmodDll, "RemoveFile"));
         pfnGetFiles = reinterpret_cast<tGModGetFiles>(GetProcAddress(gmodDll, "GetFiles"));
         pfnSetDevice = reinterpret_cast<tGModSetDevice>(GetProcAddress(gmodDll, "SetDevice"));
-        // GetFiles is required: we reconcile against the load order it reports, so
-        // a build whose GetFiles is missing (or doesn't report load order) can't be
-        // driven correctly.
+        // GetFiles is required: we reconcile against the load order it reports, so a build lacking it can't be driven.
         if (!pfnAddFile || !pfnRemoveFile || !pfnGetFiles || !pfnSetDevice) {
             statusMessage = "Error: gMod.dll is missing AddFile/RemoveFile/GetFiles/SetDevice exports. "
                             "Please use a gMod build that includes these functions.";
@@ -132,9 +131,7 @@ namespace {
         return true;
     }
 
-    // Read gMod's currently-loaded files, in load order (== priority): gMod hands
-    // them back in the order it loaded them, so this is what we diff against to
-    // reconcile. Best-effort - empty if GetFiles is absent or errors.
+    // Read gMod's loaded files in load order (== priority), what we diff against to reconcile; empty if GetFiles absent/errors.
     std::vector<std::filesystem::path> QueryGmodFiles()
     {
         std::vector<std::filesystem::path> result;
@@ -153,12 +150,7 @@ namespace {
         return result;
     }
 
-    // Reconcile our pack list with what gMod actually has loaded (via GetFiles):
-    // mark known packs loaded and adopt any gMod loaded on its own (e.g. from
-    // modlist.txt) as external entries. When clear_missing is true, packs gMod
-    // is not currently serving are marked unloaded - the right behaviour after an
-    // operation. Pass false on startup, before the restored enabled state has
-    // been pushed to gMod, so it is not wiped by gMod's still-empty set.
+    // Reconcile our list with gMod's loaded set (GetFiles), adopting externally-loaded packs; clear_missing=false on startup so the restored state isn't wiped by gMod's still-empty set.
     void SyncExternalPacks(bool clear_missing = true)
     {
         if (!pfnGetFiles) return;
@@ -194,12 +186,10 @@ namespace {
         }
     }
 
-    // Push the saved enabled state to gMod once it becomes ready. Defined below,
-    // after ApplyLoadOrder; forward-declared here for InitGMod.
+    // Push the saved enabled state to gMod once ready; forward-declared for InitGMod, defined after ApplyLoadOrder.
     void RestoreLoadedPacks();
 
-    // Check GitHub and download a newer gMod if needed. Forward-declared so adding a
-    // pack can trigger the download when gMod isn't loaded yet. Defined further down.
+    // Check GitHub and download a newer gMod if needed; forward-declared so adding a pack can trigger it.
     void CheckAndUpdateGmod();
 
     // Where the toolbox keeps its managed gMod.dll (auto-downloaded).
@@ -208,11 +198,74 @@ namespace {
         return Resources::GetPath("gmod") / "gMod.dll";
     }
 
-    // Load our own managed copy of gMod.dll and hand it the game's device. We never
-    // adopt a pre-existing gMod in the process; the toolbox always owns the copy it loads.
+    // True if the module exports the gMod texture API we drive.
+    bool ModuleHasGmodExports(HMODULE h)
+    {
+        return h && GetProcAddress(h, "AddFile") && GetProcAddress(h, "RemoveFile") && GetProcAddress(h, "GetFiles") && GetProcAddress(h, "SetDevice");
+    }
+
+    // Read a named string from a file's version resource (e.g. "ProductName"); empty if absent.
+    std::string GetDllVersionString(const std::filesystem::path& path, const wchar_t* name)
+    {
+        if (path.empty()) return {};
+        const auto wp = path.wstring();
+        DWORD handle = 0;
+        const DWORD size = GetFileVersionInfoSizeW(wp.c_str(), &handle);
+        if (!size) return {};
+        std::vector<BYTE> data(size);
+        if (!GetFileVersionInfoW(wp.c_str(), handle, size, data.data())) return {};
+        struct LangCodepage {
+            WORD language, codepage;
+        }* tr = nullptr;
+        UINT trLen = 0;
+        if (!VerQueryValueW(data.data(), L"\\VarFileInfo\\Translation", reinterpret_cast<LPVOID*>(&tr), &trLen) || !tr || trLen < sizeof(LangCodepage)) return {};
+        wchar_t query[64];
+        swprintf_s(query, L"\\StringFileInfo\\%04x%04x\\%s", tr->language, tr->codepage, name);
+        wchar_t* val = nullptr;
+        UINT valLen = 0;
+        if (!VerQueryValueW(data.data(), query, reinterpret_cast<LPVOID*>(&val), &valLen) || !val) return {};
+        return TextUtils::WStringToString(val);
+    }
+
+    // Does this module look like gMod (any version)? Named gMod.dll, or its version resource says so - catches an older gMod (or renamed d3d9 proxy) that lacks our exports.
+    bool ModuleIsGmod(HMODULE h)
+    {
+        if (!h) return false;
+        wchar_t buf[MAX_PATH] = {};
+        if (!GetModuleFileNameW(h, buf, MAX_PATH)) return false;
+        const std::filesystem::path p = buf;
+        if (_wcsicmp(p.filename().c_str(), L"gMod.dll") == 0) return true;
+        for (const wchar_t* key : {L"ProductName", L"InternalName", L"OriginalFilename"}) {
+            std::string s = GetDllVersionString(p, key);
+            std::ranges::transform(s, s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (s.contains("gmod")) return true;
+        }
+        return false;
+    }
+
+    // Probe once for a launcher-injected gMod: prefer one we can drive, else note an incompatible one; skips our own copy and the system d3d9.dll.
+    void ProbePreloadedGmodOnce()
+    {
+        if (preloadProbed) return;
+        if (!GW::Render::GetDevice()) return; // wait until the process is up so an injected gMod is present
+        preloadProbed = true;
+        for (const wchar_t* name : {L"gMod.dll", L"d3d9.dll"}) {
+            HMODULE h = GetModuleHandleW(name);
+            if (!h || h == gmodDll) continue;
+            if (ModuleHasGmodExports(h)) {
+                preloadGmod = h;
+                preloadGmodCompatible = true;
+                return;
+            }
+            if (!preloadGmod && ModuleIsGmod(h)) preloadGmod = h; // gMod we can't drive
+        }
+    }
+
+    // Bring gMod up: adopt one already in the process if present, else load our copy.
     bool InitGMod()
     {
         if (gmodReady) return true;
+        if (gmodIncompatible) return false; // a restart is the only way out
 
         auto device = GW::Render::GetDevice();
         if (!device) {
@@ -220,7 +273,30 @@ namespace {
             return false;
         }
 
-        // Nothing to mod with no packs: leave gMod unloaded rather than hook the device for nothing.
+        ProbePreloadedGmodOnce();
+
+        // 1a. A pre-loaded gMod we can drive: adopt it; we never own it.
+        if (preloadGmod && preloadGmodCompatible) {
+            gmodDll = preloadGmod;
+            ResolveTextureClientFunctions(); // exports confirmed by the probe
+            gmodLoadedByToolbox = false;
+            pfnSetDevice(device);
+            gmodReady = true;
+            statusMessage = "gMod was already active (pre-loaded). Texture pack loading enabled.";
+            RestoreLoadedPacks();
+            return true;
+        }
+
+        // 1b. A pre-loaded gMod we can't drive: loading ours on top would double-swap and corrupt our originals, so refuse and ask the user to update/remove it (needs a restart).
+        if (preloadGmod) {
+            gmodIncompatible = true;
+            wchar_t buf[MAX_PATH] = {};
+            if (GetModuleFileNameW(preloadGmod, buf, MAX_PATH)) gmodIncompatiblePath = buf;
+            statusMessage = "An older, incompatible gMod is already loaded by your launcher. Update it (or remove it so GWToolbox can manage gMod), then restart Guild Wars.";
+            return false;
+        }
+
+        // 2. Otherwise load our managed copy; with no packs, leave gMod unloaded.
         if (packs.empty()) return false;
         if (gmodLoadAttempted) return false;
         gmodLoadAttempted = true;
@@ -242,6 +318,7 @@ namespace {
             gmodDll = nullptr;
             return false;
         }
+        gmodLoadedByToolbox = true; // we loaded it, so we own its lifetime
         pfnSetDevice(device);
         gmodReady = true;
         RestoreLoadedPacks();
@@ -249,14 +326,7 @@ namespace {
     }
     TexturePackEntry* FindPack(const std::filesystem::path& path, bool create_if_not_found = false);
 
-    // gMod's AddFile decodes and DDS-compresses textures, which is slow enough to
-    // hitch the game if run on the render/main thread. So snapshot the desired set
-    // here (reading packs on the calling thread, where it is valid) and hand the
-    // heavy add/remove work to a worker thread; reconcile back on the main thread.
-    //
-    // apply_mutex serialises the worker-side reconciles, and apply_generation -
-    // bumped per request - lets a stale request (superseded while queued) skip its
-    // work, so rapid toggles can't apply out of order with 20 worker threads.
+    // AddFile is slow (decode + DDS-compress), so reconciles run on a worker; apply_mutex serialises them and apply_generation drops superseded requests so rapid toggles can't apply out of order.
     std::mutex apply_mutex;
     std::atomic<uint64_t> apply_generation = 0;
 
@@ -270,12 +340,7 @@ namespace {
         return desired;
     }
 
-    // Reconcile gMod's loaded set to `desired` with AddFile/RemoveFile. We read
-    // gMod's current load order straight from GetFiles (it reports files in load
-    // order). gMod gives the first-loaded pack priority on a texture conflict, so
-    // to honour the requested order we keep the longest matching prefix, remove
-    // everything after it, and re-add the desired tail in order. Returns the last
-    // gMod error (or 0). Caller must hold apply_mutex.
+    // Reconcile gMod's loaded set to `desired`: keep the longest matching prefix (first-loaded wins conflicts), remove the tail, re-add desired in order; returns last gMod error. Caller holds apply_mutex.
     int ReconcileLocked(const std::vector<std::filesystem::path>& desired)
     {
         const auto current = QueryGmodFiles();
@@ -283,12 +348,13 @@ namespace {
         while (prefix < current.size() && prefix < desired.size() && current[prefix] == desired[prefix]) {
             ++prefix;
         }
-        // Remove the diverging tail, deepest first, leaving the kept prefix intact.
+        int error = GMOD_RETURN_OK;
+        // Remove the diverging tail, deepest first; a failure (e.g. an old gMod that can't match the path) is reported, not swallowed, so the pack isn't silently left loaded.
         for (size_t i = current.size(); i-- > prefix;) {
-            if (pfnRemoveFile) pfnRemoveFile(current[i].wstring().c_str());
+            const int ret = pfnRemoveFile ? pfnRemoveFile(current[i].wstring().c_str()) : GMOD_RETURN_OK;
+            if (ret < 0 && ret != GMOD_RETURN_EXISTS) error = ret;
         }
         // Re-add the desired tail in order; earlier adds win conflicts.
-        int error = GMOD_RETURN_OK;
         for (size_t i = prefix; i < desired.size(); ++i) {
             const int ret = pfnAddFile ? pfnAddFile(desired[i].wstring().c_str()) : GMOD_RETURN_OK;
             if (ret < 0 && ret != GMOD_RETURN_EXISTS) error = ret;
@@ -296,8 +362,7 @@ namespace {
         return error;
     }
 
-    // The single point that changes what gMod has loaded; load, unload and reorder
-    // all funnel through here.
+    // The single point that changes what gMod has loaded; load, unload and reorder all funnel through here.
     void ApplyLoadOrder()
     {
         if (!gmodReady || !pfnAddFile || !pfnRemoveFile) {
@@ -308,15 +373,14 @@ namespace {
         const uint64_t my_generation = ++apply_generation;
 
         Resources::EnqueueWorkerTask([desired, my_generation] {
-            // Hold apply_mutex across the whole reconcile so add/remove sequences
-            // are serialised and only the newest request actually runs.
+            // Hold apply_mutex across the reconcile so add/remove sequences are serialised and only the newest request runs.
             std::lock_guard lk(apply_mutex);
             if (my_generation != apply_generation.load()) return; // superseded while queued
             if (!gmodReady) return;
             const int error = ReconcileLocked(*desired);
             Resources::EnqueueMainTask([error, my_generation] {
                 if (my_generation != apply_generation.load()) return; // a newer apply is in flight
-                if (error < 0) statusMessage = "gMod failed to load a pack (error " + std::to_string(error) + ").";
+                if (error < 0) statusMessage = "gMod failed to apply a pack change (error " + std::to_string(error) + ").";
                 SyncExternalPacks();
             });
         });
@@ -338,8 +402,7 @@ namespace {
         ApplyLoadOrder();
     }
 
-    // Move the pack at `index` one slot up (direction -1) or down (+1) in the
-    // list, changing its priority, then re-apply the order to gMod.
+    // Move the pack at `index` up (-1) or down (+1), changing its priority, then re-apply the order to gMod.
     bool MovePack(int index, int direction)
     {
         const int other = index + direction;
@@ -350,9 +413,7 @@ namespace {
         return true;
     }
 
-    // Called once gMod is ready: adopt anything it already loaded (modlist.txt
-    // etc.) without disturbing the enabled flags restored from settings, then push
-    // the combined set so the packs the user had enabled are loaded again.
+    // Called once gMod is ready: adopt anything it already loaded (modlist.txt etc.) then push the user's enabled set.
     void RestoreLoadedPacks()
     {
         gmodLocalVersionChecked = false; // gMod is now loaded; refresh the displayed version
@@ -362,11 +423,9 @@ namespace {
 
     void ShutdownGMod()
     {
-        if (gmodReady) {
-            // Unload synchronously: on teardown the worker threads are stopping, so a
-            // queued ApplyLoadOrder might never run. Holding apply_mutex waits out any
-            // in-flight worker reconcile; bumping the generation makes queued/running
-            // ones skip; then we remove everything here, last, so nothing reloads after.
+        // Only tear down a gMod we loaded; a pre-loaded one is left running with its packs.
+        if (gmodReady && gmodLoadedByToolbox) {
+            // Unload synchronously (worker threads are stopping): hold apply_mutex, bump the generation to skip queued reconciles, then remove everything here so nothing reloads after.
             std::lock_guard lk(apply_mutex);
             ++apply_generation;
             for (auto& pack : packs)
@@ -377,16 +436,18 @@ namespace {
             }
         }
 
+        const bool owned = gmodLoadedByToolbox;
+
         gmodReady = false;
         pfnAddFile = nullptr;
         pfnRemoveFile = nullptr;
         pfnGetFiles = nullptr;
         pfnSetDevice = nullptr;
 
-        // Free our dll. gMod's DllMain(DLL_PROCESS_DETACH) reverts all its D3D9 vtable
-        // hooks (RemoveAllD3D9Hooks), so this is its clean shutdown path.
-        if (gmodDll) FreeLibrary(gmodDll);
+        // Free only our own dll (its DllMain reverts gMod's D3D9 hooks); never a pre-loaded one.
+        if (owned && gmodDll) FreeLibrary(gmodDll);
         gmodDll = nullptr;
+        gmodLoadedByToolbox = false;
         gmodLoadAttempted = false; // allow a fresh load later (e.g. when a pack is added)
         gmodLocalVersionChecked = false;
     }
@@ -420,14 +481,12 @@ namespace {
         const auto filename = PathToUtf8(pack->path.filename());
         pack->loaded = true;
         if (!gmodReady) {
-            // First pack configured but gMod isn't loaded yet: fetch/download it now.
-            // The pack stays flagged loaded and is applied once gMod becomes ready.
+            // First pack configured but gMod isn't loaded yet: fetch it now; the pack applies once gMod is ready.
             statusMessage = "Preparing gMod for: " + filename;
             CheckAndUpdateGmod();
             return true;
         }
-        // The actual load runs on a worker thread; the result (and any failure)
-        // is reported when it reconciles. Show an optimistic status meanwhile.
+        // The load runs on a worker thread and reports on reconcile; show an optimistic status meanwhile.
         statusMessage = "Loading: " + filename;
         ApplyLoadOrder();
         return true;
@@ -439,8 +498,7 @@ namespace {
     // gMod version check / download
     // =========================================================================
 
-    // Read a DLL's file-version resource as "major.minor.patch.build". Empty if the
-    // file has no version info; gMod.dll's matches its GitHub release tag.
+    // Read a DLL's file-version resource as "major.minor.patch.build" (gMod.dll's matches its release tag); empty if none.
     std::string GetDllFileVersion(const std::filesystem::path& path)
     {
         if (path.empty()) return {};
@@ -456,14 +514,23 @@ namespace {
         return std::format("{}.{}.{}.{}", HIWORD(fi->dwFileVersionMS), LOWORD(fi->dwFileVersionMS), HIWORD(fi->dwFileVersionLS), LOWORD(fi->dwFileVersionLS));
     }
 
+    // Path of the gMod.dll in use: the live module if active, else the managed copy.
+    std::filesystem::path CurrentGmodDllPath()
+    {
+        if (gmodReady && gmodDll) {
+            wchar_t buf[MAX_PATH] = {};
+            if (GetModuleFileNameW(gmodDll, buf, MAX_PATH)) return buf;
+        }
+        return ManagedGmodDllPath();
+    }
+
     void RefreshLocalGmodVersion()
     {
-        gmodLocalVersion = GetDllFileVersion(ManagedGmodDllPath());
+        gmodLocalVersion = GetDllFileVersion(CurrentGmodDllPath());
         gmodLocalVersionChecked = true;
     }
 
-    // Compare dotted version strings ("1.8.0.2"): >0 if a is newer, <0 if older, 0 if
-    // equal. Missing trailing components count as 0, so "1.8" == "1.8.0.0".
+    // Compare dotted versions ("1.8.0.2"): >0 if a newer, <0 if older, 0 if equal; missing trailing parts count as 0.
     int CompareVersions(const std::string& a, const std::string& b)
     {
         const auto parse = [](const std::string& v) {
@@ -489,8 +556,7 @@ namespace {
         return 0;
     }
 
-    // Load the managed gMod.dll after it has changed on disk. The caller unloads any
-    // active copy first, so we just clear the load-attempt latch and init afresh.
+    // Load the managed gMod.dll after it changed on disk (caller already unloaded any active copy): clear the latch and init.
     void ReloadGmod()
     {
         gmodLocalVersionChecked = false;
@@ -498,15 +564,26 @@ namespace {
         InitGMod();
     }
 
-    // Fetch the latest gMod release and, if it is newer than the managed copy (or none
-    // exists), download it into the GWToolbox folder and load it. All network/disk work
-    // runs on a worker thread; state changes are posted back to the main thread.
+    // Is a gMod we did not load already in the process (compatible or not)? If so we never download/replace it.
+    bool ForeignGmodLoaded()
+    {
+        if (gmodReady) return !gmodLoadedByToolbox;
+        ProbePreloadedGmodOnce();
+        return preloadGmod != nullptr;
+    }
+
+    // Fetch the latest release; download+load it if newer, but only for a gMod we own.
     void CheckAndUpdateGmod()
     {
         if (gmodUpdateStep != GmodUpdateStep::Idle) return;
         gmodUpdateStep = GmodUpdateStep::Checking;
         gmodUpdateStatus.clear();
-        Resources::EnqueueWorkerTask([] {
+
+        // We may replace gMod only when we manage the copy; a pre-loaded one is checked, not touched.
+        const bool auto_managed = !ForeignGmodLoaded();
+        const auto in_use_path = CurrentGmodDllPath();
+
+        Resources::EnqueueWorkerTask([auto_managed, in_use_path] {
             std::string response;
             unsigned int tries = 0;
             const auto url = "https://api.github.com/repos/gwdevhub/gMod/releases/latest";
@@ -537,7 +614,7 @@ namespace {
             }
 
             const auto managed = ManagedGmodDllPath();
-            const std::string local = GetDllFileVersion(managed);
+            const std::string local = GetDllFileVersion(in_use_path);
             if (!local.empty() && CompareVersions(version, local) <= 0) {
                 // Already have the latest (or newer).
                 Resources::EnqueueMainTask([version, local] {
@@ -549,14 +626,24 @@ namespace {
                 return;
             }
 
+            if (!auto_managed) {
+                // Newer exists but the active gMod isn't ours; report it, leave updating to its owner.
+                Resources::EnqueueMainTask([version, local] {
+                    gmodUpdateStep = GmodUpdateStep::Idle;
+                    gmodLatestVersion = version;
+                    if (!local.empty()) gmodLocalVersion = local;
+                    gmodUpdateStatus = "A newer gMod (" + version + ") is available; it was loaded by your launcher, so update it there.";
+                });
+                return;
+            }
+
             Resources::EnqueueMainTask([version] {
                 gmodUpdateStep = GmodUpdateStep::Downloading;
                 gmodLatestVersion = version;
                 gmodUpdateStatus = "Downloading gMod " + version + "...";
             });
 
-            // Download to a temp file: our gMod.dll may still be loaded (and thus locked),
-            // so we can't write the real file yet. We swap it in on the main thread below.
+            // Download to a temp file since our gMod.dll may still be loaded (locked); swapped in on the main thread below.
             const auto tmp = managed.parent_path() / "gMod.tmp.dll";
             Resources::EnsureFolderExists(managed.parent_path());
             std::wstring error;
@@ -568,9 +655,7 @@ namespace {
                     gmodUpdateStatus = "gMod download failed: " + TextUtils::WStringToString(error);
                     return;
                 }
-                // Unload our copy so the file is no longer locked, then rename the temp
-                // download over the original and load the new version. ShutdownGMod clears
-                // the loaded flags, so remember the enabled packs to restore them after.
+                // Unload (unlocks the file), rename temp over the original, reload; remember enabled packs since ShutdownGMod clears them.
                 std::vector<std::filesystem::path> enabled;
                 for (const auto& pack : packs) {
                     if (pack.loaded) enabled.push_back(pack.path);
@@ -600,10 +685,7 @@ namespace {
     void OnTexmodFileChosen(const char* path)
     {
         if (!path) return;
-        // The file dialog hands back the path as UTF-8. Building a filesystem::path
-        // straight from a char* would decode it in the ANSI codepage instead, mangling
-        // non-ASCII names (e.g. a "µ" in the filename) into a path that doesn't exist.
-        // Decode the UTF-8 to a wide string first so the full Unicode path survives.
+        // The dialog returns UTF-8; decode to a wide string first so non-ASCII names survive (a char* path would decode as ANSI).
         const std::filesystem::path p = TextUtils::StringToWString(path);
         if (!std::filesystem::exists(p)) return;
         LoadTexturePack(p);
@@ -613,6 +695,9 @@ namespace {
     {
         if (gmodReady) {
             ImGui::TextColored({0.4f, 1.0f, 0.4f, 1.0f}, ICON_FA_CHECK " gMod active");
+        }
+        else if (gmodIncompatible) {
+            ImGui::TextColored({1.0f, 0.4f, 0.4f, 1.0f}, ICON_FA_TIMES " gMod blocked (incompatible version pre-loaded)");
         }
         else {
             ImGui::TextColored({1.0f, 0.4f, 0.4f, 1.0f}, ICON_FA_TIMES " gMod not initialised");
@@ -628,10 +713,19 @@ namespace {
         }
     }
 
-    // gMod.dll status: gMod is downloaded and kept up to date automatically; show the
-    // installed version against the latest release and offer a manual re-check.
+    // gMod.dll status: show the installed version against the latest release and offer a manual re-check.
     void DrawGmodSource()
     {
+        // A launcher pre-loaded a gMod we can't drive: warn and stop (the version row below would be misleading).
+        if (gmodIncompatible) {
+            const std::string old_version = GetDllFileVersion(gmodIncompatiblePath);
+            ImGui::TextColored({1.0f, 0.85f, 0.4f, 1.0f}, "An incompatible gMod%s is already loaded by your launcher.",
+                               old_version.empty() ? "" : (" (" + old_version + ")").c_str());
+            ImGui::TextDisabled("Update it to a current gMod%s, or remove it so GWToolbox manages gMod itself, then restart Guild Wars.",
+                                gmodLatestVersion.empty() ? "" : (" (latest: " + gmodLatestVersion + ")").c_str());
+            return;
+        }
+
         if (!gmodLocalVersionChecked) RefreshLocalGmodVersion();
 
         if (!gmodLocalVersion.empty())
@@ -767,13 +861,9 @@ namespace {
 
     // =========================================================================
     // DirectX9 texture capture
-    //
-    // Hook D3D9 CreateTexture to gather every texture the game makes, keyed by
-    // gMod/uMod/Texmod hash, for export as DDS/PNG. Capturing is opt-in (`recording`)
-    // because hashing every created texture costs framerate. The cheap Release hook,
-    // once installed, stays in place so the map never keeps a freed texture pointer.
     // =========================================================================
 
+    // Hook D3D9 CreateTexture to gather textures by gMod hash for DDS/PNG export; opt-in (recording) since hashing costs FPS, with a Release hook so the map never keeps a freed pointer.
     std::map<uint32_t, IDirect3DTexture9*> dx9_textures_created_by_hash;
     bool recording = false;
 
@@ -813,9 +903,7 @@ namespace {
         GW::Hook::EnterHook();
         HRESULT result = CreateDx9Texture_Ret(device, Width, Height, Levels, Usage, Format, Pool, ppTexture, pSharedHandle);
 
-        // Hash the texture from the *previous* call (deferred so the game has had a
-        // chance to fill it). Our reference (taken below) keeps it alive across the
-        // gap, so it can't be freed before we hash it.
+        // Hash the texture from the *previous* call (deferred so the game has filled it); our reference keeps it alive across the gap.
         if (auto tex = LastCreatedTexture) {
             LastCreatedTexture = nullptr; // clear before Release so the re-entrant release hook is a no-op
             const auto hash = Resources::GetTexmodHash(tex);
@@ -825,9 +913,7 @@ namespace {
             tex->Release(); // drop our deferred-hash reference
         }
 
-        // Only track managed/system-mem content textures (lockable, survive a device
-        // reset). Skip D3DPOOL_DEFAULT (render targets/dynamic): unsafe to lock,
-        // recreated on reset, and a held reference would block that reset.
+        // Only track managed/system-mem textures (lockable, survive reset); skip D3DPOOL_DEFAULT (unsafe to lock, and a held ref would block device reset).
         if (SUCCEEDED(result) && *ppTexture && Pool != D3DPOOL_DEFAULT) {
             // Hook Release on first texture creation
             if (!TextureRelease_Func) {
@@ -845,8 +931,7 @@ namespace {
         return result;
     }
 
-    // Toggle the CreateTexture capture hook to match `record`. The Release hook is
-    // installed alongside it on first start and left in place after stopping.
+    // Toggle the CreateTexture capture hook to match `record`; the Release hook installs on first start and stays after stopping.
     void SetTextureCapture(bool record)
     {
         if (record) {
@@ -864,8 +949,7 @@ namespace {
 
             // Hook texture Release to track when textures are destroyed
             if (!TextureRelease_Func) {
-                // We need any texture to get its vtable
-                // Create a temporary dummy texture to get the vtable
+                // Create a temporary dummy texture to get its vtable.
                 IDirect3DTexture9* temp_texture = nullptr;
                 IDirect3DDevice9* device = GW::Render::GetDevice();
                 if (device && SUCCEEDED(device->CreateTexture(1, 1, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &temp_texture, nullptr))) {
@@ -1039,10 +1123,10 @@ void TexmodModule::Update(float)
     // Keep the D3D9 CreateTexture capture hook matched to the recording toggle.
     SetTextureCapture(recording);
 
-    // Unload gMod once nothing needs it (requested when the last pack was removed).
+    // Unload gMod once nothing needs it, but only one we loaded: tearing down a pre-loaded one would cancel the in-flight unload and re-adopt it next frame, resurrecting its packs.
     if (gmodUnloadRequested) {
         gmodUnloadRequested = false;
-        ShutdownGMod();
+        if (gmodLoadedByToolbox) ShutdownGMod();
     }
 
     if (gmodReady) return;
@@ -1084,21 +1168,16 @@ void TexmodModule::LoadSettings(ToolboxIni* ini)
         const std::string key = std::string(INI_PACK_PATH) + std::to_string(i);
         const char* val = ini->GetValue(INI_SECTION, key.c_str(), nullptr);
         if (!val || !*val) continue;
-        // Stored as UTF-8 (see SaveSettings); decode to a wide path so non-ASCII names
-        // survive. Falls back to the ANSI codepage for any pre-existing legacy value.
+        // Stored as UTF-8 (see SaveSettings); decode to a wide path so non-ASCII names survive.
         std::filesystem::path p = TextUtils::StringToWString(val);
         const std::string enabled_key = std::string(INI_PACK_ENABLED) + std::to_string(i);
         const bool enabled = ini->GetBoolValue(INI_SECTION, enabled_key.c_str(), false);
         packs.push_back({p, PathToUtf8(p.stem()), /*loaded=*/enabled});
     }
-    // gMod is not ready yet (no device); the restored enabled flags are pushed to
-    // it later by RestoreLoadedPacks(). This call is a no-op until then.
+    // gMod isn't ready yet (no device); the restored enabled flags are pushed later by RestoreLoadedPacks(), so this is a no-op until then.
     SyncExternalPacks();
 
-    // Only fetch gMod for users who actually use texture packs: if any are configured,
-    // check GitHub and download a newer gMod automatically. Loading (Update ->
-    // InitGMod) then picks up whatever copy is in the GWToolbox folder. Users with no
-    // packs get the download lazily the moment they add their first one.
+    // Only fetch gMod for users who actually use texture packs; those with none get it lazily on their first added pack.
     if (!packs.empty()) CheckAndUpdateGmod();
 }
 
