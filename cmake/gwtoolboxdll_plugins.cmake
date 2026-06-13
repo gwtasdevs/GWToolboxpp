@@ -13,7 +13,10 @@ target_sources(plugin_base INTERFACE
     "GWToolboxdll/RectF.h"
     "GWToolboxdll/MinimapPlugin.h"
     "GWToolboxdll/ToolboxIni.h"
-    "GWToolboxdll/ToolboxIni.cpp")
+    "GWToolboxdll/ToolboxIni.cpp"
+    # Compiled into each plugin DLL: plugins get their own SettingsDoc/ToolboxIni (not exported by GWToolboxdll).
+    "GWToolboxdll/ToolboxIni.cpp"
+    "GWToolboxdll/Utils/SettingsDoc.cpp")
 target_include_directories(plugin_base INTERFACE
     "plugins/Base"
     "GWToolboxdll" # careful here, we only get access to exported and header functions!

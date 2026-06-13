@@ -4,10 +4,12 @@
 
 #include <GWToolbox.h>
 #include <Defines.h>
+#include <ImGuiAddons.h>
+#include <Modules/Resources.h>
 #include <Windows/PerformanceWindow.h>
 
 namespace {
-    int slow_threshold_us = 1000;
+    PerformanceWindow::Settings settings;
 
     // QPC helper
     uint64_t QpcToMicroseconds(LONGLONG ticks)
@@ -105,8 +107,51 @@ namespace {
     std::map<std::string, ModuleStats> acc_modules;
     DWORD window_start_tick = 0;
 
-    void FlushWindow()
+    // Raw 1s accumulator values, so true averages can be recomputed offline
+    void AppendCsvRow(std::string& out, DWORD tick, const char* category, const char* name, const char* metric, const Stats& s)
     {
+        if (s.count == 0) return;
+        char line[192];
+        snprintf(line, sizeof(line), "%lu,%s,%s,%s,%u,%llu,%llu,%llu\n",
+                 tick, category, name, metric, s.count,
+                 static_cast<unsigned long long>(s.sum_us),
+                 static_cast<unsigned long long>(s.min_us),
+                 static_cast<unsigned long long>(s.max_us));
+        out += line;
+    }
+
+    // Runs on a worker thread so the draw loop never touches the disk
+    void WriteCsvRows(const std::string& rows)
+    {
+        static std::mutex csv_mutex;
+        std::scoped_lock lock(csv_mutex);
+        std::ofstream file(Resources::GetPath(L"performance_log.csv"), std::ios::app);
+        if (!file.is_open()) return;
+        // Header only for a fresh file; appending preserves earlier runs
+        if (file.tellp() == 0)
+            file << "tick_ms,category,name,metric,count,sum_us,min_us,max_us\n";
+        file << rows;
+    }
+
+    void StreamSnapshotToCsv(DWORD tick)
+    {
+        std::string rows;
+        AppendCsvRow(rows, tick, "frame", "frame", "period", acc_frame);
+        AppendCsvRow(rows, tick, "toolbox", "tb_update", "update", acc_tb_update);
+        AppendCsvRow(rows, tick, "toolbox", "tb_draw", "draw", acc_tb_draw);
+        AppendCsvRow(rows, tick, "toolbox", "present", "present", acc_present);
+        for (const auto& [name, ms] : acc_modules) {
+            AppendCsvRow(rows, tick, "module", name.c_str(), "update", ms.update);
+            AppendCsvRow(rows, tick, "module", name.c_str(), "draw", ms.draw);
+        }
+        if (!rows.empty())
+            Resources::EnqueueWorkerTask([rows = std::move(rows)] { WriteCsvRows(rows); });
+    }
+
+    void FlushWindow(DWORD tick)
+    {
+        if (settings.stream_to_csv) StreamSnapshotToCsv(tick);
+
         // Store current 1s snapshot into ring buffer
         hist_frame[hist_index] = acc_frame;
         hist_tb_update[hist_index] = acc_tb_update;
@@ -213,7 +258,7 @@ void PerformanceWindow::Draw(IDirect3DDevice9* device)
     const DWORD now = GetTickCount();
     if (window_start_tick == 0) window_start_tick = now;
     if (now - window_start_tick >= 1000) {
-        FlushWindow();
+        FlushWindow(now);
         window_start_tick = now;
     }
 
@@ -328,7 +373,7 @@ void PerformanceWindow::Draw(IDirect3DDevice9* device)
                     const uint64_t total_avg = e.stats.update.Avg() + e.stats.draw.Avg();
                     ImGui::TableNextRow();
                     ImGui::TableNextColumn();
-                    if (total_avg >= static_cast<uint64_t>(slow_threshold_us))
+                    if (total_avg >= static_cast<uint64_t>(settings.slow_threshold_us))
                         ImGui::TextColored(ImVec4(1.f, 0.3f, 0.3f, 1.f), "%s", e.name);
                     else
                         ImGui::TextUnformatted(e.name);
@@ -400,7 +445,7 @@ void PerformanceWindow::Draw(IDirect3DDevice9* device)
                     for (const auto& e : ui_entries) {
                         ImGui::TableNextRow();
                         ImGui::TableNextColumn();
-                        if (e.stats.Avg() >= static_cast<uint64_t>(slow_threshold_us))
+                        if (e.stats.Avg() >= static_cast<uint64_t>(settings.slow_threshold_us))
                             ImGui::TextColored(ImVec4(1.f, 0.3f, 0.3f, 1.f), "%s", e.module_name);
                         else
                             ImGui::TextUnformatted(e.module_name);
@@ -423,26 +468,36 @@ void PerformanceWindow::Draw(IDirect3DDevice9* device)
     ImGui::End();
 }
 
+void PerformanceWindow::Initialize()
+{
+    ToolboxWindow::Initialize();
+    SettingsRegistry::Register(this, settings);
+}
+
+void PerformanceWindow::LoadSettings(SettingsDoc& doc, ToolboxIni* legacy)
+{
+    ToolboxWindow::LoadSettings(doc, legacy);
+    doc.GetStruct(Name(), settings);
+}
+
+void PerformanceWindow::SaveSettings(SettingsDoc& doc)
+{
+    ToolboxWindow::SaveSettings(doc);
+    doc.SetStruct(Name(), settings);
+}
+
 void PerformanceWindow::Terminate()
 {
     UnhookPresent();
     ToolboxWindow::Terminate();
 }
 
-void PerformanceWindow::LoadSettings(ToolboxIni* ini)
-{
-    ToolboxWindow::LoadSettings(ini);
-    LOAD_UINT(slow_threshold_us);
-}
-
-void PerformanceWindow::SaveSettings(ToolboxIni* ini)
-{
-    ToolboxWindow::SaveSettings(ini);
-    SAVE_UINT(slow_threshold_us);
-}
-
 void PerformanceWindow::DrawSettingsInternal()
 {
-    ImGui::InputInt("Slow module threshold (us)", &slow_threshold_us, 100, 1000);
-    if (slow_threshold_us < 0) slow_threshold_us = 0;
+    ImGui::InputInt("Slow module threshold (us)", &settings.slow_threshold_us, 100, 1000);
+    if (settings.slow_threshold_us < 0) settings.slow_threshold_us = 0;
+
+    ImGui::Checkbox("Stream timings to CSV", &settings.stream_to_csv);
+    ImGui::ShowHelp("Appends per-second timings to performance_log.csv in the settings folder "
+                    "while the Performance window is open. Useful for comparing builds offline.");
 }
