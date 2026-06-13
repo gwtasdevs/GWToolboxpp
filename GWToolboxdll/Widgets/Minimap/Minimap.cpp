@@ -1973,5 +1973,3 @@ void Minimap::RenderSetupProjection(IDirect3DDevice9* device, const MinimapRende
 
     device->SetTransform(D3DTS_PROJECTION, reinterpret_cast<const D3DMATRIX*>(&proj));
 }
-;
-    merchant_k(p�ITp
