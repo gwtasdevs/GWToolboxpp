@@ -27,17 +27,10 @@ namespace {
     };
     std::unordered_map<GW::AgentID, TrackedEnemy> tracked_enemies{};
 
-    float range = 1600.0f;
     const float sqr_aggro_range = GW::Constants::Range::Earshot * GW::Constants::Range::Earshot;
     const float sqr_lost_aggro_range = GW::Constants::Range::Spellcast * GW::Constants::Range::Spellcast;
 
-    bool hide_when_nothing = true;
-    bool show_souls_counter = true;
-    bool show_waters_counter = true;
-    bool show_minds_counter = true;
-    float souls_threshhold = 0.6f;
-    float waters_threshhold = 0.5f;
-    float minds_threshhold = 0.0f;
+    DupingWindow::Settings settings;
     GW::AgentID last_attacked_agent_id;
     GW::HookEntry AgentAttack_Entry;
 
@@ -247,7 +240,8 @@ namespace {
 
 void DupingWindow::Initialize()
 {
-    RegisterSettingsContent();
+    ToolboxWindow::Initialize();
+    SettingsRegistry::Register(this, settings);
 
     GW::StoC::RegisterPacketCallback<GW::Packet::StoC::GenericValue>(&AgentAttack_Entry, [](GW::HookStatus*, const GW::Packet::StoC::GenericValue* packet) {
         if (packet->agent_id != GW::Agents::GetObservingId() || packet->value_id != 8 || packet->value != 1) {
@@ -302,7 +296,7 @@ void DupingWindow::Update(float)
     if (!me)
         return;
 
-    const float sqr_range = range * range;
+    const float sqr_range = settings.range * settings.range;
     std::set<GW::AgentID> tracked_enemy_ids{};
     for (auto* agent : *agents) {
         const auto living = agent ? agent->GetAsAgentLiving() : nullptr;
@@ -355,7 +349,7 @@ void DupingWindow::Draw(IDirect3DDevice9*)
         return;
     }
     const bool is_in_doa = GW::Map::GetMapID() == GW::Constants::MapID::Domain_of_Anguish && GW::Map::GetInstanceType() == GW::Constants::InstanceType::Explorable;
-    if (hide_when_nothing && !is_in_doa) {
+    if (settings.hide_when_nothing && !is_in_doa) {
         return;
     }
 
@@ -381,30 +375,30 @@ void DupingWindow::Draw(IDirect3DDevice9*)
                 if (info.aggro_group > 0 && info.will_follow)
                     following_soul_count++;
 
-                if (living->hp <= souls_threshhold)
+                if (living->hp <= settings.souls_threshhold)
                     souls_by_aggro_group[info.aggro_group].push_back(std::make_pair(id, &info));
                 break;
             case GW::Constants::ModelID::DoA::WaterTormentor:
             case GW::Constants::ModelID::DoA::VeilWaterTormentor:
                 total_water_count++;
 
-                if (living->hp <= waters_threshhold)
+                if (living->hp <= settings.waters_threshhold)
                     waters.push_back(std::make_pair(id, &info));
                 break;
             case GW::Constants::ModelID::DoA::MindTormentor:
             case GW::Constants::ModelID::DoA::VeilMindTormentor:
                 total_mind_count++;
 
-                if (living->hp <= minds_threshhold)
+                if (living->hp <= settings.minds_threshhold)
                     minds.push_back(std::make_pair(id, &info));
                 break;
         }
     }
 
-    if (hide_when_nothing &&
-        (!show_souls_counter || total_soul_count == 0) &&
-        (!show_waters_counter || total_water_count == 0) &&
-        (!show_minds_counter || total_mind_count == 0)
+    if (settings.hide_when_nothing &&
+        (!settings.show_souls_counter || total_soul_count == 0) &&
+        (!settings.show_waters_counter || total_water_count == 0) &&
+        (!settings.show_minds_counter || total_mind_count == 0)
     ) {
         return;
     }
@@ -422,9 +416,9 @@ void DupingWindow::Draw(IDirect3DDevice9*)
     ImGui::SetNextWindowCenter(ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(300, 0), ImGuiCond_FirstUseEver);
     if (ImGui::Begin(Name(), GetVisiblePtr(), GetWinFlags())) {
-        const auto total_counters = (show_souls_counter ? 1 : 0)
-                                    + (show_waters_counter ? 1 : 0)
-                                    + (show_minds_counter ? 1 : 0);
+        const auto total_counters = (settings.show_souls_counter ? 1 : 0)
+                                    + (settings.show_waters_counter ? 1 : 0)
+                                    + (settings.show_minds_counter ? 1 : 0);
 
         if (total_counters > 0) {
             const auto total_width = ImGui::GetContentRegionAvail().x;
@@ -439,23 +433,23 @@ void DupingWindow::Draw(IDirect3DDevice9*)
 
             const auto padding = (
                                      total_width
-                                     - (show_souls_counter ? souls_width : 0)
-                                     - (show_waters_counter ? waters_width : 0)
-                                     - (show_minds_counter ? minds_width : 0)
+                                     - (settings.show_souls_counter ? souls_width : 0)
+                                     - (settings.show_waters_counter ? waters_width : 0)
+                                     - (settings.show_minds_counter ? minds_width : 0)
                                  ) / (total_counters - 1);
 
             float offset = 0.0f;
-            if (show_souls_counter) {
+            if (settings.show_souls_counter) {
                 ImGui::Text(souls_text.c_str());
                 offset += souls_width + padding;
                 ImGui::SameLine(padding < 0 ? 0 : offset);
             }
-            if (show_waters_counter) {
+            if (settings.show_waters_counter) {
                 ImGui::Text(waters_text.c_str());
                 offset += waters_width + padding;
                 ImGui::SameLine(padding < 0 ? 0 : offset);
             }
-            if (show_minds_counter) {
+            if (settings.show_minds_counter) {
                 ImGui::Text(minds_text.c_str());
             }
         }
@@ -469,52 +463,36 @@ void DupingWindow::Draw(IDirect3DDevice9*)
 
 void DupingWindow::DrawSettingsInternal()
 {
-    ImGui::Checkbox("Hide when there is nothing to show", &hide_when_nothing);
-    ImGui::DragFloat("Range", &range, 50, 0, 5000);
+    ImGui::Checkbox("Hide when there is nothing to show", &settings.hide_when_nothing);
+    ImGui::DragFloat("Range", &settings.range, 50, 0, 5000);
 
     ImGui::Separator();
     ImGui::Text("Enemy Counters:");
     ImGui::StartSpacedElements(275.f);
     ImGui::NextSpacedElement();
-    ImGui::Checkbox("Show souls", &show_souls_counter);
+    ImGui::Checkbox("Show souls", &settings.show_souls_counter);
     ImGui::NextSpacedElement();
-    ImGui::Checkbox("Show waters", &show_waters_counter);
+    ImGui::Checkbox("Show waters", &settings.show_waters_counter);
     ImGui::NextSpacedElement();
-    ImGui::Checkbox("Show minds", &show_minds_counter);
+    ImGui::Checkbox("Show minds", &settings.show_minds_counter);
 
     ImGui::Separator();
     ImGui::Text("Duping thresholds:");
     ImGui::ShowHelp("Threshold HP below which enemy duping info is displayed");
 
-    ImGui::DragFloat("Souls", &souls_threshhold, 0.01f, 0, 1);
-    ImGui::DragFloat("Waters", &waters_threshhold, 0.01f, 0, 1);
-    ImGui::DragFloat("Minds", &minds_threshhold, 0.01f, 0, 1);
+    ImGui::DragFloat("Souls", &settings.souls_threshhold, 0.01f, 0, 1);
+    ImGui::DragFloat("Waters", &settings.waters_threshhold, 0.01f, 0, 1);
+    ImGui::DragFloat("Minds", &settings.minds_threshhold, 0.01f, 0, 1);
 }
 
-void DupingWindow::LoadSettings(ToolboxIni* ini)
+void DupingWindow::LoadSettings(SettingsDoc& doc, ToolboxIni* legacy)
 {
-    ToolboxWindow::LoadSettings(ini);
-    LOAD_BOOL(hide_when_nothing);
-    LOAD_BOOL(show_souls_counter);
-    LOAD_BOOL(show_waters_counter);
-    LOAD_BOOL(show_minds_counter);
-
-    LOAD_FLOAT(souls_threshhold);
-    LOAD_FLOAT(waters_threshhold);
-    LOAD_FLOAT(minds_threshhold);
-    LOAD_FLOAT(range);
+    ToolboxWindow::LoadSettings(doc, legacy);
+    doc.GetStruct(Name(), settings);
 }
 
-void DupingWindow::SaveSettings(ToolboxIni* ini)
+void DupingWindow::SaveSettings(SettingsDoc& doc)
 {
-    ToolboxWindow::SaveSettings(ini);
-    SAVE_BOOL(hide_when_nothing);
-    SAVE_BOOL(show_souls_counter);
-    SAVE_BOOL(show_waters_counter);
-    SAVE_BOOL(show_minds_counter);
-
-    SAVE_FLOAT(souls_threshhold);
-    SAVE_FLOAT(waters_threshhold);
-    SAVE_FLOAT(minds_threshhold);
-    SAVE_FLOAT(range);
+    ToolboxWindow::SaveSettings(doc);
+    doc.SetStruct(Name(), settings);
 }
