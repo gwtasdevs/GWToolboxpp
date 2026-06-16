@@ -46,6 +46,7 @@
 #include <Modules/QuestModule.h>
 #include <Utils/ArenaNetFileParser.h>
 #include <Utils/TextUtils.h>
+#include <Windows/Pathfinding/PathfindingWindow.h>
 #include <Windows/Pathfinding/PathingMapDataLoader.h>
 #include <corecrt_math_defines.h>
 
@@ -76,7 +77,7 @@ namespace {
         GW::Vec2f world_pos;
         uint32_t map_file_id = 0;
         uint32_t prop_index = 0;
-        
+
         uint32_t linked_portal_map_file_id = 0;
         uint32_t linked_portal_prop_index = 0;
 
@@ -435,8 +436,7 @@ namespace {
 
     void AppendMapFileInfo()
     {
-        if (!current_map_file_id || map_info_by_file_id.contains(current_map_file_id)) 
-            return;
+        if (!current_map_file_id || map_info_by_file_id.contains(current_map_file_id)) return;
         MapFileInfo info;
         const auto map_context = GW::GetMapContext();
         info.map_file_id = current_map_file_id;
@@ -791,9 +791,7 @@ namespace {
 
             if (zaishen_coin_texture && *zaishen_coin_texture && DailyQuests::GetZaishenCoinReward(quest->quest_id)) {
                 const float coin_half = quest_icon_size * 0.3f;
-                draw_list->AddImage(*zaishen_coin_texture,
-                    {viewport_quest_pos.x - coin_half, viewport_quest_pos.y - coin_half},
-                    {viewport_quest_pos.x + coin_half, viewport_quest_pos.y + coin_half});
+                draw_list->AddImage(*zaishen_coin_texture, {viewport_quest_pos.x - coin_half, viewport_quest_pos.y - coin_half}, {viewport_quest_pos.x + coin_half, viewport_quest_pos.y + coin_half});
             }
 
             return icon_rect.Contains(ImGui::GetMousePos());
@@ -828,6 +826,10 @@ namespace {
         const auto map_info = GW::Map::GetMapInfo(quest->map_to);
         if (!(map_info && map_info->continent == world_map_context->continent)) return false;
         GW::Vec2f pos;
+        if (QuestModule::GetCustomQuestMarkerWorldPos(quest->quest_id, pos)) {
+            return draw_quest_marker(pos);
+        }
+
         if (WorldMapWidget::GamePosToWorldMap(quest->marker, pos)) {
             if (quest->map_to != GW::Map::GetMapID()) {
                 is_hovered |= draw_quest_arrow(pos);
@@ -948,51 +950,58 @@ void WorldMapWidget::Initialize()
     AppendMapFileInfo();
 }
 
-bool WorldMapWidget::WorldMapToGamePos(const GW::Vec2f& world_map_pos, GW::GamePos& game_map_pos)
+namespace {
+    // World map is 96 gwinches per unit, hard-coded in the GW source.
+    constexpr float gwinches_per_unit = 96.f;
+
+    // World-map mid point for `map_id` (game bounds from the cached DAT) — the single
+    // anchor both conversions share.
+    bool GetMapWorldAnchor(GW::Constants::MapID map_id, GW::Vec2f& mid_out)
+    {
+        if ((uint32_t)map_id == 0) map_id = GW::Map::GetMapID();
+
+        const auto area_info = GW::Map::GetMapInfo(map_id);
+        ImRect map_bounds;
+        if (!area_info || !GW::Map::GetMapWorldMapBounds(area_info, &map_bounds)) return false;
+
+        Pathing::Vec2f game_min, game_max;
+        if (!Pathing::GetMapGameBoundsFromDAT(PathfindingWindow::GetMapFileId(map_id), game_min, game_max)) return false;
+
+        mid_out = {
+            map_bounds.Min.x + (abs(game_min.x) / gwinches_per_unit),
+            map_bounds.Min.y + (abs(game_max.y) / gwinches_per_unit),
+        };
+        return true;
+    }
+} // namespace
+
+bool WorldMapWidget::WorldMapToGamePos(const GW::Vec2f& world_map_pos, GW::GamePos& game_map_pos, GW::Constants::MapID map_id)
 {
-    ImRect map_bounds;
-    if (!GW::Map::GetMapWorldMapBounds(GW::Map::GetMapInfo(), &map_bounds)) return false;
+    GW::Vec2f mid;
+    if (!GetMapWorldAnchor(map_id, mid)) return false;
 
-    const auto current_map_context = GW::GetMapContext();
-    if (!current_map_context) return false;
-
-    const auto game_map_rect = ImRect(current_map_context->start_pos.x, current_map_context->start_pos.y, current_map_context->end_pos.x, current_map_context->end_pos.y);
-
-    constexpr auto gwinches_per_unit = 96.f;
-
-    // Calculate the mid-point of the map in world coordinates
-    GW::Vec2f map_mid_world_point = {
-        map_bounds.Min.x + (abs(game_map_rect.Min.x) / gwinches_per_unit),
-        map_bounds.Min.y + (abs(game_map_rect.Max.y) / gwinches_per_unit),
-    };
-
-    // Convert from world map position to game map position
-    game_map_pos.x = (world_map_pos.x - map_mid_world_point.x) * gwinches_per_unit;
-    game_map_pos.y = (world_map_pos.y - map_mid_world_point.y) * gwinches_per_unit * -1.f; // Invert Y axis
-
+    game_map_pos.x = (world_map_pos.x - mid.x) * gwinches_per_unit;
+    game_map_pos.y = (world_map_pos.y - mid.y) * gwinches_per_unit * -1.f; // Invert Y axis
     return true;
 }
 
-bool WorldMapWidget::GamePosToWorldMap(const GW::GamePos& game_map_pos, GW::Vec2f& world_map_pos)
+bool WorldMapWidget::GamePosToWorldMap(const GW::GamePos& game_map_pos, GW::Vec2f& world_map_pos, GW::Constants::MapID map_id)
 {
     if (game_map_pos.x == INFINITY || game_map_pos.y == INFINITY) return false;
-    ImRect map_bounds;
-    if (!GW::Map::GetMapWorldMapBounds(GW::Map::GetMapInfo(), &map_bounds)) return false;
-    const auto current_map_context = GW::GetMapContext();
-    if (!current_map_context) return false;
+    GW::Vec2f mid;
+    if (!GetMapWorldAnchor(map_id, mid)) return false;
 
-    const auto game_map_rect = ImRect(current_map_context->start_pos.x, current_map_context->start_pos.y, current_map_context->end_pos.x, current_map_context->end_pos.y);
-
-    // NB: World map is 96 gwinches per unit, this is hard coded in the GW source
-    constexpr auto gwinches_per_unit = 96.f;
-    GW::Vec2f map_mid_world_point = {
-        map_bounds.Min.x + (abs(game_map_rect.Min.x) / gwinches_per_unit),
-        map_bounds.Min.y + (abs(game_map_rect.Max.y) / gwinches_per_unit),
-    };
-
-    world_map_pos.x = (game_map_pos.x / gwinches_per_unit) + map_mid_world_point.x;
-    world_map_pos.y = ((game_map_pos.y * -1.f) / gwinches_per_unit) + map_mid_world_point.y; // Inverted Y Axis
+    world_map_pos.x = (game_map_pos.x / gwinches_per_unit) + mid.x;
+    world_map_pos.y = ((game_map_pos.y * -1.f) / gwinches_per_unit) + mid.y; // Inverted Y axis
     return true;
+}
+
+bool WorldMapWidget::GetMapMarkerWorldPos(GW::Constants::MapID map_id, GW::Vec2f& out)
+{
+    const auto map_info = GW::Map::GetMapInfo(map_id);
+    if (!map_info) return false;
+    out = GetMapMarkerPoint(map_info);
+    return out.x != 0 || out.y != 0;
 }
 
 void WorldMapWidget::SignalTerminate()
@@ -1083,7 +1092,8 @@ void WorldMapWidget::SaveSettings(SettingsDoc& doc)
     std::ofstream out(map_info_by_file_id_file);
     if (!out.is_open()) return;
     for (const auto& [file_id, info] : map_info_by_file_id) {
-        out << "MAP " << static_cast<uint32_t>(info.map_id)  << info.map_file_id << " " << info.world_pos_start.x << " " << info.world_pos_start.y << " " << info.world_pos_end.x << " " << info.world_pos_end.y << " " << info.portals.size() << " " << static_cast<uint32_t>(info.map_id) << "\n";
+        out << "MAP " << static_cast<uint32_t>(info.map_id) << info.map_file_id << " " << info.world_pos_start.x << " " << info.world_pos_start.y << " " << info.world_pos_end.x << " " << info.world_pos_end.y << " " << info.portals.size() << " "
+            << static_cast<uint32_t>(info.map_id) << "\n";
         for (const auto& portal : info.portals) {
             out << "PORTAL " << portal.map_file_id << " " << portal.prop_index << " " << portal.world_pos.x << " " << portal.world_pos.y << "\n";
         }
@@ -1191,7 +1201,7 @@ void WorldMapWidget::Draw(IDirect3DDevice9*)
         controls_window_rect.Translate(mouse_offset);
     }
     hovered_map_portal = 0;
-    #if 0
+#if 0
     DrawAreaOverlays();
     const auto current_map_info = GW::Map::GetMapInfo();
     for (auto& [_, map_info] : map_info_by_file_id) {
@@ -1202,8 +1212,9 @@ void WorldMapWidget::Draw(IDirect3DDevice9*)
             }
         }
     }
-    #endif
     DrawLockedAreaHighlights();
+#endif
+
 
 
     hovered_boss = nullptr;
@@ -1280,8 +1291,15 @@ void WorldMapWidget::Draw(IDirect3DDevice9*)
                               return line->visible;
                           })) {
             if (line->map != map_id) continue;
-            if (!GamePosToWorldMap(line->p1, line_start)) continue;
-            if (!GamePosToWorldMap(line->p2, line_end)) continue;
+            if (line->world_coords) {
+                // Already in world-map coords (e.g. a cross-map route tail) — use directly.
+                line_start = {line->p1.x, line->p1.y};
+                line_end = {line->p2.x, line->p2.y};
+            }
+            else {
+                if (!GamePosToWorldMap(line->p1, line_start)) continue;
+                if (!GamePosToWorldMap(line->p2, line_end)) continue;
+            }
 
             line_start.x = (line_start.x - world_map_context->top_left.x) * ui_scale.x + viewport_offset.x;
             line_start.y = (line_start.y - world_map_context->top_left.y) * ui_scale.y + viewport_offset.y;

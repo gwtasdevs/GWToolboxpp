@@ -135,6 +135,9 @@ public:
         bool draw_everywhere = false;
         bool created_by_toolbox = false;
         bool from_player_pos = false;
+        // p1/p2 hold world-map coords, not game coords; only the world map renders these
+        // (cross-map route tails, whose game positions belong to other maps).
+        bool world_coords = false;
         char name[128]{};
     };
 
