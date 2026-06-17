@@ -2,14 +2,13 @@
 
 #include <Windows.h>
 
-#include <GWCA/GameEntities/Quest.h>
 
+#include <GWCA/Constants/Constants.h>
 #include <GWCA/Context/WorldContext.h>
-
+#include <GWCA/GameEntities/Quest.h>
 #include <GWCA/Managers/QuestMgr.h>
 #include <GWCA/Managers/StoCMgr.h>
 #include <GWCA/Managers/UIMgr.h>
-
 #include <GWCA/Packets/StoC.h>
 
 #include <enumUtils.h>
@@ -25,7 +24,7 @@ namespace {
         content_start++;
         return enc_str.substr(content_start, enc_str.size() - content_start - 1).data();
     }
-    
+
     GW::HookEntry ObjectiveUpdateName_Entry;
     GW::HookEntry ObjectiveDone_Entry;
     GW::HookEntry DisplayDialogue_Entry;
@@ -45,14 +44,14 @@ std::optional<QuestInfo::Quest> QuestInfo::getQuest(std::string_view name) const
     const auto questLog = GW::QuestMgr::GetQuestLog();
     if (!questLog) return {};
 
-    for (const auto& quest : *questLog) 
+    for (const auto& quest : *questLog)
     {
         if (!quest.name) continue; // Fixed: passing null to decodedStrings.find implicitly constructs a wstring via wcslen, crashing if null.
         const auto decodedIt = decodedStrings.find(quest.name);
         if (decodedIt == decodedStrings.end()) continue;
 
         auto string = WStringToString(decodedIt->second);
-        if (string.contains(name)) 
+        if (string.contains(name))
         {
             return QuestInfo::Quest{std::move(string), quest.quest_id};
         }
@@ -61,11 +60,11 @@ std::optional<QuestInfo::Quest> QuestInfo::getQuest(std::string_view name) const
     return std::nullopt;
 }
 
-std::vector<QuestInfo::Objective> QuestInfo::listObjectives(GW::Constants::QuestID id) const 
+std::vector<QuestInfo::Objective> QuestInfo::listObjectives(GW::Constants::QuestID id) const
 {
     const auto questLog = GW::QuestMgr::GetQuestLog();
     if (!questLog) return {};
-    
+
     const auto quest = std::ranges::find_if(*questLog, [&](const auto& quest) { return quest.quest_id == id; });
     if (quest == questLog->end()) return {};
 
@@ -85,7 +84,7 @@ std::vector<QuestInfo::Objective> QuestInfo::listObjectives(GW::Constants::Quest
     return result;
 }
 
-std::vector<QuestInfo::Objective> QuestInfo::listMissionObjectives() const 
+std::vector<QuestInfo::Objective> QuestInfo::listMissionObjectives() const
 {
     const auto* worldContext = GW::GetWorldContext();
     if (!worldContext) return {}; // Fixed: was dereferenced directly; crashed during map transitions.
@@ -93,7 +92,7 @@ std::vector<QuestInfo::Objective> QuestInfo::listMissionObjectives() const
     std::vector<QuestInfo::Objective> result;
     result.reserve(objectives.size());
 
-    for (const auto& objective : objectives) 
+    for (const auto& objective : objectives)
     {
         const auto decodedIt = decodedStrings.find(objective.enc_str);
         if (decodedIt == decodedStrings.end()) continue;
@@ -105,12 +104,15 @@ std::vector<QuestInfo::Objective> QuestInfo::listMissionObjectives() const
     return result;
 }
 
-void QuestInfo::decodeStrings() 
+void QuestInfo::decodeStrings()
 {
-    if (const auto questLog = GW::QuestMgr::GetQuestLog()) 
+    if (const auto questLog = GW::QuestMgr::GetQuestLog())
     {
-        for (auto& quest : *questLog) 
+        for (auto& quest : *questLog)
         {
+            // skip custom quests added by toolbox
+            if (quest.map_from >= GW::Constants::MapID::Count) continue;
+
             if (quest.name && !decodedStrings.contains(quest.name)) { // Fixed: null check prevents wstring-from-null; slot pre-inserted so the pointer is stable before AsyncDecodeStr is called.
                 auto& slot = decodedStrings[quest.name];
                 GW::UI::AsyncDecodeStr(
@@ -142,7 +144,7 @@ void QuestInfo::decodeStrings()
 
     const auto* worldContext = GW::GetWorldContext();
     if (worldContext) { // Fixed: was dereferenced directly; called from every StoC callback so crashed on any packet during a load screen.
-        for (const auto& objective : worldContext->mission_objectives) 
+        for (const auto& objective : worldContext->mission_objectives)
         {
             if (!decodedStrings.contains(objective.enc_str)) {
                 auto& slot = decodedStrings[objective.enc_str];
@@ -211,7 +213,7 @@ void QuestInfo::update()
     if (objectivesToDecode.empty()) return;
 
     const auto& quest = objectivesToDecode.front();
-    if (!quest || quest->objectives) 
+    if (!quest || quest->objectives)
     {
         objectivesToDecode.pop();
         return;
