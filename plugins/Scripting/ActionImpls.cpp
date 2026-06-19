@@ -60,7 +60,7 @@ namespace {
                 return GW::Constants::Bag::Backpack;
         }
     }
-    bool isEquippable(GW::Constants::ItemType type) 
+    bool isEquippable(GW::Constants::ItemType type)
     {
         switch (type) {
             case GW::Constants::ItemType::Axe:
@@ -102,7 +102,7 @@ namespace {
             auto modStructFound = !modstruct.has_value();
             for (size_t i = 0; !modStructFound && i < item->mod_struct_size; i++)
                 modStructFound = *modstruct == item->mod_struct[i].mod;
-            
+
             if (modStructFound && item->model_id == model_id)
                 return item;
         }
@@ -115,7 +115,7 @@ namespace {
         GW::Item* item = nullptr;
         for (size_t i = static_cast<size_t>(GW::Constants::Bag::Backpack); i < bags_size && !item; i++)
             item = FindMatchingItem(static_cast<GW::Constants::Bag>(i), model_id, modstruct);
-        if (!item) 
+        if (!item)
             item = FindMatchingItem(GW::Constants::Bag::Equipped_Items, model_id, modstruct);
         return item;
     }
@@ -127,7 +127,7 @@ namespace {
             const auto bag = GW::Items::GetBag(bagSlot);
             if (!bag) continue;
 
-            for (uint32_t itemSlot = 0; itemSlot < bag->items.size(); ++itemSlot) 
+            for (uint32_t itemSlot = 0; itemSlot < bag->items.size(); ++itemSlot)
             {
                 if (!bag->items[itemSlot]) return std::pair{bagSlot, itemSlot};
             }
@@ -182,26 +182,26 @@ namespace {
             if (!skillBarArray) return {};
             const auto agentSkillBar = std::ranges::find_if(*skillBarArray, [&](const auto& skillbar){ return skillbar.agent_id == agentId; });
             if (agentSkillBar == skillBarArray->end()) return {};
-            if (const auto skillBarSkill = agentSkillBar->GetSkillById(skillId); skillBarSkill && skillBarSkill->GetRecharge() == 0) 
+            if (const auto skillBarSkill = agentSkillBar->GetSkillById(skillId); skillBarSkill && skillBarSkill->GetRecharge() == 0)
                 return skillBarSkill - &agentSkillBar->skills[0];
             return {};
         };
 
         const auto partyInfo = GW::PartyMgr::GetPartyInfo();
-        if (!partyInfo) 
+        if (!partyInfo)
             return {};
         const auto& party_heros = partyInfo->heroes;
-        if (!party_heros.valid()) 
+        if (!party_heros.valid())
             return {};
 
         const auto player = GW::Agents::GetControlledCharacter();
-        if (!player) 
+        if (!player)
             return {};
-        
+
         for (auto heroIt = party_heros.begin(); heroIt != party_heros.end(); ++heroIt)
         {
             if (heroIt->owner_player_id != player->login_number || (heroId && heroIt->hero_id != heroId.value())) continue;
-            if (const auto skillSlot = heroSkillSlot(heroIt->agent_id)) 
+            if (const auto skillSlot = heroSkillSlot(heroIt->agent_id))
                 return std::pair{heroIt - party_heros.begin(), *skillSlot};
         }
         return {};
@@ -218,7 +218,7 @@ namespace {
 /// ------------- MoveToAction -------------
 MoveToAction::MoveToAction()
 {
-    if (auto player = GW::Agents::GetControlledCharacter()) 
+    if (auto player = GW::Agents::GetControlledCharacter())
     {
         pos = player->pos;
     }
@@ -252,14 +252,14 @@ ActionStatus MoveToAction::isComplete() const
 
     const auto distance = GW::GetDistance(player->pos, pos);
 
-    if (distance > GW::Constants::Range::Compass) 
+    if (distance > GW::Constants::Range::Compass)
     {
         return ActionStatus::Error; // We probably teled
     }
 
-    if (!player->GetIsMoving() && distance > accuracy + eps) 
+    if (!player->GetIsMoving() && distance > accuracy + eps)
     {
-        if (moveBehaviour == MoveToBehaviour::RepeatIfIdle) 
+        if (moveBehaviour == MoveToBehaviour::RepeatIfIdle)
         {
             constexpr auto radius = 5;
             float px = pos.x + float(rand() % radius - radius / 2) / radius;
@@ -574,7 +574,7 @@ void CastBySlotAction::drawSettings()
     if (slot < 1) slot = 1;
     if (slot > 8) slot = 8;
     ImGui::PopItemWidth();
-    
+
     ImGui::PopID();
 }
 
@@ -636,13 +636,13 @@ void ChangeTargetAction::initialAction()
 
     const GW::AgentLiving* currentBestTarget = nullptr;
 
-    const auto isNewBest = [&](const GW::AgentLiving* agent) 
+    const auto isNewBest = [&](const GW::AgentLiving* agent)
     {
         if(!currentBestTarget)
             return true;
-        if (preferNonHexed && !agent->GetIsHexed() && currentBestTarget->GetIsHexed()) 
+        if (preferNonHexed && !agent->GetIsHexed() && currentBestTarget->GetIsHexed())
             return true;
-        if (preferNonHexed && agent->GetIsHexed() && !currentBestTarget->GetIsHexed()) 
+        if (preferNonHexed && agent->GetIsHexed() && !currentBestTarget->GetIsHexed())
             return false;
 
         if (rotateThroughTargets)
@@ -665,11 +665,11 @@ void ChangeTargetAction::initialAction()
                 return GW::GetSquareDistance(player->pos, agent->pos) > GW::GetSquareDistance(player->pos, currentBestTarget->pos);
             case Sorting::ClosestToTarget:
                 return currentTarget
-                    ? GW::GetSquareDistance(currentTarget->pos, agent->pos) < GW::GetSquareDistance(currentTarget->pos, currentBestTarget->pos) 
+                    ? GW::GetSquareDistance(currentTarget->pos, agent->pos) < GW::GetSquareDistance(currentTarget->pos, currentBestTarget->pos)
                     : GW::GetSquareDistance(player->pos, agent->pos) < GW::GetSquareDistance(player->pos, currentBestTarget->pos); // Fallback: Closest to player
             case Sorting::FurthestFromTarget:
-                return currentTarget 
-                    ? GW::GetSquareDistance(currentTarget->pos, agent->pos) > GW::GetSquareDistance(currentTarget->pos, currentBestTarget->pos) 
+                return currentTarget
+                    ? GW::GetSquareDistance(currentTarget->pos, agent->pos) > GW::GetSquareDistance(currentTarget->pos, currentBestTarget->pos)
                     : GW::GetSquareDistance(player->pos, agent->pos) < GW::GetSquareDistance(player->pos, currentBestTarget->pos); // Fallback: Closest to player
             case Sorting::LowestHp:
                 return agent->hp < currentBestTarget->hp;
@@ -682,7 +682,7 @@ void ChangeTargetAction::initialAction()
         }
     };
 
-    const auto testAgent = [&](const GW::Agent* agent) 
+    const auto testAgent = [&](const GW::Agent* agent)
     {
         if (!agent || !agent->GetIsLivingType()) return;
 
@@ -692,13 +692,13 @@ void ChangeTargetAction::initialAction()
         if (isNewBest(living)) currentBestTarget = living;
     };
 
-    for (const auto* agent : *agents) 
+    for (const auto* agent : *agents)
     {
         testAgent(agent);
         if (currentBestTarget && sorting == Sorting::AgentId && !rotateThroughTargets) break;
     }
 
-    if (!currentBestTarget) 
+    if (!currentBestTarget)
         return;
 
     if (rotateThroughTargets)
@@ -742,7 +742,7 @@ void ChangeTargetAction::drawSettings()
 
     ImGui::Bullet();
     if (ImGui::Button("+")) characteristics.push_back(nullptr);
-    
+
     ImGui::Text("Sorting:");
     ImGui::SameLine();
     drawEnumButton(sorting, {.last = Sorting::ModelID, .id = 20, .width = 150.f});
@@ -847,9 +847,9 @@ void EquipItemAction::drawSettings()
         }
         ImGui::PopItemWidth();
     }
-    else 
+    else
     {
-        if (ImGui::Button("Add modstruct")) 
+        if (ImGui::Button("Add modstruct"))
         {
             hasModstruct = true;
         }
@@ -867,7 +867,7 @@ void EquipItemBySlotAction::serialize(OutputStream& stream) const
 {
     Action::serialize(stream);
 
-    stream << bag << slot;    
+    stream << bag << slot;
 }
 void EquipItemBySlotAction::initialAction()
 {
@@ -982,7 +982,7 @@ void GoToTargetAction::serialize(OutputStream& stream) const
 void GoToTargetAction::initialAction()
 {
     Action::initialAction();
-    
+
     target = GW::Agents::GetTargetAsAgentLiving();
     if (!target || target->allegiance == GW::Constants::Allegiance::Enemy) return;
 
@@ -1003,7 +1003,7 @@ ActionStatus GoToTargetAction::isComplete() const
 {
     switch (finishCondition)
     {
-        case GoToTargetFinishCondition::StoppedMovingNextToTarget: 
+        case GoToTargetFinishCondition::StoppedMovingNextToTarget:
         {
             if (!target || target->allegiance == GW::Constants::Allegiance::Enemy) return ActionStatus::Error;
 
@@ -1083,14 +1083,14 @@ void SendChatAction::serialize(OutputStream& stream) const
     writeStringWithSpaces(stream, message);
 }
 namespace {
-    std::string evaluateVariables(std::string_view string) 
+    std::string evaluateVariables(std::string_view string)
     {
         const auto variables = ScriptVariableManager::getInstance().list();
 
         auto result = std::string{string};
 
         for (const auto& [name, value] : variables) {
-            while (true) 
+            while (true)
             {
                 const auto index = result.find("$" + name);
                 if (index == std::string::npos) break;
@@ -1105,7 +1105,7 @@ void SendChatAction::initialAction()
 {
     Action::initialAction();
 
-    if (channel == Channel::Log) 
+    if (channel == Channel::Log)
     {
         logMessage(message);
         return;
@@ -1215,7 +1215,7 @@ void DropBuffAction::drawSettings()
 ConditionedAction::ConditionedAction(InputStream& stream)
 {
     std::string read;
-    const auto readCond = [&](auto& condition) 
+    const auto readCond = [&](auto& condition)
     {
         stream >> read;
         if (read == missingContentToken)
@@ -1243,8 +1243,8 @@ ConditionedAction::ConditionedAction(InputStream& stream)
             stream.proceedPastSeparator(2);
         }
     };
-    
-    try 
+
+    try
     {
         readCond(cond);
         readActionSequence(actionsIf);
@@ -1267,7 +1267,7 @@ void ConditionedAction::serialize(OutputStream& stream) const
 {
     Action::serialize(stream);
 
-    const auto writeCondition = [&](const auto& condition) 
+    const auto writeCondition = [&](const auto& condition)
     {
         if (condition)
             condition->serialize(stream);
@@ -1275,10 +1275,10 @@ void ConditionedAction::serialize(OutputStream& stream) const
             stream << missingContentToken;
         stream.writeSeparator(2);
     };
-    const auto writeActionSequence = [&](const auto& sequence) 
+    const auto writeActionSequence = [&](const auto& sequence)
     {
         stream << sequence.size();
-        for (const auto& action : sequence) 
+        for (const auto& action : sequence)
         {
             if (action)
                 action->serialize(stream);
@@ -1293,7 +1293,7 @@ void ConditionedAction::serialize(OutputStream& stream) const
     writeActionSequence(actionsElse);
 
     stream << actionsElseIf.size();
-    for (const auto& [condEI, actionsEI] : actionsElseIf) 
+    for (const auto& [condEI, actionsEI] : actionsElseIf)
     {
         writeCondition(condEI);
         writeActionSequence(actionsEI);
@@ -1315,7 +1315,7 @@ void ConditionedAction::initialAction()
     {
         for (const auto& [condEI, actionsEI] : actionsElseIf)
         {
-            if (condEI && condEI->check()) 
+            if (condEI && condEI->check())
             {
                 foundActions = true;
                 currentlyExecutedActions = actionsEI;
@@ -1331,7 +1331,7 @@ void ConditionedAction::initialAction()
     while (!currentlyExecutedActions.empty())
     {
         auto& front = currentlyExecutedActions.front();
-        if (!front) 
+        if (!front)
             currentlyExecutedActions.erase(currentlyExecutedActions.begin(), currentlyExecutedActions.begin() + 1);
         else if (front->behaviour().test(ActionBehaviourFlag::ImmediateFinish))
         {
@@ -1339,7 +1339,7 @@ void ConditionedAction::initialAction()
             front->finalAction();
             currentlyExecutedActions.erase(currentlyExecutedActions.begin(), currentlyExecutedActions.begin() + 1);
         }
-        else 
+        else
         {
             front->initialAction();
             break;
@@ -1351,11 +1351,11 @@ ActionStatus ConditionedAction::isComplete() const
     if (currentlyExecutedActions.empty()) return ActionStatus::Complete;
     const auto first = currentlyExecutedActions.front();
 
-    const auto finishFirstAction = [&] 
+    const auto finishFirstAction = [&]
     {
         currentlyExecutedActions.erase(currentlyExecutedActions.begin());
 
-        if (!currentlyExecutedActions.empty()) 
+        if (!currentlyExecutedActions.empty())
         {
             if (const auto second = currentlyExecutedActions.front()) second->initialAction();
         }
@@ -1381,21 +1381,21 @@ ActionStatus ConditionedAction::isComplete() const
         return finishFirstAction();
     }
 }
-void ConditionedAction::drawSettings() 
+void ConditionedAction::drawSettings()
 {
-    const auto drawActionsSelector = [](auto& actions) 
+    const auto drawActionsSelector = [](auto& actions)
     {
         ImGui::Indent(indent);
 
         std::optional<int> rowToDelete;
         std::optional<std::pair<int, int>> rowsToSwap;
 
-        for (int i = 0; i < int(actions.size()); ++i) 
+        for (int i = 0; i < int(actions.size()); ++i)
         {
             ImGui::PushID(i);
 
             ImGui::Bullet();
-            if (ImGui::Button("X", ImVec2(20, 0))) 
+            if (ImGui::Button("X", ImVec2(20, 0)))
             {
                 if (actions[i])
                     actions[i] = nullptr;
@@ -1403,7 +1403,7 @@ void ConditionedAction::drawSettings()
                     rowToDelete = i;
             }
             ImGui::SameLine();
-            if (ImGui::Button("^", ImVec2(20, 0)) && i > 0) 
+            if (ImGui::Button("^", ImVec2(20, 0)) && i > 0)
                 rowsToSwap = {i - 1, i};
             ImGui::SameLine();
             if (ImGui::Button("v", ImVec2(20, 0)) && i + 1 < int(actions.size())) rowsToSwap = {i, i + 1};
@@ -1420,7 +1420,7 @@ void ConditionedAction::drawSettings()
         if (rowsToSwap) std::swap(*(actions.begin() + rowsToSwap->first), *(actions.begin() + rowsToSwap->second));
 
         ImGui::Bullet();
-        if (ImGui::Button("Add row")) 
+        if (ImGui::Button("Add row"))
         {
             actions.push_back(nullptr);
         }
@@ -1431,17 +1431,17 @@ void ConditionedAction::drawSettings()
     ImGui::PushID(drawId());
 
     ImGui::PushID(0);
-    if (cond) 
+    if (cond)
     {
-        if (ImGui::Button("Remove")) 
+        if (ImGui::Button("Remove"))
             cond = nullptr;
-        else 
+        else
         {
             ImGui::SameLine();
             cond->drawSettings();
         }
     }
-    else    
+    else
         cond = drawConditionSelector(120.f);
     drawActionsSelector(actionsIf);
     ImGui::PopID();
@@ -1460,11 +1460,11 @@ void ConditionedAction::drawSettings()
         ImGui::SameLine();
         if (ImGui::Button("v", ImVec2(20, 0)) && elseIfIndex + 1 < int(actionsElseIf.size())) elseIfToSwap = {elseIfIndex, elseIfIndex + 1};
         ImGui::SameLine();
-        if (condEI) 
+        if (condEI)
         {
-            if (ImGui::Button("Remove")) 
+            if (ImGui::Button("Remove"))
                 condEI = nullptr;
-            else 
+            else
             {
                 ImGui::SameLine();
                 ImGui::Text("Else");
@@ -1472,13 +1472,13 @@ void ConditionedAction::drawSettings()
                 condEI->drawSettings();
             }
         }
-        else 
+        else
         {
             ImGui::Text("Else If");
             ImGui::SameLine();
             condEI = drawConditionSelector(120.f);
         }
-        
+
         drawActionsSelector(actionsEI);
         ImGui::PopID();
 
@@ -1486,7 +1486,7 @@ void ConditionedAction::drawSettings()
     }
     if (elseIfToDelete) actionsElseIf.erase(actionsElseIf.begin() + elseIfToDelete.value());
     if (elseIfToSwap) std::swap(*(actionsElseIf.begin() + elseIfToSwap->first), *(actionsElseIf.begin() + elseIfToSwap->second));
-    
+
     if (!actionsElse.empty())
     {
         ImGui::PushID(1 + actionsElseIf.size());
@@ -1500,14 +1500,14 @@ void ConditionedAction::drawSettings()
 
     if (ImGui::Button("Add else if"))
         actionsElseIf.push_back({nullptr, {}});
-    
+
     if (actionsElse.empty())
     {
         ImGui::SameLine();
         if (ImGui::Button("Add else"))
             actionsElse.push_back(nullptr);
     }
-    
+
     ImGui::Unindent(indent);
 
     ImGui::PopID();
@@ -1515,11 +1515,11 @@ void ConditionedAction::drawSettings()
 ActionBehaviourFlags ConditionedAction::behaviour() const
 {
     ActionBehaviourFlags flags = ActionBehaviourFlag::All;
-    for (const auto& action : actionsIf) 
+    for (const auto& action : actionsIf)
     {
         if (action) flags &= action->behaviour();
     }
-    for (const auto& action : actionsElse) 
+    for (const auto& action : actionsElse)
     {
         if (action) flags &= action->behaviour();
     }
@@ -1652,8 +1652,8 @@ void PingTargetAction::initialAction()
 
     if (onlyOncePerInstance && pingedTargets.contains(currentTarget->agent_id)) return;
     pingedTargets.insert(currentTarget->agent_id);
-    
-    GW::GameThread::Enqueue([id = currentTarget->agent_id]() 
+
+    GW::GameThread::Enqueue([id = currentTarget->agent_id]()
     {
         Ping_Func(GW::CallTargetType::AttackingOrTargetting, id);
     });
@@ -1676,7 +1676,7 @@ void AutoAttackTargetAction::initialAction()
 
     const auto currentTarget = GW::Agents::GetTargetAsAgentLiving();
     if (!currentTarget || currentTarget->allegiance != GW::Constants::Allegiance::Enemy) return;
-    
+
     GW::GameThread::Enqueue([currentTarget]{ GW::Agents::InteractAgent(currentTarget); });
 }
 void AutoAttackTargetAction::drawSettings()
@@ -1940,9 +1940,9 @@ void WaitUntilAction::drawSettings()
 
     ImGui::PopID();
 }
-ActionStatus WaitUntilAction::isComplete() const 
+ActionStatus WaitUntilAction::isComplete() const
 {
-    if (!condition || condition->check()) 
+    if (!condition || condition->check())
         return ActionStatus::Complete;
     return ActionStatus::Running;
 }
@@ -1995,7 +1995,7 @@ void SetVariableAction::initialAction()
 void SetVariableAction::drawSettings()
 {
     ImGui::PushID(drawId());
-    
+
     ImGui::PushItemWidth(200.f);
     ImGui::Text("Set variable");
     ImGui::SameLine();
@@ -2010,7 +2010,7 @@ void SetVariableAction::drawSettings()
 
     ImGui::SameLine();
     ImGui::Checkbox("Preserve through instance load", &preserveThroughInstanceLoad);
-    
+
     ImGui::PopID();
 }
 
@@ -2034,7 +2034,7 @@ void IncrementVariableAction::initialAction()
     {
         value->value += 1;
         scriptManager.set(name, *value);
-    } 
+    }
 }
 
 void IncrementVariableAction::drawSettings()
@@ -2143,21 +2143,21 @@ void MoveItemToSlotAction::initialAction()
     const auto item = FindMatchingItem(id, hasModstruct ? std::optional{modstruct} : std::nullopt);
     const auto bag = GW::Items::GetBag(toGwcaBag(bagId));
 
-    if (!item || !bag || slot < 0) 
+    if (!item || !bag || slot < 0)
     {
         return;
     }
-    if (item->bag->bag_id() == toGwcaBag(bagId) && item->slot == slot) 
+    if (item->bag->bag_id() == toGwcaBag(bagId) && item->slot == slot)
     {
         return;
     }
-    if (bag->bag_id() == GW::Constants::Bag::Equipment_Pack && !isEquippable(item->type)) 
+    if (bag->bag_id() == GW::Constants::Bag::Equipment_Pack && !isEquippable(item->type))
     {
         return;
     }
 
     GW::GameThread::Enqueue([item, bag, slot = this->slot] { GW::Items::MoveItem(item, bag, slot); });
-    
+
 }
 
 void MoveItemToSlotAction::drawSettings()
@@ -2204,7 +2204,7 @@ void MoveItemToSlotAction::drawSettings()
 /// ------------- KeyboardMoveAction -------------
 KeyboardMoveAction::KeyboardMoveAction()
 {
-    if (const auto player = GW::Agents::GetControlledCharacter()) 
+    if (const auto player = GW::Agents::GetControlledCharacter())
     {
         targetPosition = player->pos;
     }
@@ -2229,12 +2229,12 @@ void KeyboardMoveAction::initialAction()
     const auto player = GW::Agents::GetControlledCharacter();
     if (!player || GW::GetDistance(player->pos, targetPosition) < 5.f) return;
 
-    if (!SideWalk_Func) 
+    if (!SideWalk_Func)
     {
         const auto address = GW::Scanner::Find("\xd9\x46\x04\xd9\x5d\xfc\xd9\x45\x0c\xd9\x45", "xxxxxxxxxx", -0x27);
         if (GW::Scanner::IsValidPtr(address, GW::ScannerSection::Section_TEXT)) SideWalk_Func = (SideWalk_pt)address;
     }
-    if (!SideWalk_Func) 
+    if (!SideWalk_Func)
     {
         return;
     }
@@ -2256,7 +2256,7 @@ ActionStatus KeyboardMoveAction::isComplete() const
     const auto isMoving = player->GetIsMoving();
     startedWalking |= isMoving;
 
-    if (GW::GetDistance(player->pos, targetPosition) < 5.f || (!isMoving && startedWalking)) 
+    if (GW::GetDistance(player->pos, targetPosition) < 5.f || (!isMoving && startedWalking))
     {
         GW::GameThread::Enqueue([playerPos = player->pos, direction = targetPosition - player->pos, movementDirection = movementDirection]() mutable {
             auto normalizedDirection = GW::Normalize(direction);
@@ -2340,14 +2340,14 @@ void RandomAction::serialize(OutputStream& stream) const
 void RandomAction::initialAction()
 {
     Action::initialAction();
-    if (actions.empty()) 
+    if (actions.empty())
     {
         currentAction = nullptr;
         return;
     }
 
     currentAction = actions[rand() % actions.size()];
-    if (currentAction) 
+    if (currentAction)
     {
         currentAction->initialAction();
     }
@@ -2357,7 +2357,7 @@ ActionStatus RandomAction::isComplete() const
 {
     if (!currentAction) return ActionStatus::Complete;
 
-    switch (const auto status = currentAction->isComplete()) 
+    switch (const auto status = currentAction->isComplete())
     {
         case ActionStatus::Running:
             return ActionStatus::Running;
@@ -2417,9 +2417,9 @@ void RandomAction::drawSettings()
 ActionBehaviourFlags RandomAction::behaviour() const
 {
     ActionBehaviourFlags flags = ActionBehaviourFlag::All;
-    for (const auto& action : actions) 
+    for (const auto& action : actions)
     {
-        if (action) 
+        if (action)
             flags &= action->behaviour();
     }
     return flags;
@@ -2444,7 +2444,7 @@ void AddHeroAction::initialAction()
 
     if (GW::Map::GetInstanceType() != GW::Constants::InstanceType::Outpost) return;
 
-    if (heroId != GW::Constants::HeroID::NoHero) 
+    if (heroId != GW::Constants::HeroID::NoHero)
     {
         GW::GameThread::Enqueue([heroId = this->heroId] { GW::PartyMgr::AddHero(heroId); });
     }
@@ -2453,7 +2453,7 @@ void AddHeroAction::initialAction()
 void AddHeroAction::drawSettings()
 {
     ImGui::PushID(drawId());
-    
+
     ImGui::Text("Add");
     ImGui::SameLine();
     drawEnumButton(heroId, {.last = GW::Constants::HeroID::Devona, .width = 130.f});
@@ -2482,11 +2482,11 @@ void KickHeroAction::initialAction()
 
     if (GW::Map::GetInstanceType() != GW::Constants::InstanceType::Outpost) return;
 
-    if (heroId != GW::Constants::HeroID::NoHero) 
+    if (heroId != GW::Constants::HeroID::NoHero)
     {
         GW::GameThread::Enqueue([heroId = this->heroId]{ GW::PartyMgr::KickHero(heroId); });
     }
-    else 
+    else
     {
         GW::GameThread::Enqueue([heroId = this->heroId]{ GW::PartyMgr::KickAllHeroes(); });
     }
@@ -2520,43 +2520,43 @@ void LoadSkillbarAction::serialize(OutputStream& stream) const
 
 void LoadSkillbarAction::initialAction()
 {
-    const auto getHeroIndex = [](GW::Constants::HeroID heroId) -> std::optional<size_t>
+    const auto getHeroAgentId = [](GW::Constants::HeroID heroId) -> std::optional<size_t>
     {
         const auto partyInfo = GW::PartyMgr::GetPartyInfo();
         if (!partyInfo || !partyInfo->heroes.valid()) return std::nullopt;
         const auto player = GW::Agents::GetControlledCharacter();
         if (!player) return std::nullopt;
-        
+
         const auto it = std::ranges::find_if(partyInfo->heroes, [&](const GW::HeroPartyMember& hero){return hero.owner_player_id == player->login_number && hero.hero_id == heroId;});
-        return it != partyInfo->heroes.end() ? (it - partyInfo->heroes.begin() + 1) : std::optional<size_t>{};
+        return it != partyInfo->heroes.end() ? (it->agent_id) : std::optional<size_t>{};
     };
 
     Action::initialAction();
 
     if (build.empty() || GW::Map::GetInstanceType() != GW::Constants::InstanceType::Outpost) return;
 
-    if (heroId == GW::Constants::HeroID::NoHero) 
+    if (heroId == GW::Constants::HeroID::NoHero)
     {
-        GW::GameThread::Enqueue([heroId = this->heroId, build = this->build] {
-            GW::SkillbarMgr::LoadSkillTemplate(build.c_str());
+        GW::GameThread::Enqueue([build = this->build] {
+            GW::SkillbarMgr::LoadSkillTemplate(GW::Agents::GetControlledCharacterId(), build.c_str());
         });
     }
-    else if (const auto heroIndex = getHeroIndex(heroId)) 
-    {
-        GW::GameThread::Enqueue([heroIndex, build = this->build] {
-            GW::SkillbarMgr::LoadSkillTemplate(*heroIndex, build.c_str());
+    else if (const auto heroAgentId = getHeroAgentId(heroId)) {
+        auto id = heroAgentId.value();
+        GW::GameThread::Enqueue([id, build = this->build] {
+            GW::SkillbarMgr::LoadSkillTemplate(id, build.c_str());
         });
     }
 }
 
-void LoadSkillbarAction::drawSettings() 
+void LoadSkillbarAction::drawSettings()
 {
     ImGui::PushID(drawId());
 
     ImGui::Text("Load skillbar");
     ImGui::SameLine();
     ImGui::PushItemWidth(300.f);
-    if (ImGui::InputText("", &build)) 
+    if (ImGui::InputText("", &build))
     {
         std::erase_if(build, [](char c){return std::isspace(c);});
     }
