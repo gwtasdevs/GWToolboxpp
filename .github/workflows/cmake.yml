@@ -213,7 +213,7 @@ jobs:
         IS_DEV_BUILD: ${{ needs.check.outputs.run == 'dev' }}
       run: |
         if [ "$IS_DEV_BUILD" = "true" ]; then
-          TAG=$(gh api repos/gwtasdevs/DialogsPlugins/releases --jq '[.[] | select(.prerelease)][0].tag_name')
+          TAG=$(gh api repos/gwtasdevs/DialogsPlugins/releases --jq '.[0].tag_name')
         else
           TAG=""
         fi
