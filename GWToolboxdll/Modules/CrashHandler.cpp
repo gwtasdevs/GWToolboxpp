@@ -152,8 +152,9 @@ LONG WINAPI CrashHandler::Crash(EXCEPTION_POINTERS* pExceptionPointers, const ch
 
     const std::wstring crash_folder = Resources::GetPath(L"crashes");
 
-    if (!Resources::EnsureFolderExists(crash_folder.c_str())) {
-        MessageBoxW(nullptr, L"Failed to create crash directory", L"GWToolbox++ crash dump error", MB_OK | MB_ICONERROR | MB_SYSTEMMODAL | MB_TOPMOST);
+    std::wstring ensure_folder_error;
+    if (!Resources::EnsureFolderExists(crash_folder.c_str(), ensure_folder_error)) {
+        MessageBoxW(nullptr, ensure_folder_error.c_str(), L"GWToolbox++ crash dump error", MB_OK | MB_ICONERROR | MB_SYSTEMMODAL | MB_TOPMOST);
         TerminateProcess(GetCurrentProcess(), 1);
     }
 
