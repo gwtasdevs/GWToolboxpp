@@ -10,8 +10,8 @@ on:
   # Rebuild after a release publishes so the download button picks up the new
   # exe; the release-creating DLL build outlives this job, so the push above
   # always captures the previous release.
-  release:
-    types: [published]
+  # release:
+  #   types: [published]
   workflow_dispatch:
 
 permissions:
