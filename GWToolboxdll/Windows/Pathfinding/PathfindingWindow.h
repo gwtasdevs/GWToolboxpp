@@ -27,15 +27,18 @@ public:
     bool HasSettings() { return true; }
 
     struct Settings {
-        bool     use_recast_pathing = false;            // false = visgraph A* (default), true = recast/Detour navmesh
-        bool     use_recast_builder = false;            // false = hand-built mesh, true = recast-generated mesh (applies on next map load)
         bool     draw_navmesh_overlay = false;
         uint32_t navmesh_wall_color = 0xC0FF3030;          // ARGB: wall edge on plane 0 (red)
         uint32_t navmesh_wall_color_hi = 0xC0FF30FF;       // wall edge on planes != 0 (magenta)
         uint32_t navmesh_connection_color = 0x6030FF30;    // connection edge on plane 0 (green)
         uint32_t navmesh_connection_color_hi = 0x6030C0FF; // connection edge on planes != 0 (cyan)
         float    navmesh_overlay_range = 4500.f;           // game units around the player
+        float    path_recalc_distance = 100.f;              // game units the player must move before the quest path recomputes
     };
+
+    // Game units the player must move before the rendered quest path recomputes (persisted setting). Read by
+    // QuestModule each tick; the recompute is still rate-capped by Update's 33ms throttle.
+    static float GetPathRecalcDistance();
 
     void Draw(IDirect3DDevice9* pDevice) override;
     void DrawSettingsInternal() override;
@@ -53,6 +56,7 @@ public:
 
     static void SetFrom(const GW::GamePos& pos);
     static void SetTo(const GW::GamePos& pos);
+
     // Set from world map coordinates (handles cross-map detection + DAT loading)
     static void SetFromWorldMap(const GW::Vec2f& world_map_pos);
     static void SetToWorldMap(const GW::Vec2f& world_map_pos);
@@ -75,7 +79,11 @@ public:
     // game coords) into `out` as WORLD coords. Pass the leg's map explicitly so a deferred
     // recompute isn't tied to where the player has since wandered. Holds no shared state —
     // the caller splices the untouched remainder of its route on. False if no path.
-    static bool RecalculateSegment(GW::Constants::MapID map_id, const GW::GamePos& from, const GW::GamePos& to, std::vector<GW::Vec2f>* out);
+    // out_game (optional): the raw CURRENT-map A* leg in that map's game coords, with each waypoint's
+    // pathfinder zplane preserved. `out` flattens to world coords (losing the plane); out_game keeps it so
+    // the caller can drape the rendered line on the surface the path traverses. Only meaningful when map_id
+    // resolves to the current map (the only case callers request it).
+    static bool RecalculateSegment(GW::Constants::MapID map_id, const GW::GamePos& from, const GW::GamePos& to, std::vector<GW::Vec2f>* out, std::vector<GW::GamePos>* out_game = nullptr);
     // True if `world_pos` falls within `map_id`'s game bounds (0 = current map).
     static bool IsWorldPosOnMap(const GW::Vec2f& world_pos, GW::Constants::MapID map_id = (GW::Constants::MapID)0);
     // True if `p` is the inter-map break sentinel in CalculateRoute output.

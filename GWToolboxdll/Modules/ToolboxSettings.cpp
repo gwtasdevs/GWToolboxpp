@@ -37,6 +37,9 @@
 #include <Modules/GuildWarsSettingsModule.h>
 #include <Modules/ItemTooltipModule.h>
 #include <Modules/LoginModule.h>
+#if defined(_DEBUG) || defined(GWTB_HARNESS)
+#include <Modules/TestHarness.h>
+#endif
 #include <Modules/MouseFix.h>
 #include <Modules/PartyBroadcastModule.h>
 #include <Modules/PriceCheckerModule.h>
@@ -100,6 +103,7 @@
 #include <Widgets/InventoryOverlayWidget.h>
 #include <Widgets/LatencyWidget.h>
 #include <Widgets/Minimap/Minimap.h>
+#include <Widgets/Minimap/GameWorldRenderer.h>
 #include <Widgets/MissionMapWidget.h>
 #include <Widgets/PartyDamage.h>
 #include <Widgets/SkillMonitorWidget.h>
@@ -171,6 +175,9 @@ namespace {
         ItemTooltipModule::Instance(),
         ResignLogModule::Instance(),
         QuestModule::Instance(),
+#if defined(_DEBUG) || defined(GWTB_HARNESS)
+        TestHarness::Instance(), // autonomous pathfinder test driver (dev builds only)
+#endif
         VanquishMapOverlayWidget::Instance(),
         PartyBroadcast::Instance(),
         CodeOptimiserModule::Instance(),
@@ -186,6 +193,7 @@ namespace {
         SkillbarWidget::Instance(),
         {DistanceWidget::Instance(), false},
         Minimap::Instance(),
+        GameWorldRenderer::Instance(),
         PartyDamage::Instance(),
         BondsWidget::Instance(),
         ClockWidget::Instance(),

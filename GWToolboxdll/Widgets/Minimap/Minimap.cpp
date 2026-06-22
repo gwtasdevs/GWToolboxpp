@@ -791,7 +791,6 @@ void Minimap::SignalTerminate()
     symbols_renderer.Terminate();
     custom_renderer.Terminate();
     effect_renderer.Terminate();
-    GameWorldRenderer::Terminate();
     GW::GameThread::Enqueue([] {
         RefreshQuestMarker();
         ResetWindowPosition(GW::UI::WindowID_Compass, compass_frame);
@@ -845,9 +844,8 @@ void Minimap::Initialize()
     pingslines_renderer.RegisterSettings(this);
     symbols_renderer.RegisterSettings(this);
     custom_renderer.RegisterSettings(this);
-    GameWorldRenderer::RegisterSettings(this);
 
-    for (const char* sub : {"Ranges", "Pings and drawings", "AoE Effects", "Symbols", "Terrain", "Hero flagging", "In-game rendering"}) {
+    for (const char* sub : {"Ranges", "Pings and drawings", "AoE Effects", "Symbols", "Terrain", "Hero flagging"}) {
         SettingsWindow::RegisterSubSection(SettingsName(), sub);
     }
 
@@ -1148,10 +1146,6 @@ void Minimap::DrawSettingsInternal()
         Colors::DrawSettingHueWheel("Background", &hero_flag_controls_background);
         ImGui::TreePop();
     }
-    if (SettingsWindow::SubSectionHeader(SettingsName(), "In-game rendering")) {
-        GameWorldRenderer::DrawSettings();
-        ImGui::TreePop();
-    }
     ImGui::StartSpacedElements(300.f);
     ImGui::NextSpacedElement();
     ImGui::Checkbox("Color enemies by profession", &agent_renderer.enemies_colors_by_profession);
@@ -1269,7 +1263,6 @@ void Minimap::LoadSettings(SettingsDoc& doc, ToolboxIni* legacy)
     custom_renderer.Invalidate();
     custom_renderer.LoadMarkers();
     effect_renderer.LoadSettings(doc, legacy, Name());
-    GameWorldRenderer::OnSettingsLoaded();
 
     pending_refresh_quest_marker = true;
 }

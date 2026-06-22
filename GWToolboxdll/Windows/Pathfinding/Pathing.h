@@ -27,9 +27,7 @@ namespace Pathing {
 
 	typedef uint16_t PointId;
 
-    class NavMesh; // viz-only Detour mesh exposed for the debug overlay
-
-    extern bool g_use_recast_pathing;
+    class NavMesh; // hand-built Detour mesh exposed for the debug overlay
 
     class MilePath {
         volatile bool m_processing = false;
@@ -103,7 +101,8 @@ namespace Pathing {
         std::string ExportVisGraph() const;
 
     private:
-        int opaque[512 / sizeof(int)];
+        // Pad sized for the largest (Debug) Impl; guarded by static_assert(sizeof(opaque) >= sizeof(Impl)).
+        int opaque[1024 / sizeof(int)];
     };
 
     class AStar {
