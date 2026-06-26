@@ -1,5 +1,6 @@
 #include "stdafx.h"
 
+#include <GWCA/Constants/Constants.h>
 #include <GWCA/Constants/Maps.h>
 #include <GWCA/GameContainers/GamePos.h>
 #include <GWCA/GameEntities/Camera.h>
@@ -7,6 +8,7 @@
 #include <GWCA/Managers/CameraMgr.h>
 #include <GWCA/Managers/ChatMgr.h>
 #include <GWCA/Managers/MapMgr.h>
+#include <GWCA/Managers/RenderMgr.h>
 
 #include <Color.h>
 #include <Defines.h>
@@ -49,10 +51,10 @@ namespace weather_module {
         std::string name = "Rain";
         int type = kTypeRain;
         bool active = false;
-        int drop_count = 1000;
+        int density = 30; // particle density 1..100%; the actual count is derived from this and the volume area
         float drop_size = 8.f;
         float fall_speed = 2000.f;    // gwinch/sec
-        float spread_radius = 2500.f; // horizontal half-extent of the volume; fixed (forced on load, no UI)
+        float spread_radius = 2500.f; // radius of the player-centred volume (horizontal wrap + column height); fixed on load
         float wind_dir_min = 0.f; // a heading is picked at random in [min, max] when the condition activates (degrees)
         float wind_dir_max = 0.f;
         float wind_tilt = 0.f; // how far the fall is tilted from straight-down, degrees (0 = vertical, 89 = sideways)
@@ -102,10 +104,13 @@ namespace {
     constexpr uint32_t kSplashFileId = 0x1baa1;
     constexpr int kSplashCols = 4, kSplashRows = 4, kSplashFrames = kSplashCols * kSplashRows;
     constexpr float kZNear = 47.0f, kZFar = 100000.f; // must match GW's projection for occlusion to line up
-    constexpr float kMaxRadius = 2500.f;              // compass range; cap for any radius in the UI
+    constexpr float kMaxRadius = GW::Constants::Range::Spirit; // 2500 gwinch; radius of the weather volume
 
     // Fixed in code (deliberately not in the UI, but handy to tweak while debugging).
-    float column_height = 2500.f;     // vertical span drops fall through
+    float particle_area_full = 500.f; // gwinch^2 each particle covers at 100% density (smaller = denser); the per-
+                                       // particle area scales as this * 100 / density, so 100% is 100x denser than 1%
+    int max_particles = 30000;         // hard cap on a condition's particle count (FPS guard)
+    float column_height_max = GW::Constants::Range::Spirit; // cap on how high above the focus particles start, so snow doesn't begin absurdly high
     float fog_factor = 1.0f;          // distance-fade strength fed to the shader
     float splash_size = 8.f;          // world size of a splash billboard
     float splash_duration = 0.5f;     // seconds to play the 16 keyframes
@@ -131,17 +136,34 @@ namespace {
     {
         return c.drift >= 0.f ? c.drift : (c.type == kTypeSnow ? snow_sway_amp : 0.f);
     }
+    // How high above the focus particles start: the volume radius, but capped so they don't begin absurdly high
+    // (the column still falls to the ground; only its top is limited).
+    float ColumnHeight(const WeatherCondition& c)
+    {
+        return std::min(c.spread_radius, column_height_max);
+    }
+    // Particle count from the density %: cover the volume's horizontal disk (radius = spread_radius) with one
+    // particle per (particle_area_full * 100 / density) gwinch^2, so density scales the count linearly. Capped.
+    int DropCount(const WeatherCondition& c)
+    {
+        const float disk = 3.14159265f * c.spread_radius * c.spread_radius;
+        const float per_particle = particle_area_full * 100.f / static_cast<float>(std::clamp(c.density, 1, 100));
+        // Scale by the fraction of the full-radius column the capped fall height actually fills, so a shorter
+        // column holds proportionally fewer particles instead of packing the same count in tighter.
+        const float height_fraction = ColumnHeight(c) / c.spread_radius;
+        return std::min(max_particles, static_cast<int>(disk / per_particle * height_fraction));
+    }
 
     std::vector<WeatherCondition> DefaultConditions()
     {
         return {
-            {"Heavy Rain", kTypeRain, false, 4000, 10.f, 1000.f, 2500.f, 0.f, 25.f, 0.f, 0.30f, {0x20ed0, 0x20ed1}, 6.f, 60.f, false, 0.50f},
-            {"Light Rain", kTypeRain, false, 300, 8.f, 1600.f, 2500.f, 0.f, 25.f, 0.f, 0.30f, {0x20ed0, 0x20ed1}, 6.f, 60.f, false, 0.20f},
-            {"Snow", kTypeSnow, false, 1500, 8.f, 400.f, 2500.f, 30.f, 55.f, 10.f, 0.f, {}, 10.f, 30.f, false, 0.30f},
+            {"Heavy Rain", kTypeRain, false, 33, 10.f, 1000.f, 2500.f, 0.f, 25.f, 0.f, 0.30f, {0x20ed0, 0x20ed1}, 6.f, 60.f, false, 0.50f},
+            {"Light Rain", kTypeRain, false, 3, 8.f, 1600.f, 2500.f, 0.f, 25.f, 0.f, 0.30f, {0x20ed0, 0x20ed1}, 6.f, 60.f, false, 0.20f},
+            {"Snow", kTypeSnow, false, 13, 8.f, 400.f, 2500.f, 30.f, 55.f, 10.f, 0.f, {}, 10.f, 30.f, false, 0.30f},
             // Ash: snow's drift (no floor decal) with a dark warm-grey tint and a heavier overcast.
-            {"Ashfall", kTypeSnow, false, 1200, 9.f, 350.f, 2500.f, 30.f, 55.f, 8.f, 0.f, {}, 12.f, 35.f, false, 0.45f, 0xFF42464Au, 0xFFA09078u, kDecalNone},
+            {"Ashfall", kTypeSnow, false, 10, 9.f, 350.f, 2500.f, 30.f, 55.f, 8.f, 0.f, {}, 12.f, 35.f, false, 0.45f, 0xFF42464Au, 0xFFA09078u, kDecalNone},
             // Sand: snow-type tilted nearly sideways, blown across the view (camera-relative), dense, sandy, no decal.
-            {"Sandstorm", kTypeSnow, false, 10000, 6.f, 250.f, 2500.f, 90.f, 90.f, 80.f, 0.f, {}, 12.f, 35.f, false, 0.55f, 0xFF6EA8C2u, 0xFF00717Fu, kDecalNone, 0.f, true},
+            {"Sandstorm", kTypeSnow, false, 83, 6.f, 250.f, 2500.f, 90.f, 90.f, 80.f, 0.f, {}, 12.f, 35.f, false, 0.55f, 0xFF6EA8C2u, 0xFF00717Fu, kDecalNone, 0.f, true},
         };
     }
     std::vector<WeatherCondition> conditions = DefaultConditions();
@@ -453,9 +475,9 @@ namespace {
     }
 
     // Side count of the square grid that tiles the spawn area for stratified placement.
-    int SpawnGrid(const int drop_count)
+    int SpawnGrid(const int count)
     {
-        return std::max(1, static_cast<int>(std::ceil(std::sqrt(static_cast<float>(std::max(1, drop_count))))));
+        return std::max(1, static_cast<int>(std::ceil(std::sqrt(static_cast<float>(std::max(1, count))))));
     }
 
     // Initial fill of the column. Stratified placement: each drop owns one grid cell, jittered within it, so the
@@ -464,7 +486,7 @@ namespace {
     // does not shift with the wind direction.
     void seed_drop(Raindrop& d, const WeatherCondition& c, const float cx, const float cy, const float cz, const int index, const int grid)
     {
-        const float top_z = cz - column_height;
+        const float top_z = cz - ColumnHeight(c); // top of the fall column (capped so it doesn't start absurdly high)
         const float cell = 2.f * c.spread_radius / static_cast<float>(grid);
         d.x = cx - c.spread_radius + (static_cast<float>(index % grid) + frand(0.f, 1.f)) * cell;
         d.y = cy - c.spread_radius + (static_cast<float>(index / grid) + frand(0.f, 1.f)) * cell;
@@ -476,9 +498,10 @@ namespace {
 
     void UpdateCondition(const WeatherCondition& c, Particles& p, const float dt, const float cx, const float cy, const float cz, const float wind_dir, const float center_dz)
     {
-        const int grid = SpawnGrid(c.drop_count);
-        if (static_cast<int>(p.raindrops.size()) != c.drop_count) {
-            p.raindrops.resize(std::max(0, c.drop_count));
+        const int count = DropCount(c);
+        const int grid = SpawnGrid(count);
+        if (static_cast<int>(p.raindrops.size()) != count) {
+            p.raindrops.resize(std::max(0, count));
             for (int i = 0; i < static_cast<int>(p.raindrops.size()); i++)
                 seed_drop(p.raindrops[i], c, cx, cy, cz, i, grid);
         }
@@ -486,7 +509,7 @@ namespace {
         const bool splash = decal == kDecalSplash;
         const float drift = EffectiveDrift(c);
         const bool settle = decal == kDecalSettle;
-        const float top_z = cz - column_height;
+        const float top_z = cz - ColumnHeight(c); // top of the fall column (capped so it doesn't start absurdly high)
         const float diameter = 2.f * c.spread_radius;
         // Velocity is the (unit) fall direction scaled by fall_speed, so wind sets the direction, not the speed.
         float vel[3];
@@ -565,6 +588,19 @@ namespace {
         return (d.x - eye[0]) * fwd[0] + (d.y - eye[1]) * fwd[1] + (d.z - eye[2]) * fwd[2] >= kZNear;
     }
 
+    // A ground mark (splash/settle) is worth building only if it falls within the camera's view cone. Unlike the
+    // falling particles - which we only cull behind the near plane, so edge drops can still drift into view - these
+    // are static, so a tighter cull is safe. The cone circumscribes the screen rect (+10% margin), so it never
+    // culls a mark that's actually visible; the GPU clips whatever slips through the corners.
+    bool InView(const float px, const float py, const float pz, const float eye[3], const float fwd[3], const float cone_tan_sq)
+    {
+        const float dx = px - eye[0], dy = py - eye[1], dz = pz - eye[2];
+        const float depth = dx * fwd[0] + dy * fwd[1] + dz * fwd[2];
+        if (depth < kZNear) return false;
+        const float lat_sq = dx * dx + dy * dy + dz * dz - depth * depth; // squared perpendicular distance from the view axis
+        return lat_sq <= depth * depth * cone_tan_sq;
+    }
+
     // Snow/ash/sand: camera-aligned square billboards, instanced like rain (the GPU expands each record to a quad,
     // so the CPU only uploads ~52 bytes per flake instead of building four textured verts). The square's axes are
     // the camera right/up, constant per condition, so they bake into every record; tint is per-instance RGBA.
@@ -618,7 +654,7 @@ namespace {
 
     // Vertical billboard standing on the ground: horizontal axis follows the camera so it faces the
     // viewer, vertical axis is world up (-z), anchored so the base sits at the impact point.
-    void AppendSplashes(const std::vector<Splash>& s, const float right[3], const unsigned int tint)
+    void AppendSplashes(const std::vector<Splash>& s, const float right[3], const unsigned int tint, const float eye[3], const float fwd[3], const float cone_tan_sq)
     {
         const float hs = splash_size * 0.5f;
         const float ax[3] = {right[0] * hs, right[1] * hs, right[2] * hs};
@@ -626,6 +662,7 @@ namespace {
         const DWORD col = ToD3DColor(tint);
         const float u_step = 1.f / kSplashCols, v_step = 1.f / kSplashRows;
         for (const auto& sp : s) {
+            if (!InView(sp.x, sp.y, sp.z, eye, fwd, cone_tan_sq)) continue;
             const int f = std::clamp(static_cast<int>(sp.age / splash_duration * kSplashFrames), 0, kSplashFrames - 1);
             const float u0 = static_cast<float>(f % kSplashCols) * u_step, v0 = static_cast<float>(f / kSplashCols) * v_step;
             emit_quad(splash_vertices, sp.x, sp.y, sp.z - hs - splash_lift, ax, ay, col, u0, v0, u0 + u_step, v0 + v_step);
@@ -635,12 +672,13 @@ namespace {
 
     // Flat quad lying on the ground (world XY plane), drawn with the snowflake texture - so it shares the snow
     // instance buffer/pass. Holds at full tint, then fades out over the tail of its life via the per-instance alpha.
-    void AppendSettledInstances(std::vector<WeatherInstance>& out, const std::vector<Settle>& s)
+    void AppendSettledInstances(std::vector<WeatherInstance>& out, const std::vector<Settle>& s, const float eye[3], const float fwd[3], const float cone_tan_sq)
     {
         const float hs = snow_settle_size * 0.5f;
         const float fade_span = std::clamp(snow_settle_fade, 0.01f, 1.f);
         out.reserve(out.size() + s.size());
         for (const auto& sp : s) {
+            if (!InView(sp.x, sp.y, sp.z, eye, fwd, cone_tan_sq)) continue;
             const float life = snow_settle_duration > 0.f ? sp.age / snow_settle_duration : 1.f;
             const float fade = life < 1.f - fade_span ? 1.f : std::max(0.f, (1.f - life) / fade_span);
             out.push_back({sp.x, sp.y, sp.z - splash_lift, hs, 0.f, 0.f, 0.f, hs, 0.f, fade});
@@ -799,6 +837,16 @@ namespace {
         float up[3];
         cross3(fwd, right, up);
 
+        // View-cone half-angle (squared tangent) for culling off-screen ground marks: circumscribe the screen rect
+        // from the vertical FOV + aspect, with a 10% margin. Falls back to no cull if the FOV looks invalid.
+        float cone_tan_sq = 1e30f;
+        if (const float fov = GW::Render::GetFieldOfView(); fov > 0.1f) {
+            const int vh = GW::Render::GetViewportHeight();
+            const float aspect = vh > 0 ? static_cast<float>(GW::Render::GetViewportWidth()) / static_cast<float>(vh) : 1.7778f;
+            const float tan_v = std::tan(fov * 0.5f);
+            cone_tan_sq = tan_v * tan_v * (1.f + aspect * aspect) * 1.21f;
+        }
+
         float ambient_target = 0.f;
         if (active >= 0 && ready) {
             auto& c = conditions[active];
@@ -813,8 +861,8 @@ namespace {
                 AppendSnowInstances(snow_instances, c, active_particles.raindrops, right, up, eye, fwd);
             else
                 AppendRainInstances(rain_instances, c, active_particles.raindrops, right, fwd, heading, eye);
-            AppendSplashes(active_particles.splashes, right, c.tint);
-            AppendSettledInstances(snow_instances, active_particles.settled);
+            AppendSplashes(active_particles.splashes, right, c.tint, eye, fwd, cone_tan_sq);
+            AppendSettledInstances(snow_instances, active_particles.settled, eye, fwd, cone_tan_sq);
             UpdateSounds(c, active_particles, dt, cx, cy, cz);
         }
         ambient_strength += (ambient_target - ambient_strength) * std::clamp(dt * 3.f, 0.f, 1.f); // ease ~1/3 s
@@ -1002,7 +1050,7 @@ void WeatherModule::OnSettingsLoaded()
         c.drift = std::max(c.drift, kDriftAuto);
         c.wind_dir_max = std::max(c.wind_dir_max, c.wind_dir_min);
         c.wind_tilt = std::clamp(c.wind_tilt, 0.f, 89.f);
-        c.drop_count = std::clamp(c.drop_count, 0, 20000);
+        c.density = std::clamp(c.density, 1, 100);
         c.spread_radius = kMaxRadius; // fixed, not user-editable
         c.splash_chance = std::clamp(c.splash_chance, 0.f, 1.f);
         c.sound_min_interval = std::max(c.sound_min_interval, 0.f);
@@ -1063,7 +1111,9 @@ void WeatherModule::DrawSettings()
             ImGui::InputText("Name", c.name, 32);
             const char* type_names[kTypeCount] = {"Rain", "Snow"};
             ImGui::Combo("Type", &c.type, type_names, kTypeCount);
-            ImGui::DragInt("Drop count", &c.drop_count, 25.f, 0, 20000, "%d", ImGuiSliderFlags_AlwaysClamp);
+            ImGui::DragInt("Density", &c.density, 1.f, 1, 100, "%d%%", ImGuiSliderFlags_AlwaysClamp);
+            ImGui::ShowHelp("How densely the volume is filled, 1-100%. The particle count is derived from this and\nthe spread area, so it stays consistent if the radius changes. Higher = denser (and heavier on FPS).");
+            ImGui::Text("  ~%d particles", DropCount(c));
             ImGui::DragFloat("Drop size", &c.drop_size, 1.f, 1.f, 500.f, "%.0f");
             ImGui::DragFloat("Fall speed", &c.fall_speed, 50.f, 0.f, 30000.f, "%.0f");
             ImGui::ShowHelp("The constant speed drops travel at. Wind tilts their direction without changing this speed.");
