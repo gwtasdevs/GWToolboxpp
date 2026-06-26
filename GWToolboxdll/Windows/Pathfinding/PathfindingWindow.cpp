@@ -2575,6 +2575,29 @@ static void UpdateNavmeshOverlay()
 
 float PathfindingWindow::GetPathRecalcDistance() { return settings.path_recalc_distance; }
 
+bool PathfindingWindow::DebugDumpNavMeshNear(const GW::GamePos& center, float radius)
+{
+    auto* mp = GetResidentMilepathOrPrewarm();
+    if (!mp || !mp->ready()) { Log::Log("[navdump] milepath not ready (retry)"); return false; }
+    auto* nav = mp->GetNavMeshForDebug();
+    if (!nav || !nav->IsReady()) {
+        if (!mp->build_failed()) Resources::EnqueueWorkerTask([mp] { mp->EnsureFullBuild(); });
+        Log::Log("[navdump] navmesh building (retry)");
+        return false;
+    }
+    Log::Log("[navdump] map=%d", (int)GW::Map::GetMapID());
+    nav->DebugDumpNear(center, radius);
+    return true;
+}
+
+Pathing::NavMesh* PathfindingWindow::GetResidentNavMesh()
+{
+    auto* mp = GetResidentMilepathOrPrewarm();
+    if (!mp || !mp->ready()) return nullptr;
+    auto* nav = mp->GetNavMeshForDebug();
+    return (nav && nav->IsReady()) ? nav : nullptr;
+}
+
 void PathfindingWindow::Draw(IDirect3DDevice9*)
 {
     ProcessDeferredRemovals();
@@ -2585,22 +2608,26 @@ void PathfindingWindow::DrawSettingsInternal()
 {
     ImGui::DragFloat("Path recalc distance", &settings.path_recalc_distance, 1.f, 1.f, 1000.f, "%.0f");
     ImGui::ShowHelp("How far you must move (game units / gwinches) before the rendered quest path recomputes. Lower = more responsive but heavier; the recompute is also rate-capped to ~30/s.");
-    ImGui::Separator();
     ImGui::Checkbox("Navmesh overlay", &settings.draw_navmesh_overlay);
     ImGui::ShowHelp("Draw the navmesh's polygon edges on the ground near you, at correct terrain heights (bridges included).");
+    ImGui::Separator();
     if (settings.draw_navmesh_overlay) {
         auto color_edit = [](const char* label, uint32_t* argb) {
             float c[4] = {((*argb >> 16) & 0xFF) / 255.f, ((*argb >> 8) & 0xFF) / 255.f, (*argb & 0xFF) / 255.f, ((*argb >> 24) & 0xFF) / 255.f};
             if (ImGui::ColorEdit4(label, c, ImGuiColorEditFlags_AlphaBar)) {
-                auto q = [](float f) { return (uint32_t)std::clamp(f * 255.f + 0.5f, 0.f, 255.f); };
+                const auto q = [](const float f) { return static_cast<uint32_t>(std::clamp(f * 255.f + 0.5f, 0.f, 255.f)); };
                 *argb = (q(c[3]) << 24) | (q(c[0]) << 16) | (q(c[1]) << 8) | q(c[2]);
             }
         };
+        if (ImGui::DragFloat("Terrain sample spacing", &settings.navmesh_sample_spacing, 0.5f, 1.f, 100.f, "%.0f gw")) {
+            GameWorldRenderer::SetNavmeshSampleSpacing(settings.navmesh_sample_spacing);
+            GameWorldRenderer::RedrapeNavmesh(); // re-drape live so the change is visible immediately
+        }
+        ImGui::ShowHelp("How often the overlay samples terrain height when draping edges (game units). Lower = lines hug the floor/steps more exactly, but more vertices to build and draw.");
         color_edit("Wall colour (ground plane)", &settings.navmesh_wall_color);
         color_edit("Wall colour (other planes)", &settings.navmesh_wall_color_hi);
         color_edit("Connection colour (ground plane)", &settings.navmesh_connection_color);
         color_edit("Connection colour (other planes)", &settings.navmesh_connection_color_hi);
-        ImGui::TextDisabled("Draw range follows In-game rendering's \"Maximum render distance\".");
     }
 }
 
@@ -2608,6 +2635,7 @@ void PathfindingWindow::LoadSettings(SettingsDoc& doc, ToolboxIni* legacy)
 {
     ToolboxModule::LoadSettings(doc, legacy);
     doc.GetStruct(Name(), settings);
+    GameWorldRenderer::SetNavmeshSampleSpacing(settings.navmesh_sample_spacing);
 }
 
 void PathfindingWindow::SaveSettings(SettingsDoc& doc)

@@ -15,6 +15,8 @@
 #include <Utils/GameWorldCompositor.h>
 #include <Widgets/Minimap/GameWorldRenderer.h>
 #include <Widgets/Minimap/Minimap.h>
+#include <Windows/Pathfinding/NavMesh.h>           // per-sample plane resolution for path/overlay draping
+#include <Windows/Pathfinding/PathfindingWindow.h> // GetResidentNavMesh
 #include <ImGuiAddons.h>
 
 #include "GWCA/GameEntities/Agent.h"
@@ -162,6 +164,7 @@ namespace {
         bool vb_dirty = false;                             // verts changed since last upload
     };
     NavmeshBatch navmesh_batch;
+    float navmesh_sample_spacing = 5.f; // gw between terrain-altitude samples when draping overlay edges (user-tunable)
 
     // Full mesh (not draped) for the 2D top-down M-key world map. WorldMapWidget redraws these flat each frame.
     std::vector<GameWorldRenderer::BatchedLine> navmesh_worldmap_lines;
@@ -175,28 +178,36 @@ namespace {
         const GW::PathingMapArray* pm = GW::Map::GetPathingMap();
         const uint32_t num_planes = pm ? static_cast<uint32_t>(pm->size()) : 0;
         if (!num_planes) return; // pathing map not ready yet; retry next frame
-        constexpr float sample_spacing = 50.f; // sample altitude every ~50gw so the edge hugs the floor, not a chord
         const auto budget_timer = TIMER_INIT();
+        const float spacing = std::max(1.f, navmesh_sample_spacing); // user-tunable: smaller = closer to the floor, more verts
         for (; b.build_cursor < b.lines.size(); ++b.build_cursor) {
             if (TIMER_DIFF(budget_timer) >= 2) break; // budget spent; resume next frame
             const auto& ln = b.lines[b.build_cursor];
             const float dx = ln.b.x - ln.a.x, dy = ln.b.y - ln.a.y;
-            const int steps = std::max(1, static_cast<int>(std::sqrt(dx * dx + dy * dy) / sample_spacing));
-            // Drape by continuity: each sample follows the previous one's surface (ramp/bridge/floor), emitting a sub-segment per step; seed from the edge's OWN plane (ln.a's zplane) so an edge under a bridge isn't pulled onto the deck.
-            GW::GamePos seed = ln.a;
-            float prev = GW::Map::QueryAltitude(&seed);
-            if (prev == 0.f) prev = ClosestSurfaceZ(ln.a.x, ln.a.y, num_planes, -1.0e9f);
-            if (prev == ALTITUDE_UNKNOWN) prev = 0.f;
+            const int steps = std::max(1, static_cast<int>(std::sqrt(dx * dx + dy * dy) / spacing));
+            // Drape each sample on the edge's OWN plane. A navmesh edge lies on a single trapezoid, so its surface IS
+            // that plane's heightfield (which ramps/steps where the floor does). Querying the plane directly per point —
+            // not the globally-closest surface — makes the line ride that surface: flat stays flat, a ramp rises, a
+            // deck stays on the deck, and an edge under a bridge stays on the ground rather than snapping to the deck.
+            // Sampling density is `spacing` gw; QueryAltitude is exact at each point, so the only error is the chord
+            // between samples — tighten `spacing` to shrink it.
+            const uint32_t plane = ln.a.zplane; // == ln.b.zplane: both verts come from the same trapezoid
+            auto surfaceZ = [&](float x, float y, float fallback) -> float {
+                GW::GamePos p{x, y, plane};
+                const float a = GW::Map::QueryAltitude(&p);
+                if (a != 0.f) return a;                                      // edge's plane has floor here (the common case)
+                const float c = ClosestSurfaceZ(x, y, num_planes, fallback); // only at an edge lip with no plane surface
+                return c == ALTITUDE_UNKNOWN ? fallback : c;
+            };
+            float prev = surfaceZ(ln.a.x, ln.a.y, 0.f);
             float px = ln.a.x, py = ln.a.y, pz = prev;
             for (int s = 1; s <= steps; ++s) {
                 const float t = static_cast<float>(s) / static_cast<float>(steps);
                 const float x = ln.a.x + dx * t, y = ln.a.y + dy * t;
-                float z = ClosestSurfaceZ(x, y, num_planes, prev);
-                if (z == ALTITUDE_UNKNOWN) z = prev;
-                else prev = z;
+                const float z = surfaceZ(x, y, prev);
                 b.staging.push_back({px, py, pz, ln.color}); // LINELIST: each consecutive pair is one sub-segment
                 b.staging.push_back({x, y, z, ln.color});
-                px = x; py = y; pz = z;
+                px = x; py = y; pz = z; prev = z;
             }
         }
         if (b.build_cursor >= b.lines.size()) {
@@ -309,12 +320,25 @@ namespace {
                 vertices[i].z = HighestSurfaceZ(vertices[i].x, vertices[i].y, candidate_planes);
         }
         else {
-            // Ordered, densely-sampled path: drape by continuity (each sample follows the walked surface across bridges even with no waypoint on that plane). Seed from the first waypoint; the leading from_player_pos segment is re-seeded from live player height below.
+            // Ordered, densely-sampled path: drape on the navmesh-walkable plane at each sample (point-location),
+            // choosing the surface closest to the running height. This follows the surface the path actually walks —
+            // e.g. up onto a monument plane between two ground hops — instead of sinking onto the ground beneath it,
+            // which the old all-planes "closest surface" did because plane 0's heightfield still reports the floor
+            // under the monument. Falls back to that all-planes query when the navmesh isn't built yet or no walkable
+            // plane covers the sample (so cross-plane edges with no waypoint on the higher plane still drape sanely).
+            auto* nav = PathfindingWindow::GetResidentNavMesh();
             GW::GamePos seed_pos = poly.points.empty() ? GW::GamePos{} : poly.points.front();
             float prev = GW::Map::QueryAltitude(&seed_pos);
             if (prev == 0.f) prev = ClosestSurfaceZ(seed_pos.x, seed_pos.y, num_planes, -1.0e9f); // highest surface
             for (size_t i = poly.vertices_processed; i < vertices.size(); i++, poly.vertices_processed++) {
-                const float z = ClosestSurfaceZ(vertices[i].x, vertices[i].y, num_planes, prev);
+                float z;
+                if (nav) {
+                    z = nav->DrapeHeightAt(vertices[i].x, vertices[i].y, prev);
+                    if (z == ALTITUDE_UNKNOWN) z = prev; // over a gap with no walkable poly: hold height, don't sink to the ground
+                }
+                else {
+                    z = ClosestSurfaceZ(vertices[i].x, vertices[i].y, num_planes, prev); // navmesh not built yet
+                }
                 if (z != ALTITUDE_UNKNOWN) prev = z;
                 vertices[i].z = z;
             }
@@ -415,17 +439,27 @@ void GameWorldRenderer::GenericPolyRenderable::Draw(IDirect3DDevice9* device)
 
     if (from_player_pos && vertices.size() > 1) {
         if (const auto player = GW::Agents::GetControlledCharacter()) {
-            // Re-anchor the leading line to the player's live position each frame and drape by continuity from player->z, which is reliable even when the reported plane is 0 on a bridge (seeding from the plane sank the line to the ground beneath the bridge).
+            // Re-anchor the leading line to the player's live position each frame and drape on the navmesh-walkable
+            // plane at each sample, seeded from player->z (reliable even when the reported plane reads 0). This rides
+            // the surface the player actually walks (up a monument/ramp between hops) instead of the ground beneath.
             const float ex = vertices.back().x, ey = vertices.back().y;
             const GW::PathingMapArray* pathing_map = GW::Map::GetPathingMap();
             const uint32_t num_planes = pathing_map ? static_cast<uint32_t>(pathing_map->size()) : 0;
             const size_t last = vertices.size() - 1;
+            auto* nav = PathfindingWindow::GetResidentNavMesh();
             float prev = player->z;
             for (size_t j = 0; j <= last; ++j) {
                 const float t = static_cast<float>(j) / static_cast<float>(last);
                 const float sx = player->pos.x + (ex - player->pos.x) * t;
                 const float sy = player->pos.y + (ey - player->pos.y) * t;
-                float z = num_planes ? ClosestSurfaceZ(sx, sy, num_planes, prev) : ALTITUDE_UNKNOWN;
+                float z;
+                if (nav) {
+                    z = nav->DrapeHeightAt(sx, sy, prev);
+                    if (z == ALTITUDE_UNKNOWN) z = prev; // gap with no walkable poly: hold height, don't sink to the ground
+                }
+                else {
+                    z = num_planes ? ClosestSurfaceZ(sx, sy, num_planes, prev) : ALTITUDE_UNKNOWN; // navmesh not built yet
+                }
                 if (z != ALTITUDE_UNKNOWN) prev = z; else z = prev;
                 vertices[j].x = sx;
                 vertices[j].y = sy;
@@ -645,6 +679,23 @@ void GameWorldRenderer::SetNavmeshLines(GW::Constants::MapID map_id, std::vector
     auto& b = navmesh_batch;
     b.pending_map = map_id;
     b.lines = std::move(lines);
+    b.staging.clear();
+    b.build_cursor = 0;
+    b.building = true;
+}
+
+void GameWorldRenderer::SetNavmeshSampleSpacing(float gw)
+{
+    navmesh_sample_spacing = std::max(1.f, gw);
+}
+
+void GameWorldRenderer::RedrapeNavmesh()
+{
+    // Re-drape the current edge set (e.g. after the sample-spacing slider changed) without re-culling: restart the
+    // incremental build from the existing source lines. No-op if nothing is loaded.
+    auto& b = navmesh_batch;
+    if (b.lines.empty()) return;
+    b.pending_map = b.map_id;
     b.staging.clear();
     b.build_cursor = 0;
     b.building = true;

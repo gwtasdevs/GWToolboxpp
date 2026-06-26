@@ -12,6 +12,7 @@
 #include <GWCA/Context/CharContext.h>
 #include <GWCA/Context/PreGameContext.h>
 #include <GWCA/Managers/AgentMgr.h>
+#include <GWCA/Managers/CameraMgr.h>
 #include <GWCA/Managers/MapMgr.h>
 #include <GWCA/Managers/MemoryMgr.h>
 #include <GWCA/Managers/QuestMgr.h>
@@ -25,6 +26,7 @@
 #include "Modules/TestHarness.h"
 #include "Utils/ToolboxUtils.h"
 #include "Widgets/WorldMapWidget.h"
+#include "Windows/Pathfinding/PathfindingWindow.h"
 
 // Dev iteration tool: compiled in Debug (_DEBUG) and RelWithDebInfo (GWTB_HARNESS, which
 // logs to log.txt), excluded from the shipped Release build.
@@ -183,6 +185,52 @@ namespace {
             const char* src = "";
             if (resolve_goal(read_config(), goal, src)) do_path_to(goal, src);
             else write_status("repath: no config goal or active quest marker (use 'setgoal' first)");
+            return;
+        }
+        if (verb == "dumpnav") { // dump navmesh polys near a point: dumpnav [x y [radius]] (default: config goal / player pos, r=1500)
+            float x = 0, y = 0, radius = 1500.f;
+            bool have_xy = (bool)(is >> x >> y);
+            is >> radius;
+            GW::GamePos center;
+            if (have_xy) { center = GW::GamePos(x, y, 0); }
+            else {
+                const char* src = "";
+                if (!resolve_goal(read_config(), center, src)) {
+                    const auto self = GW::Agents::GetControlledCharacter();
+                    if (!self) { write_status("dumpnav: no coords, no goal, no character"); return; }
+                    center = self->pos;
+                }
+            }
+            const bool ok = PathfindingWindow::DebugDumpNavMeshNear(center, radius);
+            if (const auto self = GW::Agents::GetControlledCharacter())
+                Log::Log("[navdump] player=(%.0f,%.0f,z%u) z=%.0f facing=%.3f camyaw=%.3f",
+                         self->pos.x, self->pos.y, self->pos.zplane, self->z, self->rotation_angle, GW::CameraMgr::GetYaw());
+            char buf[160];
+            snprintf(buf, sizeof(buf), "dumpnav(%.0f,%.0f,r%.0f): %s", center.x, center.y, radius, ok ? "dumped" : "not ready (retry)");
+            write_status(buf);
+            Log::Log("[harness] %s", buf);
+            return;
+        }
+        if (verb == "heightline") { // heightline x1 y1 x2 y2 plane [n] : QueryAltitude at n points along a segment on `plane`
+            float x1, y1, x2, y2;
+            uint32_t plane = 0, n = 16;
+            if (is >> x1 >> y1 >> x2 >> y2 >> plane) {
+                is >> n;
+                if (n < 2) n = 2;
+                if (n > 64) n = 64;
+                Log::Log("[heightline] (%.0f,%.0f)->(%.0f,%.0f) plane=%u n=%u", x1, y1, x2, y2, plane, n);
+                for (uint32_t i = 0; i < n; ++i) {
+                    const float t = (float)i / (float)(n - 1);
+                    const float x = x1 + (x2 - x1) * t, y = y1 + (y2 - y1) * t;
+                    GW::GamePos p(x, y, plane);
+                    const float a = GW::Map::QueryAltitude(&p);
+                    Log::Log("[heightline]   t=%.2f (%.0f,%.0f) plane%u_alt=%.1f", t, x, y, plane, a);
+                }
+                write_status("heightline: logged");
+            }
+            else {
+                write_status("heightline: bad args (x1 y1 x2 y2 plane [n])");
+            }
             return;
         }
         if (verb == "waypoint") {
