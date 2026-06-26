@@ -69,6 +69,7 @@ namespace weather_module {
         int floor_decal = kDecalAuto;             // what each impact leaves on the ground: none/splash/settle
         float drift = kDriftAuto;                 // lateral float as particles fall (gwinch/sec amplitude); 0 = none
         bool wind_camera_relative = false;        // wind heading is relative to the camera (stays screen-fixed as you rotate)
+        bool center_on_camera = false;            // centre the volume on the camera itself, not its target (wraps tightly around the viewer)
     };
 
     // A broad weather climate. Maps/regions are grouped into one of these (see ClimateForRegion), so weather is
@@ -157,19 +158,18 @@ namespace {
     std::vector<WeatherCondition> DefaultConditions()
     {
         return {
-            {"Heavy Rain", kTypeRain, false, 33, 10.f, 1000.f, 2500.f, 0.f, 25.f, 0.f, 0.30f, {0x20ed0, 0x20ed1}, 6.f, 60.f, false, 0.50f},
-            {"Light Rain", kTypeRain, false, 3, 8.f, 1600.f, 2500.f, 0.f, 25.f, 0.f, 0.30f, {0x20ed0, 0x20ed1}, 6.f, 60.f, false, 0.20f},
-            {"Snow", kTypeSnow, false, 13, 8.f, 400.f, 2500.f, 30.f, 55.f, 10.f, 0.f, {}, 10.f, 30.f, false, 0.30f},
+            {"Heavy Rain", kTypeRain, false, 70, 10.f, 500.f, 2500.f, 0.f, 25.f, 0.f, 0.30f, {0x20ed0, 0x20ed1}, 6.f, 60.f, false, 1.0f},
+            {"Light Rain", kTypeRain, false, 2, 10.f, 500.f, 2500.f, 0.f, 25.f, 0.f, 1.0f, {0x20ed0, 0x20ed1}, 6.f, 60.f, false, 0.20f},
+            {"Snow", kTypeSnow, false, 13, 8.f, 100.f, 2500.f, 30.f, 55.f, 10.f, 0.f, {}, 10.f, 30.f, false, 0.50f},
             // Ash: snow's drift (no floor decal) with a dark warm-grey tint and a heavier overcast.
             {"Ashfall", kTypeSnow, false, 10, 9.f, 350.f, 2500.f, 30.f, 55.f, 8.f, 0.f, {}, 12.f, 35.f, false, 0.45f, 0xFF42464Au, 0xFFA09078u, kDecalNone},
-            // Sand: snow-type tilted nearly sideways, blown across the view (camera-relative), dense, sandy, no decal.
-            {"Sandstorm", kTypeSnow, false, 83, 6.f, 250.f, 2500.f, 90.f, 90.f, 80.f, 0.f, {}, 12.f, 35.f, false, 0.55f, 0xFF6EA8C2u, 0xFF00717Fu, kDecalNone, 0.f, true},
         };
     }
     std::vector<WeatherCondition> conditions = DefaultConditions();
 
     // Default climate->weather table, referencing the default condition names above. Leftover probability per
-    // climate is clear weather. Arid is omitted on purpose: dry by default, but offered in the picker to edit.
+    // climate is clear weather. Arid and Desertous are omitted on purpose: dry by default, but offered in the
+    // picker to edit.
     std::vector<ClimateProfile> DefaultClimateProfiles()
     {
         const auto p = [](const Climate c, std::vector<ClimateWeather> e) { return ClimateProfile{c, std::move(e)}; };
@@ -178,8 +178,6 @@ namespace {
             p(Climate::Tropical, {{"Heavy Rain", 0.55f}, {"Light Rain", 0.25f}}),
             p(Climate::Mountainous, {{"Snow", 0.6f}}),
             p(Climate::Volcanic, {{"Ashfall", 0.6f}}),
-            p(Climate::Desertous, {{"Sandstorm", 0.30f}}),
-            p(Climate::Arid, {{"Sandstorm", 0.10f}}),
         };
     }
     std::vector<ClimateProfile> climate_profiles = DefaultClimateProfiles();
@@ -812,12 +810,29 @@ namespace {
         const auto ready = !reset && !GW::UI::GetIsWorldMapShowing();
         if (reset) ground_cache.clear(); // terrain altitudes are per-map; drop them when the map changes
 
-        const float cx = cam->look_at_target.x, cy = cam->look_at_target.y, cz = cam->look_at_target.z;
+        const float eye[3] = {cam->position.x, cam->position.y, cam->position.z};
+        // View direction is always camera -> target, even when the volume itself is centred on the camera.
+        float fwd[3] = {cam->look_at_target.x - eye[0], cam->look_at_target.y - eye[1], cam->look_at_target.z - eye[2]};
+        normalize3(fwd);
+        constexpr float world_up[3] = {0.f, 0.f, -1.f};
+        float right[3];
+        cross3(world_up, fwd, right);
+        normalize3(right);
+        float up[3];
+        cross3(fwd, right, up);
 
         // The single active condition (first one flagged active; single-active is enforced wherever it's toggled).
         int active = -1;
         for (int i = 0; i < static_cast<int>(conditions.size()); i++)
             if (conditions[i].active) { active = i; break; }
+
+        // Volume centre: the camera itself for camera-relative conditions (sand wraps tightly around the viewer), else
+        // the camera's target - the player - so most weather follows where you're looking.
+        const bool cam_centred = active >= 0 && conditions[active].center_on_camera;
+        const float cx = cam_centred ? eye[0] : cam->look_at_target.x;
+        const float cy = cam_centred ? eye[1] : cam->look_at_target.y;
+        const float cz = cam_centred ? eye[2] : cam->look_at_target.z;
+
         if (active != active_condition || reset) { // switched condition (or reset): drop the old particles, reseed fresh
             active_particles = {};
             active_condition = active;
@@ -826,16 +841,6 @@ namespace {
         }
         const float dcz = cz - center_z; // the focus's vertical move this tick; the column is shifted by it so it
         center_z = cz;                   // keeps tracking the player's height even when drops barely fall (sandstorm)
-
-        const float eye[3] = {cam->position.x, cam->position.y, cam->position.z}; // for the behind-near-plane build cull
-        float fwd[3] = {cx - cam->position.x, cy - cam->position.y, cz - cam->position.z};
-        normalize3(fwd);
-        constexpr float world_up[3] = {0.f, 0.f, -1.f};
-        float right[3];
-        cross3(world_up, fwd, right);
-        normalize3(right);
-        float up[3];
-        cross3(fwd, right, up);
 
         // View-cone half-angle (squared tangent) for culling off-screen ground marks: circumscribe the screen rect
         // from the vertical FOV + aspect, with a 10% margin. Falls back to no cull if the FOV looks invalid.
@@ -1049,9 +1054,9 @@ void WeatherModule::OnSettingsLoaded()
         c.floor_decal = std::clamp(c.floor_decal, kDecalAuto, kDecalCount - 1);
         c.drift = std::max(c.drift, kDriftAuto);
         c.wind_dir_max = std::max(c.wind_dir_max, c.wind_dir_min);
-        c.wind_tilt = std::clamp(c.wind_tilt, 0.f, 89.f);
+        c.wind_tilt = std::clamp(c.wind_tilt, 0.f, 90.f);
         c.density = std::clamp(c.density, 1, 100);
-        c.spread_radius = kMaxRadius; // fixed, not user-editable
+        c.spread_radius = std::clamp(c.spread_radius, 250.f, kMaxRadius); // user-editable, but bounded to compass-half range
         c.splash_chance = std::clamp(c.splash_chance, 0.f, 1.f);
         c.sound_min_interval = std::max(c.sound_min_interval, 0.f);
         c.sound_max_interval = std::max(c.sound_max_interval, c.sound_min_interval);
@@ -1114,15 +1119,19 @@ void WeatherModule::DrawSettings()
             ImGui::DragInt("Density", &c.density, 1.f, 1, 100, "%d%%", ImGuiSliderFlags_AlwaysClamp);
             ImGui::ShowHelp("How densely the volume is filled, 1-100%. The particle count is derived from this and\nthe spread area, so it stays consistent if the radius changes. Higher = denser (and heavier on FPS).");
             ImGui::Text("  ~%d particles", DropCount(c));
+            ImGui::DragFloat("Range", &c.spread_radius, 25.f, 250.f, kMaxRadius, "%.0f", ImGuiSliderFlags_AlwaysClamp);
+            ImGui::ShowHelp("Radius of the weather volume around the focus. A small range concentrates the effect close\nin (e.g. a sandstorm wrapping tightly around the camera); a large one fills out to compass range.");
             ImGui::DragFloat("Drop size", &c.drop_size, 1.f, 1.f, 500.f, "%.0f");
             ImGui::DragFloat("Fall speed", &c.fall_speed, 50.f, 0.f, 30000.f, "%.0f");
             ImGui::ShowHelp("The constant speed drops travel at. Wind tilts their direction without changing this speed.");
             ImGui::DragFloatRange2("Wind direction", &c.wind_dir_min, &c.wind_dir_max, 2.f, 0.f, 360.f, "%.0f deg", "%.0f deg", ImGuiSliderFlags_AlwaysClamp);
             ImGui::ShowHelp("Range of compass headings the wind may blow toward; one is picked at random each time the\ncondition activates. A wide range (e.g. 0-360) varies the direction; a narrow one keeps it consistent.");
-            ImGui::DragFloat("Wind tilt", &c.wind_tilt, 1.f, 0.f, 89.f, "%.0f deg", ImGuiSliderFlags_AlwaysClamp);
-            ImGui::ShowHelp("How far the fall is tilted from straight down: 0 = vertical, 89 = almost sideways.");
+            ImGui::DragFloat("Wind tilt", &c.wind_tilt, 1.f, 0.f, 90.f, "%.0f deg", ImGuiSliderFlags_AlwaysClamp);
+            ImGui::ShowHelp("How far the fall is tilted from straight down: 0 = vertical, 90 = fully sideways (no fall -\nstreams horizontally and never sinks, e.g. a sandstorm).");
             ImGui::Checkbox("Wind relative to camera", &c.wind_camera_relative);
             ImGui::ShowHelp("Measure the wind direction from the camera instead of the world, so the storm keeps the same\non-screen direction as you rotate the camera (e.g. always blowing across the view).");
+            ImGui::Checkbox("Centre on camera", &c.center_on_camera);
+            ImGui::ShowHelp("Centre the volume on the camera itself instead of its target, so the effect wraps tightly\naround the viewer and fills the near view. Best paired with a small range (e.g. a sandstorm).");
             if (c.type == kTypeSnow) {
                 float drift = EffectiveDrift(c);
                 if (ImGui::DragFloat("Drift", &drift, 1.f, 0.f, 1000.f, "%.0f", ImGuiSliderFlags_AlwaysClamp)) c.drift = drift;
