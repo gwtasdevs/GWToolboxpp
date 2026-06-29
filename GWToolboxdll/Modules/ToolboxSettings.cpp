@@ -37,6 +37,9 @@
 #include <Modules/GuildWarsSettingsModule.h>
 #include <Modules/ItemTooltipModule.h>
 #include <Modules/LoginModule.h>
+#if defined(_DEBUG) || defined(GWTB_HARNESS)
+#include <Modules/TestHarness.h>
+#endif
 #include <Modules/MouseFix.h>
 #include <Modules/PartyBroadcastModule.h>
 #include <Modules/PriceCheckerModule.h>
@@ -100,6 +103,11 @@
 #include <Widgets/InventoryOverlayWidget.h>
 #include <Widgets/LatencyWidget.h>
 #include <Widgets/Minimap/Minimap.h>
+#include <Widgets/Minimap/GameWorldRenderer.h>
+#include <Modules/WeatherModule.h>
+#ifdef _DEBUG
+#include <Modules/RiverModule.h>
+#endif
 #include <Widgets/MissionMapWidget.h>
 #include <Widgets/PartyDamage.h>
 #include <Widgets/SkillMonitorWidget.h>
@@ -170,7 +178,11 @@ namespace {
         PriceCheckerModule::Instance(),
         ItemTooltipModule::Instance(),
         ResignLogModule::Instance(),
+        PathfindingWindow::Instance(),
         QuestModule::Instance(),
+#if defined(_DEBUG) || defined(GWTB_HARNESS)
+        TestHarness::Instance(), // autonomous pathfinder test driver (dev builds only)
+#endif
         VanquishMapOverlayWidget::Instance(),
         PartyBroadcast::Instance(),
         CodeOptimiserModule::Instance(),
@@ -186,6 +198,11 @@ namespace {
         SkillbarWidget::Instance(),
         {DistanceWidget::Instance(), false},
         Minimap::Instance(),
+        GameWorldRenderer::Instance(),
+        {WeatherModule::Instance(), false},
+#ifdef _DEBUG
+        {RiverModule::Instance(), false},
+#endif
         PartyDamage::Instance(),
         BondsWidget::Instance(),
         ClockWidget::Instance(),
@@ -262,7 +279,6 @@ void ToolboxSettings::LoadModules(ToolboxIni* ini)
     GWToolbox::ToggleModule(DoorMonitorWindow::Instance());
     GWToolbox::ToggleModule(SkillListingWindow::Instance());
 #endif
-    GWToolbox::ToggleModule(PathfindingWindow::Instance());
     GWToolbox::ToggleModule(VendorFix::Instance());
     GWToolbox::ToggleModule(AudioSettings::Instance());
 

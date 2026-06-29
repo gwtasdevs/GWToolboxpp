@@ -2,6 +2,7 @@
 
 #include <cstdio>
 
+#include <Defender.h>
 #include <Path.h>
 #include <RestClient.h>
 
@@ -14,12 +15,12 @@
 
 static void ShowError(const wchar_t* message)
 {
-    MessageBoxW(nullptr, message, L"GWToolbox - Error", 0);
+    ShowMessageBoxW(nullptr, message, L"GWToolbox - Error", 0);
 }
 
 static void ShowError(const char* message)
 {
-    MessageBoxA(nullptr, message, "GWToolbox - Error", 0);
+    ShowMessageBoxA(nullptr, message, "GWToolbox - Error", 0);
 }
 
 static bool RestartAsAdminForInjection(const uint32_t target_pid)
@@ -102,7 +103,7 @@ static bool InjectInstalledDllInProcess(const Process* process, std::wstring& er
                false;
     if (!process->GetModule(&module, L"GWToolboxdll.dll")) {
         std::wstring detail;
-        if (FindRecentDefenderBlock(L"GWToolboxdll.dll", detail))
+        if (FindRecentDefenderBlock(L"GWToolboxdll.dll", 30, detail))
             return error = std::format(L"Windows Defender blocked GWToolbox from loading:\n\n{}\n\nAdd an exclusion for the {} directory in Windows Security and re-launch {}.", detail, dllpath.parent_path().wstring(), exe_filename), false;
         return error = std::format(
                    L"Application @ {} failed to inject; it may have been quarantined by anti virus software!\n\nExclude the {} directory in your anti virus settings and re-launch {}.", dllpath.wstring(), dllpath.parent_path().wstring(), exe_filename
@@ -151,7 +152,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
     std::wstring error;
     std::filesystem::path log_file_path;
     if (!PathGetExeFullPath(log_file_path)) {
-        MessageBoxW(nullptr, L"Failed to get qualified path for logs file.", L"GWToolbox", MB_OK | MB_TOPMOST);
+        ShowMessageBoxW(nullptr, L"Failed to get qualified path for logs file.", L"GWToolbox", MB_OK | MB_TOPMOST);
         return 0;
     }
     // A previous self-update renames the old exe aside; clean it up now that it's no longer locked.
@@ -164,7 +165,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
     if (freopen_s(&stream, log_file_path.string().c_str(), "w", stderr) != 0) {
         wchar_t buf[MAX_PATH + 128];
         swprintf(buf, MAX_PATH + 128, L"Failed to open log file for writing:\n\n%s\n\nEnsure you have write permissions to this folder.", log_file_path.wstring().c_str());
-        MessageBoxW(nullptr, buf, L"GWToolbox", MB_OK | MB_TOPMOST);
+        ShowMessageBoxW(nullptr, buf, L"GWToolbox", MB_OK | MB_TOPMOST);
         return 0;
     }
 
@@ -207,7 +208,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
             return 1;
         }
 
-        const int iRet = MessageBoxW(nullptr, L"GWToolbox doesn't seem to be installed, do you want to install it?", L"GWToolbox", MB_YESNO);
+        const int iRet = ShowMessageBoxW(nullptr, L"GWToolbox doesn't seem to be installed, do you want to install it?", L"GWToolbox", MB_YESNO);
 
         if (iRet == IDNO) {
             fprintf(stderr, "User doesn't want to install GWToolbox\n");
@@ -259,12 +260,24 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
     }
 
     if (reply == InjectReply_PatternError) {
-        MessageBoxW(
+        ShowMessageBoxW(
             nullptr,
             L"Couldn't find character name RVA.\n"
             L"You need to update the launcher or contact the developers.",
             L"GWToolbox - Error", MB_OK | MB_ICONERROR | MB_TOPMOST
         );
+        return 1;
+    }
+
+    if (reply == InjectReply_MemoryBlocked) {
+        std::wstring message =
+            L"GWToolbox found Guild Wars but couldn't read its memory to locate your character.\n\n"
+            L"This is almost always anti-virus or Controlled Folder Access blocking GWToolbox. "
+            L"Add an exclusion for your GWToolbox folder in Windows Security, allow GWToolbox through Controlled Folder Access, then re-launch.";
+        std::wstring detail;
+        if (FindRecentDefenderBlock(L"Gw.exe", 5, detail))
+            message += L"\n\nWindows Defender reported:\n" + detail;
+        ShowTroubleshootingError(message, GwtbDialogTitle(L"GWToolbox - Error").c_str(), Troubleshooting::CantReadMemory, MB_ICONERROR | MB_TOPMOST);
         return 1;
     }
 
@@ -276,7 +289,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
         }
         // @Enhancement:
         // Add UAC shield to the yes button
-        const int iRet = MessageBoxW(
+        const int iRet = ShowMessageBoxW(
             nullptr,
             L"Couldn't find any valid process to start GWToolboxpp.\n"
             L"Ensure Guild Wars is running before trying to run GWToolbox.\n"
@@ -303,7 +316,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
             error_message = L"Couldn't find any valid process to start GWToolboxpp.\n"
                             L"GWToolboxpp is for Guild Wars Reforged, NOT Guild Wars 2!\n";
         }
-        const int iRet = MessageBoxW(nullptr, error_message, L"GWToolbox - Error", MB_RETRYCANCEL | MB_TOPMOST);
+        const int iRet = ShowMessageBoxW(nullptr, error_message, L"GWToolbox - Error", MB_RETRYCANCEL | MB_TOPMOST);
         if (iRet == IDCANCEL) {
             fprintf(stderr, "User doesn't want to retry\n");
             return 1;

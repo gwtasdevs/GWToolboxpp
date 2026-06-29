@@ -7,13 +7,14 @@
 #include <Widgets/SnapsToPartyWindow.h>
 
 namespace GW {
+    struct AgentLiving;
     namespace Packet {
         namespace StoC {
             struct MapLoaded;
         }
-    }
+    } // namespace Packet
     struct HookStatus;
-}
+} // namespace GW
 
 class PartyDamage : public SnapsToPartyWindow {
 protected:
@@ -34,6 +35,7 @@ protected:
 
     static void MapLoadedCallback(GW::HookStatus*, const GW::Packet::StoC::MapLoaded*);
     static void DamagePacketCallback(GW::HookStatus*, const GW::Packet::StoC::GenericModifier*);
+    static void ConditionValueCallback(GW::HookStatus*, const GW::Packet::StoC::GenericValue*);
 
 public:
     static PartyDamage& Instance()
@@ -58,6 +60,8 @@ public:
         bool overlay_party_window = false;
         bool show_damage = true;
         bool show_healing = false;
+        bool show_dps = false;
+        bool show_condition_dps = false;
         // Distance away from the party window on the x axis; used with snap to party window
         int user_offset = 0;
     };
@@ -70,7 +74,8 @@ public:
 
     void Update(float delta) override;
 
-    static DWORD GetMaxHp(DWORD player_number);
+    // An agent only gets max_hp set when it begins to take damage. PartyDamage module caches the last known max hp of NPCs to sidestep this
+    static DWORD GetMaxHp(const GW::AgentLiving* agent);
 
     void LoadSettings(SettingsDoc& doc, ToolboxIni* legacy) override;
     void SaveSettings(SettingsDoc& doc) override;

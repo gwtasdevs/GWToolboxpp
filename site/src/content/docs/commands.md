@@ -1,5 +1,6 @@
 ---
 title: "Chat Commands"
+description: "Reference for the chat commands GWToolbox++ adds, covering windows, targeting, travel, builds, items, dailies and more."
 section: features
 ---
 
@@ -45,6 +46,7 @@ GWToolbox++ adds a wide variety of chat commands that you trigger by typing them
 
 - `/pcons [on|off]`: Turn [Pcons](/docs/pcons/) on or off. `/pcons` with no argument toggles.
 - `/dropbuff <skill_id>`: Drop the first instance of an upkept skill or buff by skill ID.
+- `/dropitem <model_id> [quantity]`: Drop inventory items matching the model ID, stack by stack. With no quantity, drops every matching stack; otherwise drops up to `[quantity]` in total. Only works in an explorable area, and won't drop equipped or customized items.
 
 ## Targeting and minimap
 
@@ -143,6 +145,15 @@ All daily commands accept an optional `tomorrow` argument (e.g. `/zm tomorrow`) 
   - `/cam fog (on|off)`: Enable or disable fog.
   - `/cam fov [amount]`: Set the field-of-view (no argument resets).
 - `/zoom [value]`: Set the maximum zoom distance. `/zoom` with no argument resets to the default 750.
+
+## Weather
+
+- `/weather`: List every [Weather](/docs/weather/) condition and whether it's on.
+- `/weather <condition> [on|off|toggle]`: Toggle a condition by name (names may contain spaces), or set its state explicitly (`1`/`0` also work). Turning one on turns the rest off.
+- `/weather auto`: Start [automatic weather](/docs/weather/#automatic-weather) following the current map's climate (same as `/climate auto`).
+- `/weather off`: Stop automatic weather and clear any running weather effects (same as `/climate off`).
+- `/climate`: Show whether automatic weather is on and which climate is currently driving it.
+- `/climate [auto|off|<climate>]`: Control [automatic weather](/docs/weather/#automatic-weather). `auto` follows the current map's climate, a climate name (e.g. `Tropical`) forces that climate regardless of map, and `off` stops automatic weather and clears any running weather effects.
 
 ## Appearance (transmog)
 

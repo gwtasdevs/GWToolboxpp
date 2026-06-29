@@ -136,7 +136,7 @@ namespace {
     std::unordered_map<std::string, IDirect3DTexture9**> damagetype_icons;
     std::unordered_map<GW::Constants::MapID, GuiUtils::EncString*> map_names;
     std::unordered_map<GW::Constants::SkillID, GuiUtils::EncString*> skill_names;
-    std::unordered_map<GW::Constants::MapID, GuiUtils::EncString*> region_names;
+    std::unordered_map<GW::Region, std::unique_ptr<GuiUtils::EncString>> region_names;
     std::unordered_map<GW::Constants::HeroID, GuiUtils::EncString*> hero_names;
     std::unordered_map<GW::Constants::Language, std::unordered_map<uint32_t, std::unique_ptr<GuiUtils::EncString>>> encoded_string_ids;
     std::filesystem::path current_settings_folder;
@@ -457,6 +457,7 @@ void Resources::Cleanup()
     map_names.clear(); // NB: pointers to encoded_string_ids, no need to free memory
     skill_names.clear(); // NB: pointers to encoded_string_ids, no need to free memory
     hero_names.clear();
+    region_names.clear(); // owns its EncStrings (built from raw encoded strings, not encoded_string_ids)
     encoded_string_ids.clear();
 }
 
@@ -570,10 +571,29 @@ std::filesystem::path Resources::GetPath(const std::filesystem::path& folder, co
 
 bool Resources::EnsureFolderExists(const std::filesystem::path& path)
 {
-    if (path.empty()) return false;
+    std::wstring error_description;
+    return EnsureFolderExists(path, error_description);
+}
+
+bool Resources::EnsureFolderExists(const std::filesystem::path& path, std::wstring& error_description)
+{
+    error_description.clear();
+    if (path.empty()) {
+        error_description = L"No folder path was provided";
+        return false;
+    }
     if (exists(path)) return true;
     std::error_code ec;
-    return create_directories(path, ec);
+    if (create_directories(path, ec)) return true;
+
+    error_description = std::format(L"Failed to create folder:\n{}\n\nReason: {} (code {})\n\n{}",
+                                    path.wstring(), FormatWindowsError(ec.value()), ec.value(), PathDiagnoseWritability(path.parent_path()));
+    // ERROR_ACCESS_DENIED / ERROR_VIRUS_INFECTED / ERROR_VIRUS_DELETED are what antivirus and Controlled Folder Access return when blocking the write
+    if (ec.value() == ERROR_ACCESS_DENIED || ec.value() == ERROR_VIRUS_INFECTED || ec.value() == ERROR_VIRUS_DELETED) {
+        error_description += L"\n\nIf this is your Documents folder, Windows Defender Controlled Folder Access "
+            L"may be the cause - try allowing Guild Wars, or turning Controlled Folder Access off.";
+    }
+    return false;
 }
 
 bool Resources::Download(const std::filesystem::path& path_to_file, const std::string& url, std::wstring& response)
@@ -1003,8 +1023,9 @@ IDirect3DTexture9** Resources::GetGuildWarsWikiImage(const char* filename, size_
     *texture = nullptr;
     guild_wars_wiki_images[filename] = texture;
     static std::filesystem::path path = GetPath(GUILD_WARS_WIKI_FILES_PATH);
-    if (!EnsureFolderExists(path)) {
-        trigger_failure_callback(callback, L"Failed to create folder %s", path.wstring().c_str());
+    std::wstring folder_error;
+    if (!EnsureFolderExists(path, folder_error)) {
+        trigger_failure_callback(callback, L"%s", folder_error.c_str());
         return texture;
     }
     const auto path_to_file = std::format("{}\\{}", path.string(), filename_sanitised);
@@ -1105,8 +1126,9 @@ IDirect3DTexture9** Resources::GetSkillImageFromGWW(GW::Constants::SkillID skill
         return texture;
     }
     static std::filesystem::path path = GetPath(SKILL_IMAGES_PATH);
-    if (!EnsureFolderExists(path)) {
-        trigger_failure_callback(callback, L"Failed to create folder %s", path.wstring().c_str());
+    std::wstring folder_error;
+    if (!EnsureFolderExists(path, folder_error)) {
+        trigger_failure_callback(callback, L"%s", folder_error.c_str());
         return texture;
     }
     wchar_t path_to_file[MAX_PATH];
@@ -1215,64 +1237,96 @@ GuiUtils::EncString* Resources::GetMapName(const GW::Constants::MapID map_id)
     return map_names[map_id];
 }
 
-const wchar_t* Resources::GetRegionName(const GW::Constants::MapID map_id)
+GuiUtils::EncString* Resources::GetRegionName(const GW::Region region)
 {
-    const auto area_info = GW::Map::GetMapInfo(map_id);
-    switch (area_info ? area_info->region : GW::Region_DevRegion) {
+    if (const auto found = region_names.find(region); found != region_names.end())
+        return found->second.get();
+
+    const wchar_t* enc;
+    switch (region) {
         case GW::Region_BattleIslands:
-            return GW::EncStrings::MapRegion::BattleIsles;
+            enc = GW::EncStrings::MapRegion::BattleIsles;
+            break;
 
         // Prophecies
         case GW::Region::Region_Maguuma:
-            return GW::EncStrings::MapRegion::MaguumaJungle;
+            enc = GW::EncStrings::MapRegion::MaguumaJungle;
+            break;
         case GW::Region::Region_Ascalon:
         case GW::Region::Region_Presearing:
-            return GW::EncStrings::MapRegion::Ascalon;
+            enc = GW::EncStrings::MapRegion::Ascalon;
+            break;
         case GW::Region::Region_Kryta:
-            return GW::EncStrings::MapRegion::Kryta;
-        case GW::Region::Region_NorthernShiverpeaks: {
+            enc = GW::EncStrings::MapRegion::Kryta;
+            break;
+        case GW::Region::Region_NorthernShiverpeaks:
             // TODO: Southern vs northern shivers
-            return GW::EncStrings::MapRegion::NorthernShiverpeaks;
-        }
+            enc = GW::EncStrings::MapRegion::NorthernShiverpeaks;
+            break;
         case GW::Region_CrystalDesert:
-            return GW::EncStrings::MapRegion::CrystalDesert;
-        case GW::Region_FissureOfWoe: {
-            // TODO: Ring of fire?
-            // TODO: Underworld
-            return GW::EncStrings::MapRegion::FissureOfWoe;
-        }
+            enc = GW::EncStrings::MapRegion::CrystalDesert;
+            break;
+        case GW::Region_FissureOfWoe:
+            // TODO: Ring of fire? Underworld
+            enc = GW::EncStrings::MapRegion::FissureOfWoe;
+            break;
 
         // Factions
         case GW::Region::Region_Kurzick:
-            return GW::EncStrings::MapRegion::EchovaldForest;
+            enc = GW::EncStrings::MapRegion::EchovaldForest;
+            break;
         case GW::Region::Region_Luxon:
-            return GW::EncStrings::MapRegion::TheJadeSea;
+            enc = GW::EncStrings::MapRegion::TheJadeSea;
+            break;
         case GW::Region::Region_ShingJea:
-            return GW::EncStrings::MapRegion::ShingJeaIsland;
+            enc = GW::EncStrings::MapRegion::ShingJeaIsland;
+            break;
         case GW::Region::Region_Kaineng:
-            return GW::EncStrings::MapRegion::KainengCity;
+            enc = GW::EncStrings::MapRegion::KainengCity;
+            break;
 
         // Nightfall
         case GW::Region::Region_Kourna:
-            return GW::EncStrings::MapRegion::Kourna;
+            enc = GW::EncStrings::MapRegion::Kourna;
+            break;
         case GW::Region::Region_Vaabi:
-            return GW::EncStrings::MapRegion::Vabbi;
+            enc = GW::EncStrings::MapRegion::Vabbi;
+            break;
+        case GW::Region::Region_Desolation:
+            enc = GW::EncStrings::MapRegion::TheDesolation;
+            break;
         case GW::Region::Region_Istan:
-            return GW::EncStrings::MapRegion::Istan;
+            enc = GW::EncStrings::MapRegion::Istan;
+            break;
         case GW::Region::Region_DomainOfAnguish:
-            return GW::EncStrings::MapRegion::RealmOfTorment;
+            enc = GW::EncStrings::MapRegion::RealmOfTorment;
+            break;
 
         // Eye of the north
         case GW::Region::Region_CharrHomelands:
-            return GW::EncStrings::MapRegion::CharrHomelands;
+            enc = GW::EncStrings::MapRegion::CharrHomelands;
+            break;
         case GW::Region::Region_DepthsOfTyria:
-            return GW::EncStrings::MapRegion::DepthsOfTyria;
+            enc = GW::EncStrings::MapRegion::DepthsOfTyria;
+            break;
         case GW::Region::Region_FarShiverpeaks:
-            return GW::EncStrings::MapRegion::FarShiverpeaks;
+            enc = GW::EncStrings::MapRegion::FarShiverpeaks;
+            break;
         case GW::Region::Region_TarnishedCoast:
-            return GW::EncStrings::MapRegion::TarnishedCoast;
+            enc = GW::EncStrings::MapRegion::TarnishedCoast;
+            break;
+
+        default:
+            enc = L"\x108\107No region name yet :(\x1";
+            break;
     }
-    return L"\x108\107No region name yet :(\x1";
+    return region_names.emplace(region, std::make_unique<GuiUtils::EncString>(enc)).first->second.get();
+}
+
+GuiUtils::EncString* Resources::GetRegionName(const GW::Constants::MapID map_id)
+{
+    const auto area_info = GW::Map::GetMapInfo(map_id);
+    return GetRegionName(area_info ? area_info->region : GW::Region_DevRegion);
 }
 
 GuiUtils::EncString* Resources::DecodeStringId(const uint32_t enc_str_id, GW::Constants::Language language)

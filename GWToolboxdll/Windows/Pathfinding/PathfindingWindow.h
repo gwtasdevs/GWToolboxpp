@@ -1,15 +1,17 @@
 #pragma once
 
-#include <ToolboxWindow.h>
+#include <ToolboxModule.h>
 #include <Windows/Pathfinding/Pathing.h>
 
 using CalculatedCallback = std::function<void (std::vector<GW::GamePos>& waypoints, void* args)>;
 
 /*
-    This should really have been a module to just manage pathing - its used in a lot of places.
-    Instead, disable the Draw function in release
+    Pathing manager (a module, NOT a window): builds/queries the visgraph, drives the optional navmesh overlay,
+    and exposes the cross-map route API used by QuestModule/WorldMapWidget. It has no window of its own — its
+    only UI is its settings page. Per-frame work runs in Draw() (called for every enabled module).
+    (The class is still named PathfindingWindow because it's referenced as a static API in several places.)
 */
-class PathfindingWindow : public ToolboxWindow {
+class PathfindingWindow : public ToolboxModule {
     PathfindingWindow() = default;
     ~PathfindingWindow() = default;
 
@@ -20,22 +22,32 @@ public:
         return instance;
     }
 
-    [[nodiscard]] const char* Name() const override { return "Pathfinding Window"; }
+    [[nodiscard]] const char* Name() const override { return "Pathfinding"; }
     [[nodiscard]] const char* Icon() const override { return ICON_FA_DOOR_OPEN; }
-    [[nodiscard]] bool ShowOnWorldMap() const override { return true; }
 
     bool HasSettings() { return true; }
 
     struct Settings {
-        bool     use_recast_pathing = false;            // false = visgraph A* (default), true = recast/Detour navmesh
-        bool     use_recast_builder = false;            // false = hand-built mesh, true = recast-generated mesh (applies on next map load)
         bool     draw_navmesh_overlay = false;
         uint32_t navmesh_wall_color = 0xC0FF3030;          // ARGB: wall edge on plane 0 (red)
         uint32_t navmesh_wall_color_hi = 0xC0FF30FF;       // wall edge on planes != 0 (magenta)
         uint32_t navmesh_connection_color = 0x6030FF30;    // connection edge on plane 0 (green)
         uint32_t navmesh_connection_color_hi = 0x6030C0FF; // connection edge on planes != 0 (cyan)
-        float    navmesh_overlay_range = 4500.f;           // game units around the player
+        float    path_recalc_distance = 5.f;               // game units the player must move before the quest path recomputes
+        float    navmesh_sample_spacing = 5.f;             // gw between terrain-height samples when draping the overlay (lower = tighter to floor)
     };
+
+    // Game units the player must move before the rendered quest path recomputes (persisted setting). Read by
+    // QuestModule each tick; the recompute is still rate-capped by Update's 33ms throttle.
+    static float GetPathRecalcDistance();
+
+    // Diagnostic (harness): dump the current map's navmesh polys near `center` to log.txt. Triggers the full
+    // build if the nav isn't ready yet (returns false so the caller can retry). Game-thread safe.
+    static bool DebugDumpNavMeshNear(const GW::GamePos& center, float radius);
+
+    // The current map's overlay navmesh, only if resident and fully built (else nullptr). Game/render-thread safe
+    // (resident lookup only, never blocks on the DAT). Used by the in-world draper for per-sample plane resolution.
+    static Pathing::NavMesh* GetResidentNavMesh();
 
     void Draw(IDirect3DDevice9* pDevice) override;
     void DrawSettingsInternal() override;
@@ -46,13 +58,20 @@ public:
     bool CanTerminate() override;
     void Initialize() override;
     void Terminate() override;
+    // True while the module is initialised and not terminating. Lock-free; safe to poll every frame.
+    // Quest pathing checks this before touching the route API (the module is now optional).
+    static bool IsPathingEnabled();
     // False if still calculating current map
     static bool ReadyForPathing();
+    // True while one or more cross-map/world-map route computations are running on a worker thread. Lock-free;
+    // safe to poll every frame (the world map shows a "calculating" indicator while true).
+    static bool IsCalculatingPath();
     // False if still calculating current map
     static clock_t CalculatePath(const GW::GamePos& from, const GW::GamePos& to, CalculatedCallback callback, void* args = nullptr);
 
     static void SetFrom(const GW::GamePos& pos);
     static void SetTo(const GW::GamePos& pos);
+
     // Set from world map coordinates (handles cross-map detection + DAT loading)
     static void SetFromWorldMap(const GW::Vec2f& world_map_pos);
     static void SetToWorldMap(const GW::Vec2f& world_map_pos);
@@ -75,7 +94,11 @@ public:
     // game coords) into `out` as WORLD coords. Pass the leg's map explicitly so a deferred
     // recompute isn't tied to where the player has since wandered. Holds no shared state —
     // the caller splices the untouched remainder of its route on. False if no path.
-    static bool RecalculateSegment(GW::Constants::MapID map_id, const GW::GamePos& from, const GW::GamePos& to, std::vector<GW::Vec2f>* out);
+    // out_game (optional): the raw CURRENT-map A* leg in that map's game coords, with each waypoint's
+    // pathfinder zplane preserved. `out` flattens to world coords (losing the plane); out_game keeps it so
+    // the caller can drape the rendered line on the surface the path traverses. Only meaningful when map_id
+    // resolves to the current map (the only case callers request it).
+    static bool RecalculateSegment(GW::Constants::MapID map_id, const GW::GamePos& from, const GW::GamePos& to, std::vector<GW::Vec2f>* out, std::vector<GW::GamePos>* out_game = nullptr);
     // True if `world_pos` falls within `map_id`'s game bounds (0 = current map).
     static bool IsWorldPosOnMap(const GW::Vec2f& world_pos, GW::Constants::MapID map_id = (GW::Constants::MapID)0);
     // True if `p` is the inter-map break sentinel in CalculateRoute output.

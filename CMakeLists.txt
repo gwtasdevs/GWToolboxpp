@@ -8,9 +8,9 @@ project(gwtoolbox)
 
 set(GWTOOLBOXEXE_VERSION "4.7")
 set(GWTOOLBOXEXE_MODULE_VERSION "4,7,0,0") # used for exe module info. See GWToolbox/GWToolbox.rc
-set(GWTOOLBOXDLL_VERSION "8.28")
+set(GWTOOLBOXDLL_VERSION "8.29")
 set(GWTOOLBOXDLL_VERSION_BETA "") # can be anything. Marks beta version if not empty.
-set(GWTOOLBOX_MODULE_VERSION "8,28,0,0") # used for Dll module info. See GWToolboxdll/GWToolbox.rc
+set(GWTOOLBOX_MODULE_VERSION "8,29,0,0") # used for Dll module info. See GWToolboxdll/GWToolbox.rc
 
 
 if(MSVC_TOOLSET_VERSION LESS 143)
@@ -36,6 +36,11 @@ add_compile_definitions(
     "WIN32_LEAN_AND_MEAN"
     # glaze's zmij float writer uses _mm_cvtsi128_si64, an x64-only intrinsic, when SSE is detected; we build x86
     "ZMIJ_USE_SIMD=0"
+
+    # Dev test tooling (TestHarness module + extra pathfinding diagnostics) is gated on _DEBUG only, so
+    # it is compiled out of the shipped RelWithDebInfo/Release builds. Debug now also mirrors the log to
+    # log.txt (Logger.cpp) so the harness can read it. Define GWTB_HARNESS here to opt a non-Debug build
+    # into the harness, but it is OFF by default (the gates are `_DEBUG || GWTB_HARNESS`).
 
     "GWTOOLBOXEXE_VERSION=\"${GWTOOLBOXEXE_VERSION}\""
     "GWTOOLBOXEXE_MODULE_VERSION=${GWTOOLBOXEXE_MODULE_VERSION}"

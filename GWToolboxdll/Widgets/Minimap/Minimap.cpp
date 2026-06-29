@@ -37,9 +37,11 @@
 #include <Utils/GuiUtils.h>
 
 #include <Defines.h>
+#include <GWToolbox.h>
 #include <Modules/QuestModule.h>
 #include <Modules/Resources.h>
 #include <Utils/TextUtils.h>
+#include <Windows/SettingsWindow.h>
 #include "Minimap.h"
 #include <Utils/FontLoader.h>
 #include <Utils/ToolboxUtils.h>
@@ -790,7 +792,6 @@ void Minimap::SignalTerminate()
     symbols_renderer.Terminate();
     custom_renderer.Terminate();
     effect_renderer.Terminate();
-    GameWorldRenderer::Terminate();
     GW::GameThread::Enqueue([] {
         RefreshQuestMarker();
         ResetWindowPosition(GW::UI::WindowID_Compass, compass_frame);
@@ -844,7 +845,10 @@ void Minimap::Initialize()
     pingslines_renderer.RegisterSettings(this);
     symbols_renderer.RegisterSettings(this);
     custom_renderer.RegisterSettings(this);
-    GameWorldRenderer::RegisterSettings(this);
+
+    for (const char* sub : {"Ranges", "Pings and drawings", "AoE Effects", "Symbols", "Terrain", "Hero flagging"}) {
+        SettingsWindow::RegisterSubSection(SettingsName(), sub);
+    }
 
     uintptr_t address = GW::Scanner::Find("\x8b\x46\x40\x85\xc0\x74\x0c", "xxxxx?x", 0x5);
     if (address) {
@@ -1100,19 +1104,19 @@ void Minimap::DrawSettingsInternal()
     ImGui::Text("You can set the color alpha to 0 to disable any minimap feature.");
     // agent_rendered has its own TreeNodes
     agent_renderer.DrawSettings();
-    if (ImGui::TreeNodeEx("Ranges", ImGuiTreeNodeFlags_FramePadding | ImGuiTreeNodeFlags_SpanAvailWidth)) {
+    if (SettingsWindow::SubSectionHeader(SettingsName(), "Ranges")) {
         range_renderer.DrawSettings();
         ImGui::TreePop();
     }
-    if (ImGui::TreeNodeEx("Pings and drawings", ImGuiTreeNodeFlags_FramePadding | ImGuiTreeNodeFlags_SpanAvailWidth)) {
+    if (SettingsWindow::SubSectionHeader(SettingsName(), "Pings and drawings")) {
         pingslines_renderer.DrawSettings();
         ImGui::TreePop();
     }
-    if (ImGui::TreeNodeEx("AoE Effects", ImGuiTreeNodeFlags_FramePadding | ImGuiTreeNodeFlags_SpanAvailWidth)) {
+    if (SettingsWindow::SubSectionHeader(SettingsName(), "AoE Effects")) {
         EffectRenderer::DrawSettings();
         ImGui::TreePop();
     }
-    if (ImGui::TreeNodeEx("Symbols", ImGuiTreeNodeFlags_FramePadding | ImGuiTreeNodeFlags_SpanAvailWidth)) {
+    if (SettingsWindow::SubSectionHeader(SettingsName(), "Symbols")) {
         symbols_renderer.DrawSettings();
         ImGui::Separator();
         ImGui::Text("Cardinal (N/S/E/W) directions");
@@ -1123,7 +1127,7 @@ void Minimap::DrawSettingsInternal()
         ImGui::SliderFloat("Font size##cardinal", &cardinal_font_size, 16.f, 56.f, "%.0f px");
         ImGui::TreePop();
     }
-    if (ImGui::TreeNodeEx("Terrain", ImGuiTreeNodeFlags_FramePadding | ImGuiTreeNodeFlags_SpanAvailWidth)) {
+    if (SettingsWindow::SubSectionHeader(SettingsName(), "Terrain")) {
         ImGui::SmallConfirmButton("Restore Defaults", "Are you sure?", [&](bool result, void*) {
             if (result) {
                 color_map = 0xFF999999;
@@ -1137,14 +1141,10 @@ void Minimap::DrawSettingsInternal()
         ImGui::TreePop();
     }
     custom_renderer.DrawSettings();
-    if (ImGui::TreeNodeEx("Hero flagging", ImGuiTreeNodeFlags_FramePadding | ImGuiTreeNodeFlags_SpanAvailWidth)) {
+    if (SettingsWindow::SubSectionHeader(SettingsName(), "Hero flagging")) {
         ImGui::Checkbox("Show hero flag controls", &hero_flag_controls_show);
         ImGui::CheckboxWithHelp("Attach to minimap", &hero_flag_window_attach, "If disabled, you can move/resize the window with 'Unlock Move All'.");
         Colors::DrawSettingHueWheel("Background", &hero_flag_controls_background);
-        ImGui::TreePop();
-    }
-    if (ImGui::TreeNodeEx("In-game rendering", ImGuiTreeNodeFlags_FramePadding | ImGuiTreeNodeFlags_SpanAvailWidth)) {
-        GameWorldRenderer::DrawSettings();
         ImGui::TreePop();
     }
     ImGui::StartSpacedElements(300.f);
@@ -1264,7 +1264,6 @@ void Minimap::LoadSettings(SettingsDoc& doc, ToolboxIni* legacy)
     custom_renderer.Invalidate();
     custom_renderer.LoadMarkers();
     effect_renderer.LoadSettings(doc, legacy, Name());
-    GameWorldRenderer::OnSettingsLoaded();
 
     pending_refresh_quest_marker = true;
 }
@@ -1516,8 +1515,16 @@ bool Minimap::ShouldDrawAllQuests()
     return render_all_quests;
 }
 
+bool Minimap::IsEnabled()
+{
+    return GWToolbox::IsModuleEnabled(&Instance());
+}
+
 void Minimap::Render(IDirect3DDevice9* device, const MinimapRenderContext& context)
 {
+    if (!IsEnabled()) {
+        return;
+    }
     const GW::Agent* me = GW::Agents::GetObservingAgent();
     if (me == nullptr) {
         return;

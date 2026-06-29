@@ -2,8 +2,9 @@
 
 bool IsPathExcludedFromDefender(const std::filesystem::path& path);
 
-bool AddDefenderExclusion(const std::filesystem::path& path, const bool quiet, std::wstring& error);
-
-// Looks for a recent Defender detection/ASR-block event naming dll_name.
-// Returns true and sets `detail` to the matching event message when found.
-bool FindRecentDefenderBlock(const std::wstring& dll_name, std::wstring& detail);
+// Adds a Defender folder exclusion and allows the given executables through Controlled Folder
+// Access, in a single elevated PowerShell invocation (so at most one UAC prompt). Entries that
+// already exist are skipped; `controlled_folder_access_apps` that don't exist on disk are ignored.
+bool AddDefenderExceptions(const std::filesystem::path& exclusion_path,
+                           const std::vector<std::filesystem::path>& controlled_folder_access_apps,
+                           const bool quiet, std::wstring& error);

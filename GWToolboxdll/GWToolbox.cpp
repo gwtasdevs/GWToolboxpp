@@ -19,9 +19,12 @@
 #include <GWCA/Managers/MemoryMgr.h>
 #include <GWCA/Managers/RenderMgr.h>
 
+#include <Defender.h>
 #include <Defines.h>
 #include <GWToolbox.h>
 #include <Logger.h>
+#include <Timer.h>
+#include <Utils/GameWorldCompositor.h>
 #include <Utils/GuiUtils.h>
 #include <Utils/TeamBuild.h>
 
@@ -361,10 +364,13 @@ namespace {
         // Defender returns these from CreateFile/LoadLibrary when it blocks or quarantines a file.
         const auto warn_if_antivirus = [](const DWORD err) {
             if (err != ERROR_VIRUS_INFECTED && err != ERROR_VIRUS_DELETED) return;
-            MessageBoxW(nullptr,
-                        L"Windows Defender (or another anti-virus) blocked gwca.dll, which GWToolbox needs to run.\n\n"
-                        L"Add an exclusion for your GWToolbox folder in Windows Security and re-launch.",
-                        L"GWToolbox", MB_OK | MB_ICONERROR | MB_TOPMOST);
+            std::wstring message =
+                L"Windows Defender (or another anti-virus) blocked gwca.dll, which GWToolbox needs to run.\n\n"
+                L"Add an exclusion for your GWToolbox folder in Windows Security and re-launch.";
+            std::wstring detail;
+            if (FindRecentDefenderBlock(L"gwca.dll", 15, detail))
+                message += L"\n\nWindows Defender reported:\n" + detail;
+            ShowTroubleshootingError(message, L"GWToolbox", Troubleshooting::BlockedFiles, MB_ICONERROR | MB_TOPMOST);
         };
 
         if (!IsValidGWCADll(gwca_dll_path, resource)) {
@@ -433,9 +439,16 @@ namespace {
         }
         vec.push_back(&m);
         Log::Log("ToggleTBModule: Initializing %s...", m.Name());
+        const auto init_timer = TIMER_INIT();
         m.Initialize();
+        const auto initialize_ms = TIMER_DIFF(init_timer);
+        const auto settings_timer = TIMER_INIT();
         m.LoadSettings(*GWToolbox::GetSettingsDoc(), GWToolbox::OpenSettingsFile());
+        const auto load_settings_ms = TIMER_DIFF(settings_timer);
         Log::Log("ToggleTBModule: Initialised %s !!", m.Name());
+        if (profiling_enabled) // [perf-diag] slow-module-startup timing, gated on the profiling toggle
+            Log::Log("[perf] %s startup: Initialize %ld ms, LoadSettings %ld ms", m.Name(),
+                     (long)initialize_ms, (long)load_settings_ms);
         ReorderModules(vec);
         return true; // Added successfully
     }
@@ -1074,6 +1087,7 @@ void GWToolbox::Update(GW::HookStatus*)
             m->Update(delta_f);
             QueryPerformanceCounter(&t1);
             m->last_update_time_us_ = QpcToMicroseconds(t1.QuadPart - t0.QuadPart);
+            if (m->last_update_time_us_ > 60000) Log::Log("[hitch] %s::Update took %lld us", m->Name(), (long long)m->last_update_time_us_); // [perf-diag]
         }
         else {
             m->Update(delta_f);
@@ -1133,12 +1147,18 @@ void GWToolbox::Draw(IDirect3DDevice9* device)
 
     if (!CanRenderToolbox()) return;
 
+    // Once-per-frame tick for the shared in-world compositor (installs its hook lazily, resets the
+    // per-frame draw guard) so any module that registered an under-UI draw runs this frame.
+    GameWorldCompositor::BeginFrame();
+
     ImGui_ImplDX9_NewFrame();
     ImGui_ImplWin32_NewFrame();
 
     const bool world_map_showing = GW::UI::GetIsWorldMapShowing();
 
-    if (!world_map_showing && GW::UI::GetIsUIDrawn()) {
+    // Draw the in-world overlays BEFORE the minimap and the rest of the toolbox UI, so
+    // that UI composites on top of them. Gated on the module's real enabled state.
+    if (!world_map_showing && GW::UI::GetIsUIDrawn() && GWToolbox::IsModuleEnabled(&GameWorldRenderer::Instance())) {
         GameWorldRenderer::Render(device);
     }
 
@@ -1175,16 +1195,24 @@ void GWToolbox::Draw(IDirect3DDevice9* device)
                 uielement->Draw(device);
                 QueryPerformanceCounter(&t1);
                 uielement->last_draw_time_us_ = QpcToMicroseconds(t1.QuadPart - t0.QuadPart);
+                if (uielement->last_draw_time_us_ > 60000) Log::Log("[hitch] %s::Draw took %lld us", uielement->Name(), (long long)uielement->last_draw_time_us_); // [perf-diag]
             }
             else {
                 uielement->Draw(device);
             }
         }
 
-        // Non-UI modules have no window of their own but may still paint an overlay
-        // this frame (e.g. Texmod's recording banner).
+        // Non-UI modules have no window but may still paint an overlay this frame (e.g. Texmod's recording banner).
         for (size_t i = 0; i < other_modules_enabled.size(); i++) {
-            other_modules_enabled[i]->Draw(device);
+            if (profiling_enabled) { // [perf-diag]
+                const auto draw_timer = TIMER_INIT();
+                other_modules_enabled[i]->Draw(device);
+                const auto draw_ms = TIMER_DIFF(draw_timer);
+                if (draw_ms > 60) Log::Log("[hitch] %s::Draw took %ld ms", other_modules_enabled[i]->Name(), (long)draw_ms);
+            }
+            else {
+                other_modules_enabled[i]->Draw(device);
+            }
         }
 
 #ifdef _DEBUG
@@ -1302,6 +1330,9 @@ void GWToolbox::UpdateTerminating(float delta_f, bool panicking)
     ASSERT(DetachWndProcHandler());
 
     if (!CanTerminate()) return;
+
+    // All modules are gone (so the shared compositor has no registered draws); release its hook and GPU resources.
+    GameWorldCompositor::Terminate();
 
     GW::DisableHooks();
 

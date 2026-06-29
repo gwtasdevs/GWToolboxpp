@@ -1,5 +1,6 @@
 #include "stdafx.h"
 
+#include <atomic>
 #include <list>
 #include <mutex>
 #include <queue>
@@ -35,6 +36,7 @@
 #include <Modules/ToolboxSettings.h>
 #include <Utils/ArenaNetFileParser.h>
 #include <Widgets/Minimap/Minimap.h>
+#include <Widgets/Minimap/GameWorldRenderer.h>
 #include <Windows/Pathfinding/PathfindingWindow.h>
 #include <Windows/Pathfinding/Pathing.h>
 #include <Windows/Pathfinding/NavMesh.h> // viz-only navmesh for the debug overlay
@@ -52,18 +54,13 @@
 #include <Widgets/MissionMapWidget.h>
 #include <Widgets/WorldMapWidget.h>
 
-// Define PATHING_VERBOSE to re-enable pathfinding's per-frame Log::Info chatter
-// ([GetAdj]/[Dijkstra]/[CacheTrace]/[AStar:los|ok]/etc.). PATH_LOG_ERROR/WARNING
-// (see PathingLog.h) only reach chat in debug; only Log::Info inside this file is
-// silenced when PATHING_VERBOSE is not defined.
+// Define PATHING_VERBOSE to re-enable this file's per-frame Log::Info chatter; PATH_LOG_ERROR/WARNING still reach chat in debug.
 // #define PATHING_VERBOSE 1
 #ifdef PATHING_VERBOSE
 #define PATH_LOG_INFO(...) Log::Info(__VA_ARGS__)
 #else
 #define PATH_LOG_INFO(...) ((void)0)
-// Locals/params like `auto* nm = Resources::GetMapName(...)` and the
-// `caller` arg of EnsureLightweightMapInfo exist only to be formatted into
-// PATH_LOG_INFO; with logging compiled out they're unused.
+// Locals/params that exist only to be formatted into PATH_LOG_INFO are unused once logging is compiled out.
 #pragma warning(disable : 4189 4100)
 #endif
 
@@ -82,12 +79,8 @@ namespace {
     // Lazy: populated on first call to ClosestPortalTrapezoidDistanceInMap for a map.
     std::unordered_map<uint64_t, OpenTyria::TrapezoidPathfinder*> trapezoid_pf_by_coords;
 
-    // Serializes whole route computations. The route caches above (+ portal_walk_cache,
-    // blacklisted_edges) are global and assume one build at a time; since every quest path
-    // now drives its own worker, concurrent builds would read half-inserted MilePaths
-    // (allocated-but-zeroed trapezoids → crash). Held for the duration of a build; the
-    // game thread's readiness check try-locks so it never blocks. Recursive: the build's
-    // helpers re-enter via the same thread.
+    // Serializes whole route computations: the global route caches assume one build at a time (concurrent builds read
+    // half-inserted MilePaths → crash). Game thread try-locks so it never blocks; recursive since build helpers re-enter.
     std::recursive_mutex route_mutex;
 
     // Cache of portal props per file_hash (lightweight, loaded on demand).
@@ -100,9 +93,7 @@ namespace {
     std::list<uint64_t> lru_order; // mile_paths_by_coords keys, front = most recent
     std::unordered_map<uint64_t, std::list<uint64_t>::iterator> lru_pos;
 
-    // Guards lru_* and route_jobs_active. Eviction frees MilePaths, so it can only run
-    // when no route worker holds one (route_jobs_active == 0); the lock makes that
-    // gate atomic against a job starting.
+    // Guards lru_* and route_jobs_active; eviction may only run when no route worker holds a MilePath (route_jobs_active == 0).
     std::mutex lru_mutex;
     int route_jobs_active = 0;
 
@@ -117,9 +108,7 @@ namespace {
 
     void EnforceCacheLimitIfIdle(); // GetMapFileId fwd decl must be in scope first
 
-    // RAII guard around a route computation: defers eviction while it holds MilePath*,
-    // then trims the cache once done (on the main thread — eviction erases cached_map_info
-    // which the renderer reads there).
+    // RAII guard: defers eviction while it holds MilePath*, then trims the cache on the main thread (renderer reads cached_map_info there).
     struct RouteJobScope {
         RouteJobScope()
         {
@@ -140,23 +129,28 @@ namespace {
         RouteJobScope& operator=(const RouteJobScope&) = delete;
     };
 
+    // In-flight world-map route/path computations. Each async route worker holds a PathCalcScope; the world map
+    // polls IsCalculatingPath() to show a "calculating" indicator while one is running. Atomic: incremented on
+    // worker threads, read on the game/render thread.
+    std::atomic<int> path_calc_in_flight = 0;
+    struct PathCalcScope {
+        PathCalcScope() { ++path_calc_in_flight; }
+        ~PathCalcScope() { --path_calc_in_flight; }
+        PathCalcScope(const PathCalcScope&) = delete;
+        PathCalcScope& operator=(const PathCalcScope&) = delete;
+    };
+
     bool draw_map_bounds = false;
     bool draw_graph_edges = false;
     bool draw_portals = false;
-    // Distance metric used by the multi-map route picker for portal-portal hops.
-    // Euclidean: straight line (fast, ignores walls).
-    // Trapezoid: OpenTyria trapezoid-graph AStar (fast, occasionally suboptimal).
-    // Walk:      full visgraph + AStar (accurate, slow first-time builds).
+    // Portal-portal hop metric for the route picker: Euclidean (straight line), Trapezoid (graph AStar, fast), Walk (visgraph, accurate/slow).
     enum class PortalDistanceMode { Euclidean = 0, Trapezoid = 1, Walk = 2 };
     PortalDistanceMode portal_distance_mode = PortalDistanceMode::Trapezoid;
     GW::GamePos ToCurrentMapCoords(const GW::GamePos& pos, GW::Constants::MapID src_map); // forward decl (early)
-    Pathing::MilePath* LoadMapFromDAT(GW::Constants::MapID map_id);                       // forward decl (early)
+    Pathing::MilePath* LoadMapFromDAT(GW::Constants::MapID map_id, bool allow_load = true); // forward decl (early)
     void BuildMapGraph();                                                                 // forward decl (early)
 
-    // Cache of (owner_map, pos, other_map) -> AStar walk cost from pos to closest
-    // portal in owner_map connecting to other_map. Cleared at the start of every
-    // FindMapRoute call so a single route query has a coherent cost view but
-    // earlier queries' state can't poison later ones.
+    // Walk-cost cache keyed by (owner_map, pos, other_map); cleared per FindMapRoute call so prior queries can't poison later ones.
     struct PortalWalkKey {
         uint32_t mode; // PortalDistanceMode value, so cached costs from a previous mode aren't reused
         uint32_t owner;
@@ -185,19 +179,14 @@ namespace {
 
     bool IsOutpostMap(GW::Constants::MapID map_id); // forward decl
 
-    // Diagnostic: log only when interesting MapIDs are touched. Bump this set if
-    // you're chasing a different unintended-load case. Empty means log everything.
+    // Diagnostic: only log when these MapIDs are touched; edit the set to chase a different unintended-load case.
     inline bool IsInterestingMapForCacheTrace(GW::Constants::MapID mid)
     {
         return mid == (GW::Constants::MapID)114 || mid == (GW::Constants::MapID)153;
     }
 
-    // Create cached entries for sibling MapIDs sharing the same file_hash.
-    // Skip outposts: an explorable's load would otherwise spread tiny entries
-    // to every sibling outpost across the world (e.g. fh 0xce65 → 38, 119),
-    // and `UpdateBoundsLines` would then draw a rectangle at each outpost
-    // icon regardless of where the player is. Outpost lookups still work via
-    // the file_hash fallback in `GetCachedMapInfo`.
+    // Cache sibling MapIDs sharing this file_hash. Skip outposts: spreading to them would draw stray bounds rectangles
+    // at every sibling outpost icon (e.g. fh 0xce65 → 38, 119); their lookups still resolve via GetCachedMapInfo's fallback.
     void CacheSharedFileHashMaps(const CachedMapInfo& source_info)
     {
         uint32_t fh = GetMapFileId(source_info.map_id);
@@ -208,7 +197,6 @@ namespace {
                 auto mid = entry.map_id;
                 if (mid == source_info.map_id) continue;
                 if (IsOutpostMap(mid)) continue; // see comment above
-                // Check if this MapID already has an entry
                 bool exists = false;
                 for (const auto& [h, inf] : cached_map_info) {
                     if (inf.map_id == mid) {
@@ -258,16 +246,14 @@ namespace {
         }
     }
 
-    // Trim to MAX_CACHED_MAPS (LRU first, current map pinned), but only when idle so
-    // no worker is mid-route holding a MilePath* we'd free.
+    // Trim to MAX_CACHED_MAPS (LRU first, current map pinned), only when idle so no worker is mid-route holding a freed MilePath*.
     void EnforceCacheLimitIfIdle()
     {
         std::vector<uint64_t> evicted;
         {
             std::lock_guard lock(lru_mutex);
             if (route_jobs_active > 0) return;
-            // Current map keys low32 = MapID (GetMilepathForCurrentMap); foreign maps
-            // key low32 = file_hash — pin against both forms.
+            // Current-map keys low32 = MapID, foreign-map keys low32 = file_hash — pin against both forms.
             const uint32_t cur_fh = GetMapFileId(GW::Map::GetMapID());
             const uint32_t cur_mid = (uint32_t)GW::Map::GetMapID();
             auto is_current = [&](uint64_t key) {
@@ -320,8 +306,7 @@ namespace {
         std::vector<Pathing::PortalProp> pending_portals;
     };
     // =========================================================================
-    // Unified editor state — all From/To endpoint data in one struct for
-    // easy snapshotting (history/undo) and clean swap.
+    // Unified editor state — all From/To endpoint data in one struct for easy snapshotting and swap.
     // =========================================================================
     struct EndpointEditorState {
         EditorEndpoint endpoint;
@@ -349,11 +334,8 @@ namespace {
     bool pending_connection_lines_update = false;
 
 
-    // Deferred line removal to avoid invalidating iterators during WorldMapWidget::Draw.
-    // Pointers are queued here and freed at the start of the next PathfindingWindow::Draw via
-    // ProcessDeferredRemovals -> CustomRenderer::RemoveCustomLines. Stale pointers are safe in
-    // this queue: RemoveCustomLines only frees pointers that are still in CustomRenderer::lines
-    // (the authoritative live-list) and never dereferences the queue itself.
+    // Deferred line removal so we don't invalidate iterators during WorldMapWidget::Draw; drained next Draw.
+    // Stale pointers are safe: RemoveCustomLines only frees pointers still in the live list, never dereferencing the queue.
     std::vector<CustomRenderer::CustomLine*> pending_line_removals;
 
     void DeferRemoveLines(std::vector<CustomRenderer::CustomLine*>& lines)
@@ -365,10 +347,9 @@ namespace {
     void ProcessDeferredRemovals()
     {
         if (pending_line_removals.empty()) return;
-        auto& cr = Minimap::Instance().custom_renderer;
-        for (auto* line : pending_line_removals) {
-            cr.RemoveCustomLine(line);
-        }
+        // Single O(N) pass: per-line RemoveCustomLine is O(N) each (linear find + vector erase), so removing the
+        // navmesh overlay's thousands of lines one-by-one was O(N^2) and a big chunk of the map-load hitch.
+        Minimap::Instance().custom_renderer.RemoveCustomLines(pending_line_removals);
         pending_line_removals.clear();
     }
 
@@ -454,14 +435,16 @@ namespace {
     GW::GamePos ToCurrentMapCoords(const GW::GamePos& pos, GW::Constants::MapID src_map);            // forward decl
 
     // Load a map from DAT and create a MilePath for it. Returns the MilePath (may still be processing).
-    Pathing::MilePath* LoadMapFromDAT(GW::Constants::MapID map_id)
+    // allow_load=false makes this game-thread-safe: it returns a resident MilePath if present, else nullptr,
+    // and never touches the DAT. Only pass true off the game thread (the readFromDat below blocks).
+    Pathing::MilePath* LoadMapFromDAT(GW::Constants::MapID map_id, bool allow_load)
     {
         if (IsInterestingMapForCacheTrace(map_id)) {
             PATH_LOG_INFO("[CacheTrace] LoadMapFromDAT(%d) entered", (int)map_id);
         }
         const uint32_t fid = GetMapFileId(map_id);
         if (!fid) {
-            PATH_LOG_ERROR("LoadMapFromDAT: no file_id for map %d (visit the map once to cache it)", (int)map_id);
+            if (allow_load) PATH_LOG_ERROR("LoadMapFromDAT: no file_id for map %d (visit the map once to cache it)", (int)map_id);
             return nullptr;
         }
 
@@ -473,6 +456,9 @@ namespace {
             }
         }
 
+        // Not resident: the DAT read + parse below blocks the caller. Refuse on the game thread.
+        if (!allow_load) return nullptr;
+
         PATH_LOG_INFO("LoadMapFromDAT: map=%d file_id=%u (0x%X)", (int)map_id, fid, fid);
 
         auto dat_data = Pathing::PathingMapData();
@@ -481,9 +467,7 @@ namespace {
             return nullptr;
         }
 
-        // For the current map we can cross-check the DAT against live map memory. A bounds
-        // mismatch means the cached file_id is stale (wrong map version); fall back to the
-        // MapContext copy so pathing uses data matching the map we're actually on.
+        // For the current map, cross-check DAT against live memory: a bounds mismatch means a stale file_id, so use the MapContext copy.
         Pathing::PathingMapData ctx_data;
         Pathing::PathingMapData* chosen = &dat_data;
         if (map_id == GW::Map::GetMapID()) {
@@ -520,15 +504,11 @@ namespace {
                 all_ids.push_back(entry.map_id);
         }
 
-        // Lightweight (full_build=false): keep only raw map data; the visgraph is
-        // built lazily on first AStar walk, so probe-only maps never pay for one.
+        // Lightweight (full_build=false): keep only raw map data; the visgraph builds lazily on first AStar walk.
         auto* m = new Pathing::MilePath(std::move(map_data), map_id, all_ids, false);
         mile_paths_by_coords[hash] = m;
         TouchLru(hash); // eviction itself is deferred until the route job ends (RouteJobScope)
-        // UpdateBoundsLines / UpdatePortalMarkers mutate the CustomRenderer's
-        // line pool. LoadMapFromDAT runs on worker threads (and now in parallel
-        // for FindMapRoute pre-warm), so deferring these UI mutations to the
-        // main thread avoids cross-thread heap free races on AddCustomLine.
+        // Defer these line-pool mutations to the main thread; LoadMapFromDAT runs on workers and AddCustomLine isn't thread-safe.
         Resources::EnqueueMainTask([] {
             UpdateBoundsLines();
             if (draw_portals) UpdatePortalMarkers();
@@ -538,21 +518,26 @@ namespace {
 
     // Fallback when no file_id is known: build PathingMapData from the live map context
     // and hand it to the standard MilePath ctor (eager build — it's the player's map).
-    Pathing::MilePath* LoadMapFromContext(GW::Constants::MapID map_id)
+    // allow_load=false is game-thread-safe: resident lookup only, never runs the deep-copy parse below.
+    Pathing::MilePath* LoadMapFromContext(GW::Constants::MapID map_id, bool allow_load = true)
     {
         const auto mc = GW::GetMapContext();
         if (!(mc && mc->path && mc->path->staticData)) return nullptr;
 
+        // pathNodeSize == pathNodes.size() (LoadFromMapContext sets it directly), so the cache key is
+        // available without the full deep-copy — check residency before paying the parse cost.
+        const auto hash = static_cast<uint64_t>(map_id)
+            | (static_cast<uint64_t>(mc->path->pathNodes.size()) << 32);
+        if (const auto it = mile_paths_by_coords.find(hash); it != mile_paths_by_coords.end()) {
+            TouchLru(hash);
+            return it->second;
+        }
+
+        // Not resident: LoadFromMapContext below is a full deep-copy + pointer-fixup. Refuse on the game thread.
+        if (!allow_load) return nullptr;
+
         auto map_data = Pathing::PathingMapData();
         if (!Pathing::LoadFromMapContext(mc, 0, &map_data)) return nullptr;
-
-        auto hash = static_cast<uint64_t>(map_id);
-        hash |= static_cast<uint64_t>(map_data.pathNodeSize) << 32;
-
-        if (mile_paths_by_coords.contains(hash)) {
-            TouchLru(hash);
-            return mile_paths_by_coords[hash];
-        }
 
         CachedMapInfo info;
         info.map_id = map_id;
@@ -571,16 +556,49 @@ namespace {
         return m;
     }
 
-    // Returns milepath pointer for the current map, nullptr if we're not in a valid state
-    Pathing::MilePath* GetMilepathForCurrentMap()
+    // Returns milepath pointer for the current map, nullptr if we're not in a valid state.
+    // allow_load=false is game-thread-safe (resident lookup only); true blocks on the DAT and must run off the game thread.
+    Pathing::MilePath* GetMilepathForCurrentMap(bool allow_load = true)
     {
         // todo: maybe use bool GetIsMapReady() from other modules?
         if (GW::Map::GetInstanceType() == GW::Constants::InstanceType::Loading || !GW::Map::GetIsMapLoaded()) return nullptr;
         const auto map_id = GW::Map::GetMapID();
         if (map_id == GW::Constants::MapID::None) return nullptr;
         // Prefer DAT (shared with coordinate bounds); fall back to map context only with no file_id.
-        if (GetMapFileId(map_id)) return LoadMapFromDAT(map_id);
-        return LoadMapFromContext(map_id);
+        if (GetMapFileId(map_id)) return LoadMapFromDAT(map_id, allow_load);
+        return LoadMapFromContext(map_id, allow_load);
+    }
+
+    // Background prewarm so the game thread never blocks on a DAT read. ReadyForPathing/overlay probes call
+    // GetResidentMilepathOrPrewarm(); if the current map isn't resident yet, a single worker task loads it.
+    std::atomic<bool> prewarm_in_flight = false;
+
+    void PrewarmCurrentMap()
+    {
+        bool expected = false;
+        if (!prewarm_in_flight.compare_exchange_strong(expected, true)) return; // one load in flight at a time
+        Resources::EnqueueWorkerTask([] {
+            std::lock_guard route_lock(route_mutex); // same serialization as a route build; see route_mutex
+            RouteJobScope job_scope;
+            GetMilepathForCurrentMap(true); // the blocking DAT read happens here, on the worker
+            prewarm_in_flight = false;
+        });
+    }
+
+    // Game-thread-safe current-map MilePath accessor: returns it only if already resident, otherwise kicks off
+    // the background load and returns nullptr. Never reads the DAT or parses map context on the caller's thread.
+    Pathing::MilePath* GetResidentMilepathOrPrewarm()
+    {
+        if (GW::Map::GetInstanceType() == GW::Constants::InstanceType::Loading || !GW::Map::GetIsMapLoaded()) return nullptr;
+        {
+            // Try-lock so we never block the game thread; a held lock means a worker is mid-build → treat as not-ready.
+            std::unique_lock route_lock(route_mutex, std::try_to_lock);
+            if (route_lock.owns_lock()) {
+                if (const auto m = GetMilepathForCurrentMap(false)) return m;
+            }
+        }
+        PrewarmCurrentMap();
+        return nullptr;
     }
 
     std::vector<CustomRenderer::CustomLine*> navmesh_edge_lines; // viz-only navmesh poly-edge overlay
@@ -721,6 +739,7 @@ namespace {
 
     volatile bool pending_terminate = false;
     volatile bool pending_worker_task = false;
+    std::atomic<bool> pathing_enabled = false; // true between Initialize() and SignalTerminate(); polled by QuestModule
 
     GW::HookEntry gw_ui_hookentry;
 
@@ -805,9 +824,7 @@ namespace {
     // Convert path points from source map coords to current map coords via world map
     bool IsOutpostMap(GW::Constants::MapID map_id); // forward decl
 
-    // Sentinel point used in flat full_path arrays to indicate "do not draw a line
-    // here". Inserted between segments when an intermediate map is "underground"
-    // (its entry and exit transitions are both no_draw connections).
+    // "Don't draw a line here" sentinel in flat full_path arrays; inserted between segments around underground (no_draw) maps.
     constexpr float PATH_BREAK_VALUE = FLT_MAX;
     inline bool IsPathBreak(const GW::GamePos& p)
     {
@@ -818,9 +835,7 @@ namespace {
         return p.x == PATH_BREAK_VALUE;
     }
 
-    // A path segment hidden from the world map (because its map is underground)
-    // but kept in native coords + native map tag so the in-game terrain, minimap,
-    // and the mission map can render it once the player actually enters that map.
+    // A path segment hidden from the world map (underground map) but kept in native coords + map tag so it renders once entered.
     struct HiddenPathSegment {
         std::vector<GW::GamePos> points;
         GW::Constants::MapID map_id;
@@ -903,11 +918,8 @@ namespace {
         }
     }
 
-    // Append lines for hidden-from-world-map segments in their native map coords,
-    // tagged with their native map_id. These don't render on the world map (filtered
-    // by line->map == cur_map there) but DO render on the in-game terrain, minimap,
-    // and mission map once the player walks into that underground map. Called after
-    // DrawPathAsLines so it doesn't clear the existing path; segments share path_lines.
+    // Append underground segments in native map coords tagged with their map_id: hidden on the world map but drawn in-world
+    // once the player enters that map. Call after DrawPathAsLines (doesn't clear) — segments share path_lines.
     void AddHiddenUndergroundSegmentLines(const std::vector<HiddenPathSegment>& segs)
     {
         for (const auto& seg : segs) {
@@ -993,11 +1005,8 @@ namespace {
                 break;
             }
         }
-        // Add maps referenced by portal connections that aren't yet in the graph.
-        // Dedup by EXACT MapID only (not file_hash) — otherwise an outpost referenced
-        // in a connection chain gets silently dropped if the dedup pass above already
-        // picked an explorable sibling, and Dijkstra would push the literal MapID
-        // onto the queue but find it missing from map_graph_nodes when expanding.
+        // Add connection-referenced maps not yet in the graph, deduped by EXACT MapID (not file_hash) — else an outpost in a
+        // connection chain gets dropped when its explorable sibling was picked, and Dijkstra would expand a missing node.
         for (const auto& conn : portal_connections.GetAll()) {
             for (auto mid : {conn.from_map, conn.to_map}) {
                 if (mid == GW::Constants::MapID::None) continue;
@@ -1036,10 +1045,7 @@ namespace {
         }
         if (!src) return {};
 
-        // Connection-referenced map_graph_nodes (added via the portal_connections
-        // pass in BuildMapGraph) have ImRect() empty bounds. Skip the bounds-overlap
-        // branch when either side is empty, otherwise two empty rects "overlap" at
-        // origin and pollute Dijkstra with phantom adjacencies.
+        // Connection-referenced nodes have empty bounds; skip the overlap branch for them, else two empty rects "overlap" at origin.
         const bool src_empty = src->wm_bounds.GetWidth() < 1.f || src->wm_bounds.GetHeight() < 1.f;
 
         std::vector<GW::Constants::MapID> result;
@@ -1057,11 +1063,8 @@ namespace {
             }
         }
 
-        // Add neighbors from manual portal connections.
-        // Connection-spread rule: a connection stored against an EXPLORABLE map
-        // applies to all variants sharing that physical map (e.g. its outpost
-        // siblings). A connection stored against an OUTPOST is local to that
-        // exact outpost (prevents 348/244/218 cross-pollination).
+        // Add neighbors from manual connections. Connection-spread rule: a connection on an EXPLORABLE map applies to all
+        // file_hash siblings; one on an OUTPOST is local to that exact outpost (prevents 348/244/218 cross-pollination).
         auto contains = [&](GW::Constants::MapID mid) {
             for (auto m : result)
                 if (m == mid) return true;
@@ -1072,11 +1075,8 @@ namespace {
         auto matches_current = [&](GW::Constants::MapID conn_map_id) -> bool {
             if (conn_map_id == map_id) return true;
             if (IsOutpostMap(conn_map_id)) return false;
-            // If src is an outpost, don't inherit explorable siblings' connections.
-            // Those portals live in the explorable's terrain — to use them, the
-            // player must first transition outpost→explorable (an extra hop the
-            // route picker doesn't account for). Treating them as direct produces
-            // phantom-cheap edges (e.g. fh 0x85A8 outpost 57 inheriting 56→18).
+            // An outpost can't inherit its explorable siblings' connections: those portals need an extra outpost→explorable
+            // hop the picker doesn't model, so treating them as direct yields phantom-cheap edges (e.g. fh 0x85A8 57 inheriting 56→18).
             if (src_is_outpost) return false;
             return fh_cur && GetMapFileId(conn_map_id) == fh_cur;
         };
@@ -1180,9 +1180,7 @@ namespace {
     // Cost from manual portal connections between two maps (directional: a→b)
     float GetConnectionCost(GW::Constants::MapID map_a, GW::Constants::MapID map_b)
     {
-        // Connection-spread rule: a connection stored against an EXPLORABLE map
-        // applies to all variants sharing that physical map. A connection stored
-        // against an OUTPOST is local to that exact outpost.
+        // Connection-spread rule: explorable connections apply to all file_hash siblings; outpost connections are local. See GetAdjacentMaps.
         uint32_t fh_a = GetMapFileId(map_a);
         uint32_t fh_b = GetMapFileId(map_b);
         auto maps_match = [](GW::Constants::MapID mid, GW::Constants::MapID target, uint32_t target_fh) {
@@ -1196,8 +1194,7 @@ namespace {
             bool fwd = (maps_match(conn.from_map, map_a, fh_a) && maps_match(conn.to_map, map_b, fh_b));
             bool rev = !conn.IsOneWay() && (maps_match(conn.from_map, map_b, fh_b) && maps_match(conn.to_map, map_a, fh_a));
             if (!fwd && !rev) continue;
-            // Use the cheaper of the two endpoint types so P-G / G-P connections
-            // benefit from the NPC/Gadget teleport multiplier in either direction.
+            // Use the cheaper endpoint type so P-G / G-P connections get the teleport multiplier in either direction.
             float mult_from = Pathing::PortalConnections::GetCostMultiplier(conn.from_type);
             float mult_to = Pathing::PortalConnections::GetCostMultiplier(conn.to_type);
             float mult = std::min(mult_from, mult_to);
@@ -1207,13 +1204,9 @@ namespace {
         return best;
     }
 
-    // Per-hop fixed cost added on top of conn_cost / geo_cost. Penalizes routes
-    // with more hops uniformly so the route picker prefers fewer maps when costs
-    // are otherwise comparable. Bumped high enough to overcome F-P savings that
-    // a longer route might gain from a more start-friendly portal in graph_src.
+    // Fixed per-hop cost so the picker prefers fewer maps; high enough to overcome F-P savings a longer route might gain at graph_src.
     constexpr float HOP_PENALTY = 20000.f;
-    // Transit cost multiplier: scales the bounds-center geo_cost by this factor
-    // to penalize "going through" intermediate maps.
+    // Scales the bounds-center geo_cost to penalize "going through" intermediate maps.
     constexpr float TRANSIT_MULT = 1.5f;
 
     // Edge cost between two adjacent maps
@@ -1241,8 +1234,7 @@ namespace {
             return conn_cost + HOP_PENALTY;
         }
 
-        // Low cost: use world map distance between bounds centers, scaled by
-        // TRANSIT_MULT to overweight intermediate-map walking proxy.
+        // World-map distance between bounds centers, scaled by TRANSIT_MULT as an intermediate-map walking proxy.
         float geo_cost = 1000.f;
         const MapGraphNode* na = nullptr;
         const MapGraphNode* nb = nullptr;
@@ -1258,11 +1250,7 @@ namespace {
         return std::min(conn_cost, geo_cost * TRANSIT_MULT) + HOP_PENALTY;
     }
 
-    // F-P / P-T contributions are added in raw game-coord units. This is much
-    // larger than geo_cost (WM units) and conn_cost (~500), so endpoint distance
-    // becomes the dominant factor in route picking. That's intentional: when the
-    // start point is much closer to one route's portal than another's, the route
-    // picker should reflect the real walk required at the endpoints.
+    // F-P / P-T added in raw game-coord units: intentionally dwarfs geo_cost (WM) and conn_cost (~500) so endpoint walk distance dominates.
     constexpr float GAME_TO_WM = 1.f;
 
     // Forward decl: full definition is below FindPortalPairs (which needs PortalPair).
@@ -1279,18 +1267,12 @@ namespace {
         return (uint64_t)(uint32_t)a | ((uint64_t)(uint32_t)b << 32);
     }
 
-    // Dijkstra to find lowest-cost map sequence, preferring portal-connected maps.
-    // When start_pos and goal_pos are provided, edges leaving the source map and
-    // edges entering the destination map are weighted by straight-line distance
-    // from start (or to goal) to the actual portal used by that edge — this lets
-    // the route picker prefer portals that are close to the start/goal instead of
-    // routes that are topologically cheap but require long walks at the endpoints.
+    // Dijkstra for the lowest-cost map sequence. When start_pos/goal_pos are given, source-leaving and dest-entering edges are
+    // weighted by distance to the actual portal used, so the picker favors portals near the endpoints over topologically cheap routes.
     std::vector<GW::Constants::MapID> FindMapRoute(GW::Constants::MapID src, GW::Constants::MapID dst, const GW::GamePos* start_pos = nullptr, const GW::GamePos* goal_pos = nullptr)
     {
         BuildMapGraph();
-        // Per-call cost cache. Cleared so each FindMapRoute invocation has a
-        // coherent snapshot — costs from a previous query (different src/goal)
-        // can't bleed in.
+        // Clear the per-call cost cache so a previous query (different src/goal) can't bleed in.
         portal_walk_cache.clear();
 
         // Resolve src/dst to their graph representative (outpost→explorable with same file_hash)
@@ -1365,20 +1347,15 @@ namespace {
                             return ClosestPortalDistanceInMap(from, a, b);
                     }
                 };
-                // F-P: when leaving the source map, add the distance from start
-                // to the actual portal used in this edge.
+                // F-P: leaving the source map, add the distance from start to this edge's portal.
                 if (start_pos && current == graph_src) {
                     float fp_game = portal_dist(*start_pos, current, neighbor);
                     if (fp_game != std::numeric_limits<float>::infinity()) {
                         edge_cost += fp_game * GAME_TO_WM;
                     }
                 }
-                // In-map traversal of intermediate maps: when leaving a non-source,
-                // non-destination map, add the distance from the portal we entered
-                // through (anchor: any portal connecting to predecessor) to the
-                // closest portal connecting to `neighbor`. Without this, dijkstra
-                // would treat traversing a 50k-unit map as free and pick longer
-                // routes through large intermediate maps over short direct ones.
+                // Intermediate-map traversal: add the distance from the entry-portal anchor to the neighbor portal,
+                // else Dijkstra treats crossing a 50k-unit map as free and prefers long routes through big maps.
                 else if (current != graph_dst) {
                     auto prev_it = came_from.find(static_cast<uint32_t>(current));
                     if (prev_it != came_from.end()) {
@@ -1392,8 +1369,7 @@ namespace {
                         }
                     }
                 }
-                // P-T: when entering the destination map, add the distance from
-                // the entry portal in the dest map to the goal.
+                // P-T: entering the destination map, add the distance from the entry portal to the goal.
                 if (goal_pos && neighbor == graph_dst) {
                     float pt_game = portal_dist(*goal_pos, neighbor, current);
                     if (pt_game != std::numeric_limits<float>::infinity()) {
@@ -1477,10 +1453,7 @@ namespace {
         return nullptr;
     }
 
-    // True if a map is a small playable area (outpost/city/mission outpost),
-    // not an explorable zone. Outposts have a small footprint within a larger
-    // shared map bounds, so portal positions inherited from the explorable
-    // side may be far from the actual outpost location.
+    // True for outpost/city-type maps (not explorables); their small footprint inside shared bounds means inherited portals may be far off.
     bool IsOutpostMap(GW::Constants::MapID map_id)
     {
         const auto* area = GW::Map::GetMapInfo(map_id);
@@ -1514,8 +1487,7 @@ namespace {
     }
 
 
-    // A matched portal pair between two adjacent maps
-    // Find all portal pairs between two adjacent maps, constrained to the overlap region
+    // Find all portal pairs between two adjacent maps, constrained to the overlap region.
     std::vector<PortalPair> FindPortalPairs(GW::Constants::MapID map_a, GW::Constants::MapID map_b)
     {
         std::vector<PortalPair> pairs;
@@ -1560,10 +1532,7 @@ namespace {
         return pairs;
     }
 
-    // Returns the straight-line distance (in game coords) from `pos` to the closest
-    // portal in `owner_map` that participates in a connection between `owner_map`
-    // and `other_map`. Considers manual connections (with explorable→outpost
-    // file_hash spread) and auto-detected portal pairs. Returns infinity if none.
+    // Straight-line game-coord distance from `pos` to the closest owner_map portal connecting to other_map (manual + auto pairs), or infinity.
     float ClosestPortalDistanceInMap(const GW::GamePos& pos, GW::Constants::MapID owner_map, GW::Constants::MapID other_map)
     {
         uint32_t fh_owner = GetMapFileId(owner_map);
@@ -1596,10 +1565,7 @@ namespace {
             }
         }
 
-        // Auto-detected portal pairs — only if no manual connection exists.
-        // Mirrors FindBestPortalPair: trust manual data when present, otherwise
-        // fall back to border-prop matching (which can pull in false candidates
-        // for maps that share world-map edges but aren't actually connected).
+        // Auto-detected pairs only if no manual connection: trust manual data first, since border-prop matching can pull in false candidates.
         if (!any_manual) {
             auto pairs = FindPortalPairs(owner_map, other_map);
             for (const auto& p : pairs) {
@@ -1610,19 +1576,14 @@ namespace {
         return (best_sq == std::numeric_limits<float>::infinity()) ? best_sq : sqrtf(best_sq);
     }
 
-    // Replacement for ClosestPortalDistanceInMap that uses the loaded MilePath's
-    // visgraph + AStar to compute the actual walking distance in game-coord units
-    // from `pos` to the closest portal in `owner_map` connecting to `other_map`.
-    // Falls back to straight-line Euclidean if MilePath isn't available or if all
-    // AStars fail (e.g. disconnected zones). Cached per FindMapRoute call.
+    // Like ClosestPortalDistanceInMap but uses the MilePath visgraph + AStar for the real walk distance; falls back to Euclidean if unavailable.
     float ClosestPortalWalkDistanceInMap(const GW::GamePos& pos, GW::Constants::MapID owner_map, GW::Constants::MapID other_map)
     {
         PortalWalkKey key{(uint32_t)PortalDistanceMode::Walk, (uint32_t)owner_map, (uint32_t)other_map, pos.x, pos.y};
         auto cit = portal_walk_cache.find(key);
         if (cit != portal_walk_cache.end()) return cit->second;
 
-        // Collect candidate portal positions in owner_map (from manual connections
-        // with explorable→sibling spread, plus auto-detected portal pairs).
+        // Candidate portals in owner_map (manual connections with sibling spread, plus auto-detected pairs).
         std::vector<GW::Vec2f> candidates;
         const uint32_t fh_owner = GetMapFileId(owner_map);
         const uint32_t fh_other = GetMapFileId(other_map);
@@ -1659,9 +1620,7 @@ namespace {
             return best_sq == std::numeric_limits<float>::infinity() ? best_sq : sqrtf(best_sq);
         };
 
-        // Acquire (and force-load if needed) the MilePath for owner_map. This
-        // blocks the worker thread until the visgraph is built — acceptable
-        // because FindMapRoute itself runs on a worker (UI stays responsive).
+        // Force-load the MilePath; this blocks the worker until the visgraph builds, fine since FindMapRoute runs off the UI thread.
         Pathing::MilePath* mp = nullptr;
         if (owner_map == GW::Map::GetMapID()) {
             mp = GetMilepathForCurrentMap();
@@ -1700,10 +1659,7 @@ namespace {
         return best;
     }
 
-    // OpenTyria trapezoid-graph AStar version of ClosestPortalWalkDistanceInMap.
-    // Doesn't require a visgraph — just the trapezoid + BSP data which is loaded
-    // alongside MilePath. Faster than the visgraph variant on first-time map
-    // loads but the funnel can pick suboptimal paths through tight spaces.
+    // Trapezoid-graph AStar version of ClosestPortalWalkDistanceInMap: no visgraph needed (faster on first load) but the funnel can be suboptimal.
     float ClosestPortalTrapezoidDistanceInMap(const GW::GamePos& pos, GW::Constants::MapID owner_map, GW::Constants::MapID other_map)
     {
         PortalWalkKey key{(uint32_t)PortalDistanceMode::Trapezoid, (uint32_t)owner_map, (uint32_t)other_map, pos.x, pos.y};
@@ -1747,8 +1703,7 @@ namespace {
             return best_sq == std::numeric_limits<float>::infinity() ? best_sq : sqrtf(best_sq);
         };
 
-        // Need PathingMapData. Acquire MilePath first (which loads the DAT data
-        // if needed), then borrow its map data via GetMapData().
+        // Acquire MilePath (loads DAT if needed), then borrow its PathingMapData via GetMapData().
         Pathing::MilePath* mp = (owner_map == GW::Map::GetMapID()) ? GetMilepathForCurrentMap() : GetMilepathForMap(owner_map);
         if (!mp && owner_map != GW::Map::GetMapID()) {
             LoadMapFromDAT(owner_map);
@@ -1799,17 +1754,13 @@ namespace {
             if (cost < best) best = cost;
         }
         if (best == std::numeric_limits<float>::infinity()) {
-            // Portals unreachable via trapezoid walk (common for disconnected zones);
-            // fall back to straight-line distance for route-cost estimation.
-            best = euclidean_min();
+            best = euclidean_min(); // portals unreachable via trapezoid walk (disconnected zones) — fall back to straight line
         }
         portal_walk_cache[key] = best;
         return best;
     }
 
-    // Returns any portal position in `owner_map` that connects to `other_map` (game coords).
-    // Prefers the first manual connection; falls back to the first auto-detected pair.
-    // Used as an "anchor" to estimate in-map traversal between two portal pairs.
+    // Any owner_map portal connecting to other_map (manual first, else first auto-pair); used as a traversal anchor.
     bool FindAnyPortalPosInMap(GW::Constants::MapID owner_map, GW::Constants::MapID other_map, GW::Vec2f& out)
     {
         uint32_t fh_owner = GetMapFileId(owner_map);
@@ -1840,14 +1791,10 @@ namespace {
         return false;
     }
 
-    // Resolve the correct zplane for a game position on a map by checking DAT pathing data
-    // Pick the best portal pair for a segment, considering proximity to start/goal.
-    // Priority: 1) manual connections, 2) automatic portal pairs, 3) boundary fallback
+    // Pick the best portal pair for a segment by proximity to start/goal. Priority: manual connections, auto pairs, then boundary fallback.
     bool FindBestPortalPair(GW::Constants::MapID map_a, GW::Constants::MapID map_b, const GW::Vec2f& hint_wm_pos, GW::GamePos& portal_a_out, GW::GamePos& portal_b_out, const GW::GamePos* start_game = nullptr, const GW::GamePos* goal_game = nullptr)
     {
-        // Collect all candidate portal pairs (manual connections + auto portal props)
-        // then score them. When start/goal game positions are available, use game-coordinate
-        // distance scoring (like TeleporterHeuristic). Otherwise fall back to world map hint.
+        // Collect candidate pairs (manual + auto), then score by game-coord distance when start/goal are known, else by world-map hint.
         struct Candidate {
             GW::GamePos pos_a, pos_b;
             GW::Vec2f wm_pos; // world map position for hint-based scoring
@@ -1859,10 +1806,7 @@ namespace {
         {
             uint32_t fh_a = GetMapFileId(map_a);
             uint32_t fh_b = GetMapFileId(map_b);
-            // Connection-spread rule: a connection stored against an EXPLORABLE map
-            // applies to all variants sharing that physical map (e.g. its outposts).
-            // A connection stored against an OUTPOST is local to that exact outpost
-            // (prevents 348/244/218 cross-pollination).
+            // Connection-spread rule (see GetAdjacentMaps): explorable connections apply to all file_hash siblings, outpost ones are local.
             auto maps_match = [](GW::Constants::MapID mid, GW::Constants::MapID target, uint32_t target_fh) {
                 if (mid == target) return true;
                 if (IsOutpostMap(mid)) return false;
@@ -1893,9 +1837,7 @@ namespace {
         // Score and pick the best candidate
         if (!candidates.empty()) {
             if (start_game || goal_game) {
-                // Score all candidates using actual AStar path cost.
-                // Failed AStar = the portal is unreachable, so penalize heavily.
-                // Falling back to straight-line lets bad portals beat good ones.
+                // Score by actual AStar cost; penalize failures heavily (an unreachable portal must not beat a reachable one).
                 constexpr float FAIL_PENALTY = 1e9f;
                 float best_score = std::numeric_limits<float>::infinity();
                 const Candidate* best = nullptr;
@@ -2103,6 +2045,7 @@ namespace {
 
         Resources::EnqueueWorkerTask([route_copy, start_copy, goal_copy, start_wm, goal_wm, cur_map] {
             RouteJobScope job_scope; // defer eviction while we hold MilePath*
+            PathCalcScope calc_scope; // flag a path calculation for the world-map indicator
             std::vector<GW::GamePos> full_path;
             std::vector<HiddenPathSegment> hidden_segments;
             std::vector<PortalPairDraw> portal_draws;
@@ -2162,29 +2105,21 @@ namespace {
                 // Track last position for next portal scoring
                 last_seg_end = seg_to;
 
-                // Hide intermediate segments where BOTH the entry and exit
-                // transitions are no_draw connections (e.g. underground maps).
-                // First/last segments are never hidden — they contain the actual
-                // start/goal points the user wants to see. Also never hide a
-                // segment for the map the player is currently on, even if it's
-                // an underground intermediate — they need to see where to go.
+                // Hide intermediate segments whose entry AND exit are no_draw (underground maps). Never hide first/last or the current map.
                 bool is_first = (seg == 0);
                 bool is_last = (seg + 1 == route_copy.size());
                 bool segment_hidden = !is_first && !is_last && map_id != cur_map && HasNoDrawConnection(route_copy[seg - 1], map_id) && HasNoDrawConnection(map_id, route_copy[seg + 1]);
 
                 if (segment_hidden) {
-                    // Record native-coord segment for mission-map / underground-terrain rendering,
-                    // and insert a path-break in full_path so the world-map line skips this gap.
+                    // Native-coord segment for underground rendering; path-break so the world-map line skips the gap.
                     hidden_segments.push_back({seg_path, map_id});
                     if (!full_path.empty() && !IsPathBreak(full_path.back())) {
                         full_path.push_back({PATH_BREAK_VALUE, PATH_BREAK_VALUE, 0});
                     }
-                    continue; // skip appending this segment's points to full_path
+                    continue;
                 }
 
-                // Insert path-break between segments — the portal hop between
-                // Seg_end (one map's coords) and Seg+1_start (different map projected
-                // via world map) isn't walkable and produces an off-map connector line.
+                // Path-break between segments: the cross-map portal hop isn't walkable and would draw an off-map connector.
                 if (!full_path.empty() && !IsPathBreak(full_path.back())) {
                     full_path.push_back({PATH_BREAK_VALUE, PATH_BREAK_VALUE, 0});
                 }
@@ -2202,12 +2137,8 @@ namespace {
         });
     }
 
-    // Blocking. Build the cross-map route's drawn points (current-map coords, with a
-    // PATH_BREAK sentinel between maps) and the hidden underground segments. No
-    // threading and no drawing — the caller owns the worker thread + RouteJobScope.
-    // Retries with edge-blacklisting on per-map AStar failure. Returns false if no
-    // route. This is the pure-computation core shared by the drawing path and the
-    // QuestModule-owned CalculateRoute API.
+    // Blocking pure-computation core (caller owns the worker + RouteJobScope): builds the route's world-coord points (PATH_BREAK
+    // between maps) and hidden underground segments, retrying with edge-blacklisting on AStar failure. False if no route.
     bool BuildCrossMapRoute(GW::Constants::MapID from_map, GW::Constants::MapID to_map, const GW::GamePos& start, const GW::GamePos& goal, const GW::Vec2f& start_wm, std::vector<GW::Vec2f>& out_points, std::vector<HiddenPathSegment>& out_hidden)
     {
         const auto cur_map = GW::Map::GetMapID();
@@ -2230,8 +2161,7 @@ namespace {
                 if (m != cur_map) LoadMapFromDAT(m);
             }
 
-            // Execute route segments. Points accumulate as world-map coords (the common
-            // space across maps) — never projected into another map's game space.
+            // Points accumulate as world-map coords (the common cross-map space) — never projected into another map's game space.
             std::vector<GW::Vec2f> full_path;
             std::vector<HiddenPathSegment> hidden_segments;
             GW::Vec2f last_portal_wm = start_wm;
@@ -2276,10 +2206,7 @@ namespace {
 
                 std::vector<GW::GamePos> seg_path;
                 if (!RunAStarOnMap(map_id, seg_from, seg_to, seg_path)) {
-                    // Check if this map has manual connections to its neighbors
-                    // (transit map without DAT data, e.g. underground/instance).
-                    // If both entry and exit connections exist, treat the walk
-                    // through this map as a direct straight-line transition.
+                    // Transit map without DAT data (underground/instance): if both entry and exit connections exist, walk it as a straight line.
                     bool has_entry = seg == 0 || GetConnectionCost(route[seg - 1], map_id) < 1e9f;
                     bool has_exit = seg + 1 >= route.size() || GetConnectionCost(map_id, route[seg + 1]) < 1e9f;
                     if (has_entry && has_exit) {
@@ -2287,9 +2214,7 @@ namespace {
                         seg_path = {seg_from, seg_to};
                     }
                     else {
-                        // Blacklist the edges entering/exiting this map and retry.
-                        // Resolve to graph representatives — Dijkstra works on graph nodes,
-                        // not original MapIDs (route[0]/route.back() are originals).
+                        // Blacklist this map's entry/exit edges and retry. Resolve to graph representatives — Dijkstra works on graph nodes.
                         auto resolve_graph = [](GW::Constants::MapID m) -> GW::Constants::MapID {
                             for (const auto& n : map_graph_nodes) {
                                 if (n.map_id == m) return m;
@@ -2321,9 +2246,7 @@ namespace {
 
                 last_seg_end = seg_to;
 
-                // Hide intermediate segments where BOTH the entry and exit
-                // transitions are no_draw connections (e.g. underground maps).
-                // Exception: never hide the segment for the player's current map.
+                // Hide intermediate segments whose entry AND exit are no_draw (underground); never hide the current map.
                 bool is_first_seg = (seg == 0);
                 bool is_last_seg = (seg + 1 == route.size());
                 bool segment_hidden = !is_first_seg && !is_last_seg && map_id != cur_map && HasNoDrawConnection(route[seg - 1], map_id) && HasNoDrawConnection(map_id, route[seg + 1]);
@@ -2337,8 +2260,7 @@ namespace {
                     continue;
                 }
 
-                // Insert path-break between segments — portal hop between maps
-                // isn't walkable in any single coord space.
+                // Path-break between segments — the cross-map portal hop isn't walkable in any single coord space.
                 if (!full_path.empty() && !IsPathBreak(full_path.back())) {
                     full_path.push_back({PATH_BREAK_VALUE, PATH_BREAK_VALUE});
                 }
@@ -2373,11 +2295,11 @@ namespace {
 
         Resources::EnqueueWorkerTask([from_map, to_map, start, goal, start_wm, cur_map] {
             RouteJobScope job_scope; // defer eviction while we hold MilePath*
+            PathCalcScope calc_scope; // flag a path calculation for the world-map indicator
             std::vector<GW::Vec2f> full_path;
             std::vector<HiddenPathSegment> hidden_segments;
             if (!BuildCrossMapRoute(from_map, to_map, start, goal, start_wm, full_path, hidden_segments)) return;
-            // Legacy/world-map-only preview: the points are world coords now, so draw
-            // them as world-coord lines (the world map renders these directly).
+            // World-map-only preview: points are world coords, drawn as world-coord lines.
             Resources::EnqueueMainTask([full_path, cur_map] {
                 ClearPathLines();
                 for (size_t i = 0; i + 1 < full_path.size(); i++) {
@@ -2407,6 +2329,7 @@ namespace {
         const auto map_id = target_map;
         Resources::EnqueueWorkerTask([from, to, map_id] {
             RouteJobScope job_scope; // defer eviction while we hold MilePath*
+            PathCalcScope calc_scope; // flag a path calculation for the world-map indicator
             Pathing::MilePath* milepath = nullptr;
             if (map_id == GW::Map::GetMapID()) {
                 milepath = GetMilepathForCurrentMap();
@@ -2465,10 +2388,8 @@ namespace {
         PATH_LOG_INFO("Built map file hash lookup: %d entries", (int)map_id_to_file_hash.size());
         auto it837 = map_id_to_file_hash.find(GW::Constants::MapID::War_in_Kryta_Talmark_Wilderness);
         PATH_LOG_INFO("  map 837: %s (0x%X)", it837 != map_id_to_file_hash.end() ? "found" : "NOT FOUND", it837 != map_id_to_file_hash.end() ? it837->second : 0);
-        // Debug: check specific map
         auto it381 = map_id_to_file_hash.find(GW::Constants::MapID::Yohlon_Haven_outpost);
         PATH_LOG_INFO("  map 381: %s (0x%X)", it381 != map_id_to_file_hash.end() ? "found" : "NOT FOUND", it381 != map_id_to_file_hash.end() ? it381->second : 0);
-        // Check if constant_maps_info has the entry
         int found_381 = 0;
         for (const auto& [fh, entries] : constant_maps_info) {
             for (const auto& e : entries) {
@@ -2506,11 +2427,9 @@ namespace {
             if (constant_fid) break;
         }
 
-        // Cross-check: warn once per map about file_id discrepancies. Skip map 0
-        // (MapID::None) — it has no file_id by definition and is looked up routinely.
+        // Warn once per map about runtime/constant file_id discrepancies; skip map 0 (None has no file_id and is looked up routinely).
         if ((uint32_t)map_id != 0 && !file_id_mismatch_warned.contains((uint32_t)map_id)) {
             if (map_id == GW::Constants::MapID::Shing_Jea_Monastery_outpost) {
-                // Brute force search to verify
                 int found_count = 0;
                 uint32_t found_fh = 0;
                 for (const auto& [fh, entries] : constant_maps_info) {
@@ -2583,44 +2502,54 @@ namespace {
 
 } // namespace
 
+bool PathfindingWindow::IsPathingEnabled()
+{
+    return pathing_enabled;
+}
+
 bool PathfindingWindow::ReadyForPathing()
 {
-    if (GW::Map::GetInstanceType() == GW::Constants::InstanceType::Loading) return false;
-    // GetMilepathForCurrentMap can create/insert into the route caches; don't touch them
-    // while a build holds route_mutex. Report not-ready instead of blocking the game thread
-    // (the caller retries next tick).
-    std::unique_lock route_lock(route_mutex, std::try_to_lock);
-    if (!route_lock.owns_lock()) return false;
-    const auto m = GetMilepathForCurrentMap();
+    // Never load the DAT here: probe the resident cache and, if missing, kick a background load. Returns false
+    // until that load lands, so callers (e.g. the quest path) simply retry next frame — the game thread never stalls.
+    const auto m = GetResidentMilepathOrPrewarm();
     return m && m->ready();
+}
+
+bool PathfindingWindow::IsCalculatingPath()
+{
+    return path_calc_in_flight.load() > 0;
 }
 
 void LoadAndShowMapsAtWorldPos(const GW::Vec2f& wm_pos); // forward decl
 
-// Editor UI (Draw + WndProc click handling) was trimmed in this branch. The
-// multi-map pathing API is consumed via PathfindingWindow::CalculatePath /
-// GetNextPortalToward / GetMapFileId / SetFromWorldMap / SetToWorldMap and
-// does not require a window or input handling. Draw renders nothing, but still
-// drains the deferred line-removal queue each frame (ClearPathLines etc. only
-// queue removals; without this drain, cleared route lines would stay on screen).
-// WndProc is a no-op stub so ToolboxWindow's vtable contract is satisfied.
+// Editor UI was trimmed in this branch; the pathing API needs no window. Draw renders nothing but must still drain the
+// deferred line-removal queue each frame, else cleared route lines stay on screen. WndProc is a no-op vtable stub.
 static void UpdateNavmeshOverlay()
 {
-    static GW::GamePos last_pos{};
     static bool was_on = false;
+    static GW::Constants::MapID built_map = GW::Constants::MapID::None;
+    static GW::GamePos last_build_pos{};
+    static std::vector<Pathing::NavMesh::DebugEdge> cached_edges; // whole-map edges, extracted once per map
     if (!settings.draw_navmesh_overlay) {
-        if (was_on) { DeferRemoveLines(navmesh_edge_lines); was_on = false; }
+        if (was_on) {
+            GameWorldRenderer::ClearNavmeshLines();
+            DeferRemoveLines(navmesh_edge_lines); // drop any lines left by the old per-line path
+            cached_edges.clear();
+            built_map = GW::Constants::MapID::None;
+            was_on = false;
+        }
         return;
     }
-    const auto me = GW::Agents::GetControlledCharacter();
-    float moved2 = 1e30f;
-    if (me) { const float dx = me->pos.x - last_pos.x, dy = me->pos.y - last_pos.y; moved2 = dx * dx + dy * dy; }
-    if (was_on && !navmesh_edge_lines.empty() && moved2 < 600.f * 600.f) return;
     was_on = true;
-    if (me) last_pos = me->pos;
 
-    DeferRemoveLines(navmesh_edge_lines);
-    auto* mp = GetMilepathForCurrentMap();
+    const auto cur_map = GW::Map::GetMapID();
+    const auto me = GW::Agents::GetControlledCharacter();
+    const bool map_changed = cur_map != built_map;
+    float moved2 = 1e30f;
+    if (me && !map_changed) { const float dx = me->pos.x - last_build_pos.x, dy = me->pos.y - last_build_pos.y; moved2 = dx * dx + dy * dy; }
+    if (!map_changed && moved2 < 600.f * 600.f) return; // near set still fresh; nothing to rebuild
+
+    auto* mp = GetResidentMilepathOrPrewarm(); // Draw runs on the game thread — must not block on a DAT read
     if (!mp || !mp->ready()) return;
     auto* nav = mp->GetNavMeshForDebug();
     if (!nav || !nav->IsReady()) {
@@ -2631,71 +2560,106 @@ static void UpdateNavmeshOverlay()
         }
         return;
     }
-    std::vector<Pathing::NavMesh::DebugEdge> edges;
-    nav->DebugExtractEdges(edges);
-    const float range2 = settings.navmesh_overlay_range * settings.navmesh_overlay_range;
-    const auto cur_map = GW::Map::GetMapID();
-    auto& cr = Minimap::Instance().custom_renderer;
-    for (const auto& e : edges) {
-        if (me) { const float dx = me->pos.x - e.a.x, dy = me->pos.y - e.a.y; if (dx * dx + dy * dy > range2) continue; }
-        auto* line = cr.AddCustomLine(e.a, e.b);
-        line->map = cur_map;
+
+    auto edge_color = [](const Pathing::NavMesh::DebugEdge& e) -> unsigned int {
         const bool hi = e.a.zplane != 0; // edges off the ground plane get the "hi" colour
-        line->color = e.wall ? (hi ? settings.navmesh_wall_color_hi : settings.navmesh_wall_color)
-                             : (hi ? settings.navmesh_connection_color_hi : settings.navmesh_connection_color);
-        line->draw_on_terrain = true;
-        line->draw_on_minimap = false;
-        line->draw_on_mission_map = false;
-        line->created_by_toolbox = true;
-        line->dotted = false; // solid edges so the mesh reads clearly
-        navmesh_edge_lines.push_back(line);
+        return e.wall ? (hi ? settings.navmesh_wall_color_hi : settings.navmesh_wall_color)
+                      : (hi ? settings.navmesh_connection_color_hi : settings.navmesh_connection_color);
+    };
+
+    if (map_changed) {
+        cached_edges.clear();
+        nav->DebugExtractEdges(cached_edges); // extract the whole mesh once; re-cull cheaply on movement
+        // Hand the FULL mesh to the 2D world map (it's flat + cheap there, no draping / no per-move re-cull needed).
+        std::vector<GameWorldRenderer::BatchedLine> full;
+        full.reserve(cached_edges.size());
+        for (const auto& e : cached_edges) full.push_back({e.a, e.b, edge_color(e)});
+        GameWorldRenderer::SetNavmeshWorldMapLines(cur_map, std::move(full));
     }
+
+    // In-world: cull to the shared in-world render distance around the player so the batch stays small (drapes fast,
+    // tracks the player) — handed to the renderer as ONE double-buffered batched VB (one draw call, no flicker).
+    const float draw_range = GameWorldRenderer::GetRenderMaxDistance();
+    const float range2 = draw_range * draw_range;
+    std::vector<GameWorldRenderer::BatchedLine> lines;
+    lines.reserve(cached_edges.size());
+    for (const auto& e : cached_edges) {
+        if (me) { const float dx = me->pos.x - e.a.x, dy = me->pos.y - e.a.y; if (dx * dx + dy * dy > range2) continue; }
+        lines.push_back({e.a, e.b, edge_color(e)});
+    }
+    GameWorldRenderer::SetNavmeshLines(cur_map, std::move(lines));
+    built_map = cur_map;
+    if (me) last_build_pos = me->pos;
+}
+
+float PathfindingWindow::GetPathRecalcDistance() { return settings.path_recalc_distance; }
+
+bool PathfindingWindow::DebugDumpNavMeshNear(const GW::GamePos& center, float radius)
+{
+    auto* mp = GetResidentMilepathOrPrewarm();
+    if (!mp || !mp->ready()) { Log::Log("[navdump] milepath not ready (retry)"); return false; }
+    auto* nav = mp->GetNavMeshForDebug();
+    if (!nav || !nav->IsReady()) {
+        if (!mp->build_failed()) Resources::EnqueueWorkerTask([mp] { mp->EnsureFullBuild(); });
+        Log::Log("[navdump] navmesh building (retry)");
+        return false;
+    }
+    Log::Log("[navdump] map=%d", (int)GW::Map::GetMapID());
+    nav->DebugDumpNear(center, radius);
+    return true;
+}
+
+Pathing::NavMesh* PathfindingWindow::GetResidentNavMesh()
+{
+    auto* mp = GetResidentMilepathOrPrewarm();
+    if (!mp || !mp->ready()) return nullptr;
+    auto* nav = mp->GetNavMeshForDebug();
+    return (nav && nav->IsReady()) ? nav : nullptr;
 }
 
 void PathfindingWindow::Draw(IDirect3DDevice9*)
 {
-    Pathing::g_use_recast_pathing = settings.use_recast_pathing;
-    Pathing::NavMesh::s_use_recast_builder = settings.use_recast_builder;
     ProcessDeferredRemovals();
     UpdateNavmeshOverlay();
 }
 
 void PathfindingWindow::DrawSettingsInternal()
 {
-    ImGui::Checkbox("Use recast (Detour) pathing", &settings.use_recast_pathing);
-    ImGui::ShowHelp("Off (default): visibility-graph pathfinder.\nOn: recast/Detour navmesh pathfinder (experimental — may misroute around the trapezoid mesh's seams).");
-    ImGui::Checkbox("Recast-generated mesh", &settings.use_recast_builder);
-    ImGui::ShowHelp("Build the recast (Detour) mesh that 'Use recast pathing' navigates on — cleaner topology than the hand-built one. The OVERLAY always draws the hand-built mesh (correct heights), so this doesn't change what's drawn. Applies on next map load / zone.");
-    ImGui::Separator();
+    ImGui::DragFloat("Path recalc distance", &settings.path_recalc_distance, 1.f, 1.f, 1000.f, "%.0f");
+    ImGui::ShowHelp("How far you must move (game units / gwinches) before the rendered quest path recomputes. Lower = more responsive but heavier; the recompute is also rate-capped to ~30/s.");
     ImGui::Checkbox("Navmesh overlay", &settings.draw_navmesh_overlay);
-    ImGui::ShowHelp("Draw the hand-built navmesh's polygon edges on the ground near you, at correct terrain heights (bridges included). This is the drawn mesh; pathing may navigate on a different (recast) mesh.");
+    ImGui::ShowHelp("Draw the navmesh's polygon edges on the ground near you, at correct terrain heights (bridges included).");
+    ImGui::Separator();
     if (settings.draw_navmesh_overlay) {
         auto color_edit = [](const char* label, uint32_t* argb) {
             float c[4] = {((*argb >> 16) & 0xFF) / 255.f, ((*argb >> 8) & 0xFF) / 255.f, (*argb & 0xFF) / 255.f, ((*argb >> 24) & 0xFF) / 255.f};
             if (ImGui::ColorEdit4(label, c, ImGuiColorEditFlags_AlphaBar)) {
-                auto q = [](float f) { return (uint32_t)std::clamp(f * 255.f + 0.5f, 0.f, 255.f); };
+                const auto q = [](const float f) { return static_cast<uint32_t>(std::clamp(f * 255.f + 0.5f, 0.f, 255.f)); };
                 *argb = (q(c[3]) << 24) | (q(c[0]) << 16) | (q(c[1]) << 8) | q(c[2]);
             }
         };
+        if (ImGui::DragFloat("Terrain sample spacing", &settings.navmesh_sample_spacing, 0.5f, 1.f, 100.f, "%.0f gw")) {
+            GameWorldRenderer::SetNavmeshSampleSpacing(settings.navmesh_sample_spacing);
+            GameWorldRenderer::RedrapeNavmesh(); // re-drape live so the change is visible immediately
+        }
+        ImGui::ShowHelp("How often the overlay samples terrain height when draping edges (game units). Lower = lines hug the floor/steps more exactly, but more vertices to build and draw.");
         color_edit("Wall colour (ground plane)", &settings.navmesh_wall_color);
         color_edit("Wall colour (other planes)", &settings.navmesh_wall_color_hi);
         color_edit("Connection colour (ground plane)", &settings.navmesh_connection_color);
         color_edit("Connection colour (other planes)", &settings.navmesh_connection_color_hi);
-        ImGui::DragFloat("Draw range", &settings.navmesh_overlay_range, 100.f, 500.f, 20000.f, "%.0f");
     }
 }
 
 void PathfindingWindow::LoadSettings(SettingsDoc& doc, ToolboxIni* legacy)
 {
-    ToolboxWindow::LoadSettings(doc, legacy);
+    ToolboxModule::LoadSettings(doc, legacy);
     doc.GetStruct(Name(), settings);
-    Pathing::g_use_recast_pathing = settings.use_recast_pathing;
-    Pathing::NavMesh::s_use_recast_builder = settings.use_recast_builder;
+    GameWorldRenderer::SetNavmeshSampleSpacing(settings.navmesh_sample_spacing);
 }
 
 void PathfindingWindow::SaveSettings(SettingsDoc& doc)
 {
-    ToolboxWindow::SaveSettings(doc);
+    ToolboxModule::SaveSettings(doc);
     doc.SetStruct(Name(), settings);
 }
 
@@ -2706,7 +2670,8 @@ bool PathfindingWindow::WndProc(UINT, WPARAM, LPARAM)
 
 void PathfindingWindow::SignalTerminate()
 {
-    ToolboxWindow::SignalTerminate();
+    ToolboxModule::SignalTerminate();
+    pathing_enabled = false;
     pending_terminate = true;
     GW::UI::RemoveUIMessageCallback(&gw_ui_hookentry);
     ClearBoundsLines();
@@ -2743,9 +2708,7 @@ clock_t PathfindingWindow::CalculatePath(const GW::GamePos& from, const GW::Game
 
     Resources::EnqueueWorkerTask([from, to, callback, args] {
         RouteJobScope job_scope; // defer eviction while we hold MilePath*
-        // Always fire the callback exactly once. Prior versions silent-failed on milepath-not-ready
-        // and on Search errors, leaving the caller's "calculating" flag stuck for 5 s and the cached
-        // waypoints stale on retry — quest path appeared frozen while the player walked past it.
+        // Always fire the callback exactly once; silent-failing leaves the caller's "calculating" flag stuck and the path frozen.
         auto fire_empty = [callback, args] {
             Resources::EnqueueMainTask([callback, args] {
                 std::vector<GW::GamePos> empty_vec = {};
@@ -2807,11 +2770,8 @@ clock_t PathfindingWindow::CalculatePath(const GW::GamePos& from, const GW::Game
 
 void PathfindingWindow::Terminate()
 {
-    ToolboxWindow::Terminate();
-    // Workers were signal-stopped in SignalTerminate and joined by the time
-    // CanTerminate returned true, so each `delete mp` is just allocator work
-    // (visgraph + trapezoid + portal frees). Run them in parallel — under the
-    // Debug allocator the per-instance cost adds up serially.
+    ToolboxModule::Terminate();
+    // Workers are already stopped/joined, so each `delete mp` is pure allocator work; parallelize since the Debug allocator is slow serially.
     if (!mile_paths_by_coords.empty()) {
         std::vector<std::thread> deletes;
         deletes.reserve(mile_paths_by_coords.size());
@@ -2830,8 +2790,8 @@ void PathfindingWindow::Terminate()
         lru_pos.clear();
         route_jobs_active = 0;
     }
-    // Trapezoid pathfinders only own scratch buffers — no worker threads — so
-    // serial frees are fine.
+    path_calc_in_flight = 0; // force-clear the indicator on shutdown (mirrors route_jobs_active above)
+    // Trapezoid pathfinders own only scratch buffers (no threads), so serial frees are fine.
     for (const auto& [hash, pf] : trapezoid_pf_by_coords)
         delete pf;
     trapezoid_pf_by_coords.clear();
@@ -2910,14 +2870,12 @@ bool PathfindingWindow::GetNextPortalToward(GW::Constants::MapID from_map, const
 }
 
 namespace {
-    // Blocking. Full cross-map route between two world-map positions into `out` (world
-    // coords, PATH_BREAK between maps). False on failure.
+    // Blocking. Full cross-map route between two world-map positions into `out` (world coords, PATH_BREAK between maps). False on failure.
     bool ComputeRoute(const GW::Vec2f& from_world, const GW::Vec2f& to_world, std::vector<GW::Vec2f>& out)
     {
         out.clear();
         const auto from_map = GW::Map::GetMapID();
-        // Prefer a direct same-map route when the goal lies within the current map's
-        // bounds — GetMapIdForLocation can otherwise resolve to an overlapping map.
+        // Prefer a same-map route when the goal is within current bounds — GetMapIdForLocation can otherwise resolve to an overlapping map.
         const auto to_map = PathfindingWindow::IsWorldPosOnMap(to_world, from_map) ? from_map : WorldMapWidget::GetMapIdForLocation(to_world);
         if (from_map == GW::Constants::MapID::None || to_map == GW::Constants::MapID::None) return false;
 
@@ -2932,15 +2890,17 @@ namespace {
         return BuildCrossMapRoute(from_map, to_map, start, goal, from_world, out, hidden);
     }
 
-    // Blocking. A* across `map_id` from `from` to `to` (that map's game coords), leg out
-    // in world coords. No shared state, so callers keep the rest of their route. False if no path.
-    bool ComputeSegment(GW::Constants::MapID map_id, const GW::GamePos& from, const GW::GamePos& to, std::vector<GW::Vec2f>& out)
+    // Blocking. A* across `map_id` (its game coords), leg out in world coords. No shared state, so callers keep their route. False if no path.
+    bool ComputeSegment(GW::Constants::MapID map_id, const GW::GamePos& from, const GW::GamePos& to, std::vector<GW::Vec2f>& out, std::vector<GW::GamePos>* out_game = nullptr)
     {
         out.clear();
+        if (out_game) out_game->clear();
         if ((uint32_t)map_id == 0) map_id = GW::Map::GetMapID();
         if (map_id == GW::Constants::MapID::None) return false;
         std::vector<GW::GamePos> leg;
         if (!RunAStarOnMap(map_id, from, to, leg) || leg.empty()) return false;
+        // Hand back the raw leg (game coords with zplane, in map_id's space) before SegmentToWorld flattens it to plane-less world Vec2f.
+        if (out_game) *out_game = leg;
         SegmentToWorld(leg, map_id, out); // leg game -> world
         return true;
     }
@@ -3114,12 +3074,12 @@ bool PathfindingWindow::CalculateRoute(const GW::Vec2f& from_world, const GW::Ve
     return ComputeRoute(from_world, to_world, *out);
 }
 
-bool PathfindingWindow::RecalculateSegment(GW::Constants::MapID map_id, const GW::GamePos& from, const GW::GamePos& to, std::vector<GW::Vec2f>* out)
+bool PathfindingWindow::RecalculateSegment(GW::Constants::MapID map_id, const GW::GamePos& from, const GW::GamePos& to, std::vector<GW::Vec2f>* out, std::vector<GW::GamePos>* out_game)
 {
     if (!out) return false;
     std::lock_guard route_lock(route_mutex); // one build at a time; see route_mutex
     RouteJobScope job_scope;                 // defer eviction while we hold MilePath*
-    return ComputeSegment(map_id, from, to, *out);
+    return ComputeSegment(map_id, from, to, *out, out_game);
 }
 
 bool PathfindingWindow::IsWorldPosOnMap(const GW::Vec2f& world_pos, GW::Constants::MapID map_id)
@@ -3140,13 +3100,13 @@ bool PathfindingWindow::IsRouteBreak(const GW::Vec2f& p)
 
 void PathfindingWindow::Initialize()
 {
-    ToolboxWindow::Initialize();
+    ToolboxModule::Initialize();
+    pending_terminate = false; // module is now optional; a prior disable left this set, which would abort all routing
+    pathing_enabled = true;
     BuildMapFileHashLookup();
     RegisterUIMessageCallback(&gw_ui_hookentry, GW::UI::UIMessage::kLoadMapContext, OnUIMessage, 0x4000);
 
-    // Load portal connections from the JSON embedded in the DLL as an RCDATA
-    // resource (drawing deferred until map is ready). Shipping it inside the DLL
-    // avoids the file having to sit next to GWToolboxdll.dll at runtime.
+    // Load portal connections from the JSON embedded as an RCDATA resource, so no loose file need sit next to the DLL at runtime.
     const EmbeddedResource portal_json(IDR_PORTAL_CONNECTIONS_JSON, RT_RCDATA, GWToolbox::GetDLLModule());
     if (portal_json.data() && portal_json.size()) {
         portal_connections.LoadFromMemory(
