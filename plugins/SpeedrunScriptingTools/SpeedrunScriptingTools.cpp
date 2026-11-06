@@ -52,6 +52,7 @@ namespace {
     GW::HookEntry BeginSkillCast_Entry;
     GW::HookEntry FinishSkillCast_Entry;
     GW::HookEntry Interrupt_Entry;
+    GW::HookEntry Knockdown_Entry;
     GW::HookEntry DisplayDialogue_Entry;
     GW::HookEntry DungeonReward_Entry;
     GW::HookEntry DoACompleteZone_Entry;
@@ -169,6 +170,7 @@ namespace {
             case Trigger::InstanceLoad:
             case Trigger::HardModePing:
             case Trigger::DungeonReward:
+            case Trigger::Knockdown:
                 break;
             case Trigger::Hotkey:
                 stream << script.triggerData.hotkey.keyData;
@@ -262,6 +264,7 @@ namespace {
                 case Trigger::InstanceLoad:
                 case Trigger::HardModePing:
                 case Trigger::DungeonReward:
+                case Trigger::Knockdown:
                     break;
                 case Trigger::Hotkey:
                     stream >> result.triggerData.hotkey.keyData;
@@ -405,6 +408,9 @@ namespace {
                     break;
                 case Trigger::DoaZoneComplete:
                     result += "On completion of " + std::string{toString(script.triggerData.doaZone)};
+                    break;
+                case Trigger::Knockdown:
+                    result += "On knockdown";
                     break;
                 case Trigger::DungeonReward:
                     result += "On receiving dungeon reward";
@@ -1194,6 +1200,13 @@ void SpeedrunScriptingTools::Initialize(ImGuiContext* ctx, const ImGuiAllocFns a
 {
     ToolboxPlugin::Initialize(ctx, allocator_fns, toolbox_dll);
 
+    GW::StoC::RegisterPacketCallback<GW::Packet::StoC::GenericFloat>(&Knockdown_Entry, [this](GW::HookStatus* status, const GW::Packet::StoC::GenericFloat* packet) {
+        if (status->blocked || packet->type != GW::Packet::StoC::GenericValueID::knocked_down) return;
+        const auto playerId = GW::Agents::GetControlledCharacterId();
+        if (!playerId || packet->agent_id != playerId) return;
+        triggerScripts(Trigger::Knockdown);
+    }, 0x8000);
+
     GW::StoC::RegisterPostPacketCallback<GW::Packet::StoC::InstanceLoadFile>(&InstanceLoadFile_Entry, [this](GW::HookStatus*, const GW::Packet::StoC::InstanceLoadFile*)
     {
         ScriptVariableManager::getInstance().clear();
@@ -1317,6 +1330,7 @@ bool SpeedrunScriptingTools::triggerScripts(Trigger triggerType, std::function<b
 
 void SpeedrunScriptingTools::SignalTerminate()
 {
+    GW::StoC::RemoveCallback<GW::Packet::StoC::GenericFloat>(&Knockdown_Entry);
     InstanceInfo::getInstance().terminate();
     QuestInfo::getInstance().terminate();
 

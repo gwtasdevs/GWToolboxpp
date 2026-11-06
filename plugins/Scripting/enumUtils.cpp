@@ -305,6 +305,8 @@ std::string_view toString(ReferenceFrame refFrame)
 std::string_view toString(Trigger type)
 {
     switch (type) {
+        case Trigger::Knockdown:
+            return "Trigger on knockdown";
         case Trigger::None:
             return "No packet trigger";
         case Trigger::InstanceLoad:
@@ -1741,7 +1743,7 @@ void drawTriggerSelector(Trigger& trigger, TriggerData& triggerData, [[maybe_unu
         #ifdef LiveSplitMode
         drawEnumButton(trigger, {.first = Trigger::DisplayDialog, .last = Trigger::DoaZoneComplete, .buttonTextOverWrite = "Add trigger"});
         #else
-        drawEnumButton(trigger, {.first = Trigger::InstanceLoad, .last = Trigger::DoaZoneComplete, .buttonTextOverWrite = "Add trigger"});
+        drawEnumButton(trigger, {.first = Trigger::InstanceLoad, .last = Trigger::Knockdown, .buttonTextOverWrite = "Add trigger"});
         #endif
     }
     else if (trigger == Trigger::Hotkey)
