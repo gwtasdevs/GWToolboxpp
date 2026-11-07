@@ -104,7 +104,6 @@ void CustomRenderer::LoadMarkers()
         for (const auto& entry : data.markers) {
             auto& marker = markers.emplace_back(entry.x, entry.y, entry.size, static_cast<Shape>(entry.shape), static_cast<GW::Constants::MapID>(entry.map), entry.name.c_str());
             marker.color = entry.color;
-            marker.color_sub = entry.color_sub;
             marker.visible = entry.visible;
             marker.draw_on_terrain = entry.draw_on_terrain;
         }
@@ -118,7 +117,6 @@ void CustomRenderer::LoadMarkers()
             }
             polygon.filled = entry.filled;
             polygon.color = entry.color;
-            polygon.color_sub = entry.color_sub;
             polygon.visible = entry.visible;
             polygon.draw_on_terrain = entry.draw_on_terrain;
         }
@@ -155,7 +153,6 @@ void CustomRenderer::LoadMarkers()
                 marker.shape = static_cast<Shape>(inifile.GetLongValue(section, "shape", 0));
                 marker.map = static_cast<GW::Constants::MapID>(inifile.GetLongValue(section, "map", 0));
                 marker.color = Colors::Load(&inifile, section, "color", marker.color);
-                marker.color_sub = Colors::Load(&inifile, section, "color_sub", marker.color_sub);
                 marker.visible = inifile.GetBoolValue(section, "visible", true);
                 marker.draw_on_terrain = inifile.GetBoolValue(section, "draw_on_terrain", false);
                 markers.push_back(std::move(marker));
@@ -177,7 +174,6 @@ void CustomRenderer::LoadMarkers()
                 }
                 polygon.filled = inifile.GetBoolValue(section, "filled", polygon.filled);
                 polygon.color = Colors::Load(&inifile, section, "color", polygon.color);
-                polygon.color_sub = Colors::Load(&inifile, section, "color_sub", polygon.color_sub);
                 polygon.map = static_cast<GW::Constants::MapID>(inifile.GetLongValue(section, "map", 0));
                 polygon.visible = inifile.GetBoolValue(section, "visible", true);
                 polygon.draw_on_terrain = inifile.GetBoolValue(section, "draw_on_terrain", false);
@@ -221,7 +217,6 @@ void CustomRenderer::SaveMarkers()
             entry.visible = marker.visible;
             entry.draw_on_terrain = marker.draw_on_terrain;
             entry.color = marker.color;
-            entry.color_sub = marker.color_sub;
         }
         for (const auto& polygon : polygons) {
             auto& entry = data.polygons.emplace_back();
@@ -230,7 +225,6 @@ void CustomRenderer::SaveMarkers()
                 entry.points.push_back({point.x, point.y});
             }
             entry.color = polygon.color;
-            entry.color_sub = polygon.color_sub;
             entry.map = static_cast<uint32_t>(polygon.map);
             entry.visible = polygon.visible;
             entry.draw_on_terrain = polygon.draw_on_terrain;
@@ -352,7 +346,7 @@ void CustomRenderer::DrawLineSettings()
         }
         ImGui::SameLine(0.0f, spacing);
 
-        markers_changed |= ImGui::InputInt("##map", (int*)&line.map, 0);
+        markers_changed |= ImGui::MapPicker("##map", &line.map);
         if (ImGui::IsItemHovered()) {
             SetTooltipMapID(line.map);
         }
@@ -478,12 +472,6 @@ void CustomRenderer::DrawMarkerSettings()
         marker_changed |= ImGui::Combo("##type", reinterpret_cast<int*>(&marker.shape), types, 2);
         ImGui::SameLine(0.0f, spacing);
 
-        marker_changed |= ImGui::ColorButtonPicker("##colorsub", &marker.color_sub);
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Color in which hostile agents inside this polygon are drawn.\nNOTE: An alpha channel of 0 will disable this color.");
-        }
-        ImGui::SameLine(0.0f, spacing);
-
         marker_changed |= ImGui::ColorButtonPicker("##color", &marker.color);
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip(
@@ -491,7 +479,7 @@ void CustomRenderer::DrawMarkerSettings()
         }
         ImGui::SameLine(0.0f, spacing);
 
-        marker_changed |= ImGui::InputInt("##map", reinterpret_cast<int*>(&marker.map), 0);
+        marker_changed |= ImGui::MapPicker("##map", &marker.map);
         if (ImGui::IsItemHovered()) {
             SetTooltipMapID(marker.map);
         }
@@ -644,19 +632,13 @@ void CustomRenderer::DrawPolygonSettings()
         }
         ImGui::SameLine(0.0f, spacing);
 
-        polygon_changed |= ImGui::ColorButtonPicker("##colorsub", &polygon.color_sub);
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Color in which hostile agents inside this polygon are drawn.\n\nNOTE: An alpha channel of 0 will disable this color.");
-        }
-        ImGui::SameLine(0.0f, spacing);
-
         polygon_changed |= ImGui::ColorButtonPicker("##color", &polygon.color);
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Color of the polygon on the map.\nNOTE: An alpha channel of 0 will disable this color.");
         }
         ImGui::SameLine(0.0f, spacing);
 
-        polygon_changed |= ImGui::InputInt("##map", reinterpret_cast<int*>(&polygon.map), 0);
+        polygon_changed |= ImGui::MapPicker("##map", &polygon.map);
         if (ImGui::IsItemHovered()) {
             SetTooltipMapID(polygon.map);
         }
