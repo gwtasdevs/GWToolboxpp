@@ -66,18 +66,20 @@ namespace account_inventory_json {
         std::optional<FreeSlotsJson> free_slots; // absent => not known
         std::map<uint32_t /*bag_id*/, BagJson> bags;
         std::map<uint32_t /*hero_id*/, BagJson> heroes;
+        std::optional<uint32_t> gold;
         struct glaze {
             using T = CharacterJson;
-            static constexpr auto value = glz::object("fs", &T::free_slots, "b", &T::bags, "h", &T::heroes);
+            static constexpr auto value = glz::object("fs", &T::free_slots, "b", &T::bags, "h", &T::heroes, "g", &T::gold);
         };
     };
     struct ChestJson {
         bool anniversary_pane_active{};
         std::optional<FreeSlotsJson> free_slots; // inventory only; absent => not known
         std::map<uint32_t /*bag_id*/, BagJson> bags;
+        std::optional<uint32_t> gold;
         struct glaze {
             using T = ChestJson;
-            static constexpr auto value = glz::object("a", &T::anniversary_pane_active, "fs", &T::free_slots, "b", &T::bags);
+            static constexpr auto value = glz::object("a", &T::anniversary_pane_active, "fs", &T::free_slots, "b", &T::bags, "g", &T::gold);
         };
     };
     struct AccountJson {
@@ -267,6 +269,7 @@ namespace {
         std::unordered_map<GW::Constants::Bag, Bag> bags;
         std::unordered_map<GW::Constants::HeroID, Hero> heroes;
         FreeSlotInfo free_slots;
+        std::optional<uint32_t> gold;
     };
     struct Account {
         GUID uuid{};
@@ -275,6 +278,7 @@ namespace {
         std::string account_representing_character; // tooltip helper
         bool anniversary_pane_active = false;
         FreeSlotInfo chest_free_slots; // equipment unused for chest
+        std::optional<uint32_t> chest_gold;
     };
 
     // Ephemeral flattened view of one item, rebuilt by traversing the hierarchy.
@@ -656,8 +660,8 @@ namespace {
         std::string prev_location{};
         for (auto it = ms->i.begin(); it != ms->i.end(); it++) {
             int style_count = 0;
-            bool is_this_account = memeq(&(*it)->account->uuid, &current_account);
-            if (is_this_account) {
+            bool is_current_account = memeq(&(*it)->account->uuid, &current_account);
+            if (!is_current_account) {
                 style_count = 1;
                 ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
             }
@@ -665,7 +669,7 @@ namespace {
             bool reprint = (*it)->character_name != prev_character || account_representing_character != prev_account_representing_character;
             if (reprint) {
                 std::string suffix = "";
-                if (!is_this_account && (*it)->character_name == "(Chest)" && !account_representing_character.empty()) {
+                if (!is_current_account && (*it)->character_name == "(Chest)" && !account_representing_character.empty()) {
                     suffix = " [" + account_representing_character + "]";
                 }
                 ImGui::Text("%s%s: %u", (*it)->character_name.c_str(), suffix.c_str(), char_totals[char_key(*it, account_representing_character)]);
@@ -921,11 +925,11 @@ namespace {
             if (!model_ID_filter.empty() && model_ID_filter != std::to_string(r.item->model_id)) continue;
             // Accessing the EncString lazily kicks off decoding for visible items.
             const std::wstring& desc = r.item->description.wstring();
+            if (r.item->description.IsDecoding()) any_decoding = true;
             if (!item_filter_w.empty()) {
                 const auto description_check = item_is_lower ? TextUtils::ToLower(desc) : desc;
                 if (!description_check.contains(item_filter_w)) continue;
             }
-            if (r.item->description.IsDecoding()) any_decoding = true;
 
             auto merge_id = std::to_wstring(r.item->model_id) + desc;
             if (!settings.merge_stacks || !merged_stacks.contains(merge_id)) {
@@ -1063,6 +1067,7 @@ namespace {
         aj.representing_character = acc.account_representing_character;
         aj.chest.anniversary_pane_active = acc.anniversary_pane_active;
         if (acc.chest_free_slots.known) aj.chest.free_slots = ToJson(acc.chest_free_slots);
+        aj.chest.gold = acc.chest_gold;
         for (auto& [bag_id, bag] : acc.chest)
             for (auto& [slot, item] : bag.items)
                 aj.chest.bags[(uint32_t)bag_id][slot] = ToJson(item);
@@ -1071,6 +1076,10 @@ namespace {
             bool any = false;
             if (ch.free_slots.known) {
                 cj.free_slots = ToJson(ch.free_slots);
+                any = true;
+            }
+            if (ch.gold) {
+                cj.gold = ch.gold;
                 any = true;
             }
             for (auto& [bag_id, bag] : ch.bags)
@@ -1090,7 +1099,7 @@ namespace {
 
     bool AccountJsonHasData(const AccountJson& aj)
     {
-        return !aj.characters.empty() || !aj.chest.bags.empty() || aj.chest.free_slots.has_value();
+        return !aj.characters.empty() || !aj.chest.bags.empty() || aj.chest.free_slots.has_value() || aj.chest.gold.has_value();
     }
 
     void ApplyItemJson(Item& item, const ItemJson& j)
@@ -1121,6 +1130,7 @@ namespace {
         if (!aj.representing_character.empty()) acc.account_representing_character = aj.representing_character;
         acc.anniversary_pane_active = aj.chest.anniversary_pane_active;
         if (aj.chest.free_slots) ApplyFreeSlots(acc.chest_free_slots, *aj.chest.free_slots);
+        if (aj.chest.gold) acc.chest_gold = aj.chest.gold;
         for (const auto& [bag_id, bag] : aj.chest.bags)
             for (const auto& [slot, item] : bag)
                 ApplyItemJson(GetOrCreateItem(account, "(Chest)", GW::Constants::HeroID::NoHero, (GW::Constants::Bag)bag_id, slot), item);
@@ -1128,12 +1138,31 @@ namespace {
             Character& ch = acc.characters[name];
             ch.name = name;
             if (cj.free_slots) ApplyFreeSlots(ch.free_slots, *cj.free_slots);
+            if (cj.gold) ch.gold = cj.gold;
             for (const auto& [bag_id, bag] : cj.bags)
                 for (const auto& [slot, item] : bag)
                     ApplyItemJson(GetOrCreateItem(account, name, GW::Constants::HeroID::NoHero, (GW::Constants::Bag)bag_id, slot), item);
             for (const auto& [hero_id, bag] : cj.heroes)
                 for (const auto& [slot, item] : bag)
                     ApplyItemJson(GetOrCreateItem(account, name, (GW::Constants::HeroID)hero_id, GW::Constants::Bag::Equipped_Items, slot), item);
+        }
+    }
+
+    void UpdateGold()
+    {
+        if (initializing || !GW::Map::GetIsMapLoaded()) return;
+        Account& acc = GetOrCreateAccount(current_account);
+        Character& ch = acc.characters[current_character];
+        ch.name = current_character;
+        const uint32_t character_gold = GW::Items::GetGoldAmountOnCharacter();
+        const uint32_t storage_gold = GW::Items::GetGoldAmountInStorage();
+        if (ch.gold != character_gold) {
+            ch.gold = character_gold;
+            inventory_dirty.insert(GetIniID(current_account, current_character));
+        }
+        if (acc.chest_gold != storage_gold) {
+            acc.chest_gold = storage_gold;
+            inventory_dirty.insert(GetIniID(current_account, "(Chest)"));
         }
     }
 
@@ -1514,7 +1543,53 @@ namespace {
 
 } // namespace
 
+void AccountInventoryWindow::GetItemInventoryData(uint32_t item_id, ItemInventoryData& item_inventory)
+{
+    if (item_inventory.item_id == item_id) return;
+    item_inventory.item_id = item_id;
+    item_inventory.total = 0;
+    item_inventory.storage = 0;
+    item_inventory.characters.clear();
+    const auto hovered_item = GW::Items::GetItemById(item_id);
+    if (!hovered_item) return;
 
+    const auto description = GetItemEncDescription(hovered_item);
+    std::map<std::string, uint32_t> character_quantities;
+    auto matches = [&](const Item& inventory_item) {
+        return inventory_item.model_id == hovered_item->model_id && inventory_item.description.encoded() == description;
+    };
+    for (const auto& [account_key, account] : accounts) {
+        for (const auto& [bag_id, bag] : account.chest) {
+            for (const auto& [slot, inventory_item] : bag.items) {
+                if (!matches(inventory_item)) continue;
+                item_inventory.total += inventory_item.quantity;
+                item_inventory.storage += inventory_item.quantity;
+            }
+        }
+        for (const auto& [character_name, character] : account.characters) {
+            for (const auto& [bag_id, bag] : character.bags) {
+                if (bag_id == GW::Constants::Bag::Equipped_Items) continue;
+                for (const auto& [slot, inventory_item] : bag.items) {
+                    if (inventory_item.equipped || !matches(inventory_item)) continue;
+                    item_inventory.total += inventory_item.quantity;
+                    character_quantities[character_name] += inventory_item.quantity;
+                }
+            }
+            for (const auto& [hero_id, hero] : character.heroes) {
+                for (const auto& [slot, inventory_item] : hero.bag.items) {
+                    if (IsHeroArmor(hero_id, slot) || !matches(inventory_item)) continue;
+                    item_inventory.total += inventory_item.quantity;
+                    character_quantities[character_name] += inventory_item.quantity;
+                }
+            }
+        }
+    }
+    if (item_inventory.total > 1) {
+        for (const auto& [character, quantity] : character_quantities) {
+            item_inventory.characters.emplace_back(character, quantity);
+        }
+    }
+}
 
 void AccountInventoryWindow::Initialize()
 {
@@ -1533,6 +1608,8 @@ void AccountInventoryWindow::Initialize()
         GW::UI::UIMessage::kPartyAddHero,
         GW::UI::UIMessage::kMapChange,
         GW::UI::UIMessage::kMapLoaded,
+        GW::UI::UIMessage::kUpdateGoldCharacter,
+        GW::UI::UIMessage::kUpdateGoldStorage,
         GW::UI::UIMessage::kLogout
     };
     for (auto message_id : ui_messages) {
@@ -1568,6 +1645,10 @@ void AccountInventoryWindow::Initialize()
                     break;
                 case GW::UI::UIMessage::kMapLoaded:
                     PostMapLoad();
+                    break;
+                case GW::UI::UIMessage::kUpdateGoldCharacter:
+                case GW::UI::UIMessage::kUpdateGoldStorage:
+                    UpdateGold();
                     break;
                 case GW::UI::UIMessage::kLogout: {
                     // prepare for potentially changing accounts.
@@ -1963,6 +2044,7 @@ void AccountInventoryWindow::PostMapLoad()
         last_available_chars = availableChars;
     }
 
+    UpdateGold();
     needs_sorting = true;
     if (GW::Map::GetInstanceType() == GW::Constants::InstanceType::Outpost) {
         SaveToFiles(false); // save inventory in outposts only to avoid impacting gameplay
@@ -2176,8 +2258,6 @@ void AccountInventoryWindow::Draw(IDirect3DDevice9*)
     if (ImGui::InputText("###item_filter", item_filter_buf, _countof(item_filter_buf))) needs_sorting = true;
     ImGui::SameLine();
     ImGui::Text("Filter   %d/%d Items", filtered_item_count, item_refs.size());
-    ImGui::TableNextRow();
-    ImGui::TableNextColumn();
 
     ImGuiTableSortSpecs* item_sort_specs = ImGui::TableGetSortSpecs();
     const bool specs_dirty = item_sort_specs && item_sort_specs->SpecsDirty;
@@ -2219,6 +2299,8 @@ void AccountInventoryWindow::Draw(IDirect3DDevice9*)
 
         if (settings.detailed_view) {
             const std::string suffix = (ims.i.size() > 1) ? " +" : "";
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
             ImGui::Text("%s%s", i_front->character_name.c_str(), suffix.c_str());
             ImGui::TableNextColumn();
             ImGui::Text("%s%s", i_front->location.c_str(), suffix.c_str());
@@ -2233,7 +2315,6 @@ void AccountInventoryWindow::Draw(IDirect3DDevice9*)
                     OnItemTooltip(ms);
                 });
             }
-            ImGui::TableNextColumn();
         }
         else {
             const auto pos = ImGui::GetCursorPos();
@@ -2280,8 +2361,6 @@ void AccountInventoryWindow::Draw(IDirect3DDevice9*)
         clipper.Begin(item_count, ImGui::GetTextLineHeightWithSpacing());
         while (clipper.Step()) {
             for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; i++) {
-                ImGui::TableNextRow();
-                ImGui::TableNextColumn();
                 render_item(i);
             }
         }

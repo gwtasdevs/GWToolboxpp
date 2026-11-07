@@ -42,6 +42,7 @@
 #include <Modules/QuestModule.h>
 #include <Modules/Resources.h>
 #include <Utils/TextUtils.h>
+#include <Windows/AgentAppearanceWindow.h>
 #include <Windows/SettingsWindow.h>
 #include "Minimap.h"
 #include <Utils/FontLoader.h>
@@ -528,7 +529,7 @@ namespace {
     {
         GW::Hook::EnterHook();
         uint32_t result = 0;
-        if (!hide_compass_agents) {
+        if (!hide_compass_agents && !(snap_to_compass && Minimap::IsActive())) {
             result = DrawCompassAgentsByType_Ret(ecx, edx, param_1, param_2, flags);
         }
         GW::Hook::LeaveHook();
@@ -823,7 +824,7 @@ void Minimap::Initialize()
     SettingsRegistry::RegisterField(this, "cardinal_offset", &cardinal_offset);
     SettingsRegistry::RegisterField(this, "cardinal_font_size", &cardinal_font_size);
     range_renderer.RegisterSettings(this);
-    agent_renderer.RegisterMinimapSettings(this);
+    AgentAppearanceWindow::RegisterMinimapSettings(this);
     pingslines_renderer.RegisterSettings(this);
     symbols_renderer.RegisterSettings(this);
     custom_renderer.RegisterSettings(this);
@@ -916,11 +917,11 @@ void Minimap::OnUIMessage(GW::HookStatus* status, const GW::UI::UIMessage msgid,
         } break;
         case GW::UI::UIMessage::kMapChange: {
             loading = true;
-            instance.agent_renderer.auto_target_id = 0;
+            AgentAppearanceWindow::auto_target_id = 0;
         } break;
         case GW::UI::UIMessage::kChangeTarget: {
             const auto msg = static_cast<GW::UI::UIPacket::kChangeTarget*>(wParam);
-            instance.agent_renderer.auto_target_id = GW::Agents::GetTargetId() ? 0 : msg->auto_target_id;
+            AgentAppearanceWindow::auto_target_id = GW::Agents::GetTargetId() ? 0 : msg->auto_target_id;
         } break;
         default:
             break;
@@ -1082,6 +1083,12 @@ void Minimap::DrawSettingsInternal()
     if (ImGui::DragFloat("Scale", &a, 0.01f, 0.1f, 10.f)) {
         scale = a;
     }
+    if (ImGui::Button("Agent Appearance")) {
+        AgentAppearanceWindow::Instance().Show();
+    }
+#ifdef _DEBUG
+    ImGui::Checkbox("Show props on minimap", &AgentAppearanceWindow::show_props_on_minimap);
+#endif
     ImGui::Text("You can set the color alpha to 0 to disable any minimap feature.");
     if (SettingsWindow::SubSectionHeader(SettingsName(), "Ranges")) {
         range_renderer.DrawSettings();
@@ -1128,9 +1135,7 @@ void Minimap::DrawSettingsInternal()
     }
     ImGui::StartSpacedElements(300.f);
     ImGui::NextSpacedElement();
-    ImGui::CheckboxWithHelp("Show hidden NPCs", &agent_renderer.show_hidden_npcs, "Show NPCs that aren't usually visible on the minimap\ne.g. minipets, invisible NPCs");
-    ImGui::NextSpacedElement();
-    ImGui::CheckboxWithHelp("Show symbol for quest NPCs", &agent_renderer.show_quest_npcs_on_minimap, "Show a star for NPCs that have quest progress available");
+    ImGui::CheckboxWithHelp("Show hidden NPCs", &AgentAppearanceWindow::show_hidden_npcs, "Show NPCs that aren't usually visible on the minimap\ne.g. minipets, invisible NPCs");
 
 
     ImGui::Text("Allow mouse click-through in:");
