@@ -8,7 +8,7 @@ namespace GW::Constants {
     enum class SkillID : uint32_t;
 }
 
-enum class Trigger { None, InstanceLoad, HardModePing, Hotkey, ChatMessage, BeginSkillCast, BeginCooldown, SkillCastInterrupt, DisplayDialog, DungeonReward, DoaZoneComplete };
+enum class Trigger { None, InstanceLoad, HardModePing, Hotkey, ChatMessage, BeginSkillCast, BeginCooldown, SkillCastInterrupt, DisplayDialog, DungeonReward, DoaZoneComplete, Knockdown };
 enum class Class { Any, Warrior, Ranger, Monk, Necro, Mesmer, Elementalist, Assassin, Ritualist, Paragon, Dervish };
 enum class AgentType { Any, Self, PartyMember, Friendly, Hostile };
 enum class Sorting { AgentId, ClosestToPlayer, FurthestFromPlayer, ClosestToTarget, FurthestFromTarget, LowestHp, HighestHp, ModelID };
