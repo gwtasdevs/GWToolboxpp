@@ -130,7 +130,7 @@ jobs:
 
     - name: Patch GWCA
       run: |
-        git clone https://github.com/gwtasdevs/gwca-patcher.git
+        git clone -b $BRANCH https://github.com/gwtasdevs/gwca-patcher.git
         cp .\Dependencies\GWCA\bin\gwca.dll .\gwca-patcher\gwca.dll
         cd .\gwca-patcher
         cargo run
