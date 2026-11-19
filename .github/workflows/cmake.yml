@@ -129,6 +129,7 @@ jobs:
       uses: dtolnay/rust-toolchain@stable
 
     - name: Patch GWCA
+      shell: bash
       run: |
         git clone -b $BRANCH https://github.com/gwtasdevs/gwca-patcher.git
         cp .\Dependencies\GWCA\bin\gwca.dll .\gwca-patcher\gwca.dll
