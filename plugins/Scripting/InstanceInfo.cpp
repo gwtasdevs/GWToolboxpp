@@ -26,14 +26,19 @@ namespace {
     GW::HookEntry DungeonReward_Entry;
     GW::HookEntry CountdownStart_Entry;
 
+    constexpr auto MiniPetGuildLord = 36648u;
+    constexpr auto MiniPetHighPriestZhang = 36649u;
+    constexpr auto MiniPetGhostlyPriest = 36650u;
+    constexpr auto MiniPetRiftWarden = 36651u;
+
     bool isTargetableMiniPet(uint32_t itemId) 
     {
         switch (itemId)
         {
-            case GW::Constants::ModelID::Minipet::GuildLord:
-            case GW::Constants::ModelID::Minipet::HighPriestZhang:
-            case GW::Constants::ModelID::Minipet::GhostlyPriest:
-            case GW::Constants::ModelID::Minipet::RiftWarden:
+            case MiniPetGuildLord:
+            case MiniPetHighPriestZhang:
+            case MiniPetGhostlyPriest:
+            case MiniPetRiftWarden:
                 return true;
             default:
                 return false;
@@ -51,7 +56,7 @@ namespace {
             str.erase(start, end+1);
         }
     }
-} // namespace
+}
 
 void InstanceInfo::initialize()
 {
@@ -119,10 +124,9 @@ void InstanceInfo::initialize()
 void InstanceInfo::terminate() 
 {
     GW::StoC::RemovePostCallback<GW::Packet::StoC::InstanceLoadFile>(&InstanceLoadFile_Entry);
-    // Fixed: was RemovePostCallback — wrong table for callbacks registered with RegisterPacketCallback; callbacks were never removed.
     GW::StoC::RemoveCallback<GW::Packet::StoC::DungeonReward>(&DungeonReward_Entry);
     GW::StoC::RemoveCallback<GW::Packet::StoC::ManipulateMapObject>(&ManipulateMapObject_Entry);
-    GW::StoC::RemoveCallbacks(&CountdownStart_Entry); // Fixed: CountdownStart_Entry was registered but had no matching remove call; dangling callback after plugin unload.
+    GW::StoC::RemoveCallbacks(&CountdownStart_Entry);
     RemoveUIMessageCallback(&UseItem_Entry, GW::UI::UIMessage::kSendUseItem);
 }
 
@@ -133,15 +137,12 @@ std::string InstanceInfo::getDecodedAgentName(GW::AgentID id)
     if (wName.empty()) {
         const wchar_t* encodedName = nullptr;
 
-        // Check in agent infos
-        // Fixed: GetWorldContext() was called twice with no null check and its result used directly; crashes during map transitions.
         const auto* worldContext = GW::GetWorldContext();
         if (!worldContext) return "";
         const auto& agentInfos = worldContext->agent_infos;
         if (id >= agentInfos.size()) return "";
         encodedName = agentInfos[id].name_enc;
 
-        // Check players
         if (!encodedName)
         {
             for (const auto& player : worldContext->players)
@@ -153,13 +154,12 @@ std::string InstanceInfo::getDecodedAgentName(GW::AgentID id)
             }
         }
 
-        // Fall back to NPC name
         if (!encodedName) 
         {
             const auto agent = GW::Agents::GetAgentByID(id);
             if (!agent || !agent->GetIsLivingType()) return "";
             const auto npc = GW::Agents::GetNPCByID(agent->GetAsAgentLiving()->player_number);
-            if (!npc) return ""; // Fixed: GetNPCByID() can return null; was dereferenced unconditionally.
+            if (!npc) return "";
             encodedName = npc->name_enc;
         }
 
@@ -183,7 +183,6 @@ std::string InstanceInfo::getDecodedItemName(uint32_t item_id)
     if (wName.empty()) {
         const wchar_t* encodedName = nullptr;
 
-        // Check in agent infos
         const auto item = GW::Items::GetItemById(item_id);
         if (!item) return "";
         encodedName = item->single_item_name;
